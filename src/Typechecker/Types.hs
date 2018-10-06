@@ -49,6 +49,7 @@ instance Show TypeConstant where
 instance Ord TypeConstant where
     compare (TypeConstant id1 _) (TypeConstant id2 _) = compare id1 id2
 
+
 -- The possible types of haskell expressions
 data Type = TypeVar TypeVariable
           | TypeConst TypeConstant
@@ -67,11 +68,11 @@ instance Show Type where
 
 -- Utility functions for constructing types
 makeList :: Type -> Type
-makeList t = TypeApp typeList t
+makeList = TypeApp typeList
 
 makeFun, makeTuple2 :: Type -> Type -> Type
-makeFun t1 t2 = TypeApp (TypeApp typeFun t1) t2
-makeTuple2 t1 t2 = TypeApp (TypeApp typeTuple2 t1) t2
+makeFun = TypeApp . TypeApp typeFun
+makeTuple2 = TypeApp . TypeApp typeTuple2
 
 -- Built-in types
 -- TODO(kc506): Find a better place to put these: somewhere along with their implementations?

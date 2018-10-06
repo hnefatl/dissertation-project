@@ -1,4 +1,4 @@
-module Typechecker.Substitutions where
+module Typechecker.Substitution where
 
 import Prelude hiding (all, fail)
 import Control.Monad.Fail

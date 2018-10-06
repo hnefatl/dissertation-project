@@ -1,10 +1,10 @@
 import Test.Tasty
 
-import Typechecker.SubstitutionsSpec
+import Typechecker.SubstitutionSpec
 
 tests :: TestTree
 tests = testGroup "Tests"
-    [ Typechecker.SubstitutionsSpec.test
+    [ Typechecker.SubstitutionSpec.test
     ]
 
 main :: IO ()

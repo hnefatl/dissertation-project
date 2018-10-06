@@ -1,9 +1,9 @@
-module Typechecker.SubstitutionsSpec where
+module Typechecker.SubstitutionSpec where
 
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Typechecker.Substitutions
+import Typechecker.Substitution
 import Typechecker.Types
 
 test :: TestTree
