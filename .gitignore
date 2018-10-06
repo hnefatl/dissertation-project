@@ -1,0 +1,4 @@
+.stack-work/
+.vscode/
+compiler.cabal
+*~
