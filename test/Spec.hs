@@ -1,2 +1,11 @@
+import Test.Tasty
+
+import Typechecker.SubstitutionsSpec
+
+tests :: TestTree
+tests = testGroup "Tests"
+    [ Typechecker.SubstitutionsSpec.test
+    ]
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = defaultMain tests
