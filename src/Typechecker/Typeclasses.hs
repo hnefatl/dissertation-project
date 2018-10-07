@@ -1,13 +1,12 @@
-{-# Language FlexibleContexts #-}
+{-# Language FlexibleContexts, LambdaCase #-}
 
 module Typechecker.Typeclasses where
 
 import Prelude hiding (any)
-import Data.Foldable (any)
+import Data.Foldable
 import Data.List (intercalate, union)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Maybe
 import Data.Either
 import Control.Monad.Except
 
@@ -39,13 +38,15 @@ instance Unifiable TypePredicate where
 
 
 -- A predicate-qualified thing. `Ord a => a` (`t` is a type), `Ord a => Ord [a]` (`t` is a predicate).
-data Qualified t = Qual [TypePredicate] t
+data Qualified t = Qual (S.Set TypePredicate) t
     deriving (Eq, Ord)
 
 instance Show t => Show (Qualified t) where
     -- Handle eg. `Eq a => ...` vs `(Eq a, Show a) => ...`
-    show (Qual [p] t) = show p ++ " => " ++ show t
-    show (Qual ps t) = "(" ++ intercalate ", " (map show ps) ++ ") => " ++ show t
+    show (Qual quals t) = pquals ++ " => " ++ show t
+        where 
+        qualifiers = intercalate ", " (map show $ S.toList quals)
+        pquals = if S.size quals > 1 then "(" ++ qualifiers ++ ")" else qualifiers
 
 instance Substitutable t => Substitutable (Qualified t) where
     applySub sub (Qual ps t) = Qual (applySub sub ps) (applySub sub t)
@@ -75,15 +76,12 @@ instances name env = case M.lookup name env of
 emptyClassEnv :: ClassEnvironment
 emptyClassEnv = M.empty
 
-envContains :: ClassEnvironment -> Id -> Bool
-envContains m k = isJust (M.lookup k m)
-
 -- Add a typeclass with the given superclasses
 -- Check that the class hasn't already been added and that all the superclasses exist
 addClass :: MonadError String m => Id -> [Id] -> ClassEnvironment -> m ClassEnvironment
 addClass name supers ce
-    | ce `envContains` name = throwError "Class already exists"
-    | not $ all (ce `envContains`) supers = throwError "Missing superclass"
+    | name `M.member` ce = throwError "Class already exists"
+    | not $ all (`M.member` ce) supers = throwError "Missing superclass"
     | otherwise = return $ M.insert name (Class (S.fromList supers) S.empty) ce
 
 -- Add an instance of a superclass, with the given qualifiers.
@@ -93,9 +91,45 @@ addInstance inst@(Qual _ (IsInstance classname _)) ce =
     case M.lookup classname ce of -- Find the class we're making an instance of
         Nothing -> throwError "Class doesn't exist"
         Just (Class supers otherInsts) -> do
-            when $ any (inst `overlaps`) otherInsts $ throwError "Overlapping instances"
+            when (any (inst `overlaps`) otherInsts) (throwError "Overlapping instances")
             return $ M.insert classname (Class supers (S.insert inst otherInsts)) ce
     where
         -- Two instances overlap if there's a substitution which unifies their heads
         overlaps (Qual _ head1) (Qual _ head2) = isRight (mgu head1 head2)
           
+
+-- If the given type predicate is true in the given class environment, then all the predicates returned from this
+-- function are also true (obtained by considering all the superclasses)
+ifPThenBySuper :: MonadError String m => ClassEnvironment -> TypePredicate -> m (S.Set TypePredicate)
+ifPThenBySuper ce p@(IsInstance classname ty) = do
+    supers <- S.toList <$> superclasses classname ce
+    foldM mergeSupers (S.singleton p) supers
+    where mergeSupers acc classname' = S.union acc <$> ifPThenBySuper ce (IsInstance classname' ty)
+
+-- Same as above, but getting predicates by unifying with instances of the class
+ifPThenByInstance :: MonadError String m => ClassEnvironment -> TypePredicate -> m (Maybe (S.Set TypePredicate))
+ifPThenByInstance ce p@(IsInstance classname _) = do
+    insts <- instances classname ce
+    -- Pick the first non-Nothing value (as we can't have overlapping instances, this is the right instance)
+    return $ msum (S.map tryMatchInstance insts)
+    where 
+        eitherToMaybe = either (const Nothing) Just
+        tryMatchInstance (Qual qualifiers hd) = do -- Maybe monad
+            subs <- eitherToMaybe (match hd p) -- Find a substitution
+            -- The new predicates are the constraints on the matching instance
+            Just $ applySub subs qualifiers
+
+
+-- Determines if the given predicate can be deduced from the given assumptions and the class environment
+entails :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> TypePredicate -> m Bool
+entails ce assumps p = (||) <$> entailedBySuperset <*> entailedByInstance
+    where
+        -- Can this predicate be satisifed by the superclasses?
+        entailedBySuperset = (p `S.member`) . S.unions <$> mapM (ifPThenBySuper ce) (S.toList assumps)
+        -- Can this predicate be satisfied by unification with other instances of this class?
+        entailedByInstance = ifPThenByInstance ce p >>= \case
+            Nothing -> return False
+            Just qualifiers -> allM (entails ce assumps) qualifiers
+            
+allM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
+allM f = foldlM (\x y -> (x &&) <$> f y) True

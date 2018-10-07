@@ -4,9 +4,10 @@
 module Typechecker.Substitution where
 
 import Prelude hiding (all)
-import Data.Foldable (all)
+import Data.Foldable
 import Control.Monad.Except
-import Data.List (union, nub, intercalate)
+import Data.List (union, intercalate)
+import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Typechecker.Types (TypeVariable(..), Type(..), AssocShow(..))
 
@@ -31,9 +32,9 @@ instance Substitutable Type where
     getTypeVars (TypeVar var) = [var]
     getTypeVars (TypeApp t1 t2) = getTypeVars t1 `union` getTypeVars t2
     getTypeVars _ = []
-instance Substitutable a => Substitutable [a] where
-    applySub subs = map (applySub subs)
-    getTypeVars = nub . concatMap getTypeVars
+instance (Ord t, Substitutable t) => Substitutable (S.Set t) where
+    applySub subs = S.map (applySub subs)
+    getTypeVars = concatMap getTypeVars . S.toList
 
 
 subEmpty :: Substitution
