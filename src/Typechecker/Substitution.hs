@@ -1,14 +1,21 @@
+{-# LANGUAGE FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Typechecker.Substitution where
 
-import Prelude hiding (all, fail)
-import Control.Monad.Fail
-import Data.List (union, nub)
+import Prelude hiding (all)
 import Data.Foldable (all)
+import Control.Monad.Except
+import Data.List (union, nub, intercalate)
 import qualified Data.Map.Strict as M
-import Typechecker.Types (TypeVariable(..), Type(..))
+import Typechecker.Types (TypeVariable(..), Type(..), AssocShow(..))
 
 -- A substitution is a collection of assignments of a type to a variable
 type Substitution = M.Map TypeVariable Type
+
+instance AssocShow Substitution where
+    assocShow _ sub = "[" ++ intercalate ", " prettyElements ++ "]"
+        where prettyElements = map (\(k, v) -> assocShow True v ++ "/" ++ show k) $ M.toList sub
 
 subEmpty :: Substitution
 subEmpty = M.empty
@@ -17,7 +24,7 @@ subSingle :: TypeVariable -> Type -> Substitution
 subSingle = M.singleton
 
 subMultiple :: [(TypeVariable, Type)] -> Substitution
-subMultiple = M.fromList
+subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 class Substitutable t where
     -- Apply the given type variable -> type substitution
@@ -40,13 +47,13 @@ instance Substitutable a => Substitutable [a] where
 
 -- Composition of substitutions
 subCompose :: Substitution -> Substitution -> Substitution
-subCompose s1 s2 = M.union s1 s2' -- Left-biased union with s1 applied to s2
-    where s2' = M.map (applySub s1) s2
+subCompose s1 s2 = M.union s1' s2 -- Left-biased union with s2 applied to s1
+    where s1' = M.map (applySub s2) s1
 
 -- Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
-subMerge :: MonadFail m => Substitution -> Substitution -> m Substitution
-subMerge s1 s2 = if agree then return $ M.union s1 s2 else fail "Conflicting substitutions"
+subMerge :: MonadError String m => Substitution -> Substitution -> m Substitution
+subMerge s1 s2 = if agree then return (M.union s1 s2) else throwError "Conflicting substitutions"
     where agree = all subsGiveSameResult (M.keys $ M.intersection s1 s2)
           -- Check that both substitutions give the same type when applied to the same type variables
           subsGiveSameResult var = applySub s1 (TypeVar var) == applySub s2 (TypeVar var)

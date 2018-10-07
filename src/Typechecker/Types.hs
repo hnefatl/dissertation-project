@@ -1,7 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Typechecker.Types where
 
-import Prelude hiding (fail)
-import Control.Monad.Fail
+import Control.Monad.Except
 
 -- General variable/type name
 type Id = String
@@ -10,7 +11,7 @@ makeVariableName :: Int -> Id
 makeVariableName i = "var" ++ show i
 
 class HasKind t where
-    getKind :: MonadFail m => t -> m Kind
+    getKind :: MonadError String m => t -> m Kind
 instance HasKind Kind where
     getKind = return
 instance HasKind TypeVariable where
@@ -20,21 +21,27 @@ instance HasKind TypeConstant where
 instance HasKind Type where
     getKind (TypeVar var) = getKind var
     getKind (TypeConst con) = getKind con
-    getKind (TypeQuant _) = fail "Quantified type has no kind"
+    getKind (TypeQuant _) = throwError "Quantified type has no kind"
     getKind (TypeApp t _) = do
         kind <- getKind t
         case kind of
             KindFun _ k -> return k -- The kind of a type application is the kind of the output of the type function
-            _ -> fail "Type application has incorrect kind"
+            _ -> throwError "Type application has incorrect kind"
 
+
+-- A class for types that can be "shown" but have special behaviour based on associativity to prevent ambiguity
+-- Eg. "(* -> *) -> *" is distinct from "* -> * -> *"
+-- Assumes all instances are right-associative for ease of implementation
+class AssocShow t where
+    assocShow :: Bool -> t -> String -- Bool flag indicates if we should explicitly show associativity
 
 -- A kind is either `*` or `Kind -> Kind`
 data Kind = KindStar | KindFun Kind Kind
-    deriving (Eq)
-instance Show Kind where
-    show KindStar = "*"
-    show (KindFun k@(KindFun _ _) k3) = "(" ++ show k ++ ") -> " ++ show k3
-    show (KindFun k1 k2) = show k1 ++ " -> " ++ show k2
+    deriving (Eq, Show)
+instance AssocShow Kind where
+    assocShow _ KindStar = "*"
+    assocShow False (KindFun k1 k2) = assocShow True k1 ++ " -> " ++ assocShow False k2
+    assocShow True k = "(" ++ assocShow False k ++ ")"
 
 
 data TypeVariable = TypeVariable Id Kind deriving (Eq)
@@ -55,15 +62,21 @@ data Type = TypeVar TypeVariable
           | TypeConst TypeConstant
           | TypeApp Type Type
           | TypeQuant Int -- Quantified type variables: used in type schemes (forall a. Ord a => a)
-    deriving (Eq)
+    deriving (Eq, Show)
 
-instance Show Type where
-    show (TypeVar var) = show var
-    show (TypeConst con) = show con
-    show (TypeQuant n) = "q" ++ show n
-    -- Type constructor special cases. TODO(kc506): find a nice way to match functions
-    show (TypeApp t1 t2) | t1 == typeList = "[" ++ show t2 ++ "]"
-                         | otherwise = show t1 ++ " " ++ show t2
+instance AssocShow Type where
+    assocShow _ (TypeVar var) = show var
+    assocShow _ (TypeConst con) = show con
+    assocShow _ (TypeQuant n) = "q" ++ show n
+    -- Type constructor special cases.
+    assocShow False (TypeApp t@(TypeApp t1 t2) t3)
+        | t1 == typeFun = assocShow True t2 ++ " -> " ++ assocShow False t3
+        | t1 == typeTuple2 = "(" ++ assocShow False t2 ++ ", " ++ assocShow False t3 ++ ")"
+        | otherwise = assocShow False t ++ " " ++ assocShow False t3
+    assocShow False (TypeApp t1 t2)
+        | t1 == typeList = "[" ++ assocShow False t2 ++ "]"
+        | otherwise = assocShow False t1 ++ " " ++ assocShow False t2
+    assocShow True t = "(" ++ assocShow False t ++ ")"
 
 
 -- Utility functions for constructing types
