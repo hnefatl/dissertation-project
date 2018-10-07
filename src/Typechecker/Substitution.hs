@@ -1,5 +1,5 @@
-{-# LANGUAGE FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+{-# Options_GHC -fno-warn-orphans #-}
 
 module Typechecker.Substitution where
 
@@ -16,15 +16,6 @@ type Substitution = M.Map TypeVariable Type
 instance AssocShow Substitution where
     assocShow _ sub = "[" ++ intercalate ", " prettyElements ++ "]"
         where prettyElements = map (\(k, v) -> assocShow True v ++ "/" ++ show k) $ M.toList sub
-
-subEmpty :: Substitution
-subEmpty = M.empty
-
-subSingle :: TypeVariable -> Type -> Substitution
-subSingle = M.singleton
-
-subMultiple :: [(TypeVariable, Type)] -> Substitution
-subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 class Substitutable t where
     -- Apply the given type variable -> type substitution
@@ -43,6 +34,16 @@ instance Substitutable Type where
 instance Substitutable a => Substitutable [a] where
     applySub subs = map (applySub subs)
     getTypeVars = nub . concatMap getTypeVars
+
+
+subEmpty :: Substitution
+subEmpty = M.empty
+
+subSingle :: TypeVariable -> Type -> Substitution
+subSingle = M.singleton
+
+subMultiple :: [(TypeVariable, Type)] -> Substitution
+subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 
 -- Composition of substitutions

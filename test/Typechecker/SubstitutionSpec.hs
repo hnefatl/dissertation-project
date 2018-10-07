@@ -9,14 +9,14 @@ import Typechecker.Types
 test :: TestTree
 test = testGroup "Substitution"
     [ let [a, b, c] = [TypeVariable name KindStar | name <- ["a", "b", "c"]]
-          -- x = [Int/a, Bool/b]
-          x = subMultiple [(a, typeInt), (b, typeBool)]
-          -- y = [(a -> b)/c]
-          y = subSingle c (makeFun (TypeVar a) (TypeVar b))
+          -- x = [(a -> b)/c]
+          x = subSingle c (makeFun (TypeVar a) (TypeVar b))
+          -- y = [Int/a, Bool/b]
+          y = subMultiple [(a, typeInt), (b, typeBool)]
 
           actual = subCompose x y
-          -- expected = [Int/a, Bool/b, (a -> b)/c]
-          expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFun (TypeVar a) (TypeVar b))]
+          -- expected = [Int/a, Bool/b, (Int -> Bool)/c]
+          expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFun typeInt typeBool)]
 
       in testCase ("subCompose " ++ assocShow True x ++ " " ++ assocShow True y) $ assertEqual "" expected actual
     ]
