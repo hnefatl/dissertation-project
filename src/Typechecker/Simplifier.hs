@@ -13,12 +13,11 @@ class HasHnf t where
     inHnf :: t -> Bool
     toHnf :: MonadError String m => ClassEnvironment -> t -> m (S.Set TypePredicate)
 
-instance HasHnf Type where
+instance HasHnf (Type a) where
     -- Returns whether the type is in head-normal form, as defined by the Haskell report
     -- In HNF iff it has the form `v t1 ... tn` where `v` is a type variable and `ti` are types, n >= 0
     inHnf (TypeVar _) = True
     inHnf (TypeConst _) = False
-    inHnf (TypeQuant _) = False
     inHnf (TypeApp t _) = inHnf t
 
     toHnf _ _ = throwError "Can't convert a type to HNF"

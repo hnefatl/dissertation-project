@@ -9,10 +9,10 @@ import Control.Monad.Except
 import Data.List (union, intercalate)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Typechecker.Types (TypeVariable(..), Type(..), AssocShow(..))
+import Typechecker.Types
 
 -- A substitution is a collection of assignments of a type to a variable
-type Substitution = M.Map TypeVariable Type
+type Substitution = M.Map TypeVariable ConcreteType
 
 instance AssocShow Substitution where
     assocShow _ sub = "[" ++ intercalate ", " prettyElements ++ "]"
@@ -24,7 +24,7 @@ class Substitutable t where
     -- Return all the contained type variables, in left->right order and without duplicates
     getTypeVars :: t -> [TypeVariable]
 
-instance Substitutable Type where
+instance Substitutable ConcreteType where
     applySub subs t@(TypeVar var) = M.findWithDefault t var subs
     applySub subs (TypeApp t1 t2) = TypeApp (applySub subs t1) (applySub subs t2)
     applySub _ t = t
@@ -40,10 +40,10 @@ instance (Ord t, Substitutable t) => Substitutable (S.Set t) where
 subEmpty :: Substitution
 subEmpty = M.empty
 
-subSingle :: TypeVariable -> Type -> Substitution
+subSingle :: TypeVariable -> ConcreteType -> Substitution
 subSingle = M.singleton
 
-subMultiple :: [(TypeVariable, Type)] -> Substitution
+subMultiple :: [(TypeVariable, ConcreteType)] -> Substitution
 subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 

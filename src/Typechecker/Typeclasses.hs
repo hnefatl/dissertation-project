@@ -16,7 +16,7 @@ import Typechecker.Substitution
 import Typechecker.Unifier
 
 -- A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeVar (TypeVariable "a" KindStar))`
-data TypePredicate = IsInstance Id Type
+data TypePredicate = IsInstance Id ConcreteType
     deriving (Eq)
 
 instance Ord TypePredicate where
