@@ -5,6 +5,7 @@ module Typechecker.Simplifier where
 import Typechecker.Types
 import Typechecker.Typeclasses
 
+import Data.Foldable
 import Control.Monad.Except
 import qualified Data.Set as S
 
@@ -32,9 +33,17 @@ instance HasHnf TypePredicate where
 
 instance HasHnf t => HasHnf (S.Set t) where
     inHnf = all inHnf
-    toHnf ce s = S.unions <$> (sequence . map (toHnf ce) . S.toList) s
+    toHnf ce s = S.unions <$> mapM (toHnf ce) (S.toList s)
 
 
+removeRedundant :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+removeRedundant ce s = foldlM removeIfEntailed S.empty s
+    where removeIfEntailed acc p = do
+            -- A predicate is redundant if it can be entailed by the other predicates
+            redundant <- entails ce (acc `S.union` (S.filter (> p) s)) p
+            return (if redundant then acc else S.insert p acc)
+
+-- Simplify a context as specified in the Haskell report: reduce each predicate to head-normal form then remove
+-- redundant predicates.
 simplify :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
-simplify ce s = foldlM canRemove S.empty s
-    where canRemove acc p = 
+simplify ce s = toHnf ce s >>= removeRedundant ce 

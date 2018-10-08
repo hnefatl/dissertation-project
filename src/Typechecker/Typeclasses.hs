@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as M
 import Data.Either
 import Control.Monad.Except
 
+import ExtraDefs
 import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier
@@ -130,6 +131,3 @@ entails ce assumps p = (||) <$> entailedBySuperset <*> entailedByInstance
         entailedByInstance = ifPThenByInstance ce p >>= \case
             Nothing -> return False
             Just qualifiers -> allM (entails ce assumps) qualifiers
-            
-allM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
-allM f = foldlM (\x y -> (x &&) <$> f y) True
