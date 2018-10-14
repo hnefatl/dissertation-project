@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, LambdaCase #-}
+{-# Language FlexibleContexts, FlexibleInstances, LambdaCase #-}
 
 module Typechecker.Simplifier where
 
@@ -11,7 +11,7 @@ import qualified Data.Set as S
 
 class HasHnf t where
     inHnf :: t -> Bool
-    toHnf :: MonadError String m => ClassEnvironment -> t -> m (S.Set TypePredicate)
+    toHnf :: MonadError String m => ClassEnvironment -> t -> m (S.Set InstantiatedTypePredicate)
 
 instance HasHnf (Type a) where
     -- Returns whether the type is in head-normal form, as defined by the Haskell report
@@ -22,8 +22,8 @@ instance HasHnf (Type a) where
 
     toHnf _ _ = throwError "Can't convert a type to HNF"
 
-instance HasHnf TypePredicate where
-    inHnf (IsInstance _ ty) = inHnf ty
+instance HasHnf InstantiatedTypePredicate where
+    inHnf (IsInstance _ x) = inHnf x
 
     toHnf ce p | inHnf p = return (S.singleton p)
                | otherwise = ifPThenByInstance ce p >>= \case
@@ -35,7 +35,7 @@ instance HasHnf t => HasHnf (S.Set t) where
     toHnf ce s = S.unions <$> mapM (toHnf ce) (S.toList s)
 
 
-removeRedundant :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+removeRedundant :: MonadError String m => ClassEnvironment -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 removeRedundant ce s = foldlM removeIfEntailed S.empty s
     where removeIfEntailed acc p = do
             -- A predicate is redundant if it can be entailed by the other predicates
@@ -44,5 +44,5 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 
 -- Simplify a context as specified in the Haskell report: reduce each predicate to head-normal form then remove
 -- redundant predicates.
-simplify :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+simplify :: MonadError String m => ClassEnvironment -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 simplify ce s = toHnf ce s >>= removeRedundant ce 

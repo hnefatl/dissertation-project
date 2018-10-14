@@ -21,5 +21,5 @@ test = testGroup "Unification"
           -- expected = [(Char -> Bool)/a, Int/b, Bool/c]
           expected = Right $ subMultiple [(a, makeFun typeChar typeBool), (b, typeInt), (c, typeBool)]
 
-      in testCase ("mgu " ++ assocShow True x ++ " " ++ assocShow True y) $ assertEqual "" expected actual
+      in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
     ]

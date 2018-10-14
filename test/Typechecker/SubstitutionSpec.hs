@@ -18,5 +18,5 @@ test = testGroup "Substitution"
           -- expected = [Int/a, Bool/b, (Int -> Bool)/c]
           expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFun typeInt typeBool)]
 
-      in testCase ("subCompose " ++ assocShow True x ++ " " ++ assocShow True y) $ assertEqual "" expected actual
+      in testCase ("subCompose (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
     ]
