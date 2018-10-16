@@ -1,5 +1,7 @@
-{-# Language FlexibleContexts, LambdaCase, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# Language FlexibleContexts, LambdaCase, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies #-}
 {-# Language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+-- We require undecidable instances to make Sets Instantiable
+{-# Language UndecidableInstances#-}
 
 module Typechecker.Types where
 
@@ -16,46 +18,46 @@ type Id = String
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq)
 
--- A type variable is a named variable tagged with a kind: eg. in the type expression `a b` we'd extract
+-- |A type variable is a named variable tagged with a kind: eg. in the type expression `a b` we'd extract
 -- `TypeVariable "a" (KindFun KindStar KindStar)` and `TypeVariable "b" KindStar`
 data TypeVariable = TypeVariable !Id !Kind
--- A type constant is a non-substituable symbol in a type: eg. `Maybe a` gives
+-- |A type constant is a non-substituable symbol in a type: eg. `Maybe a` gives
 -- `TypeConstant "Maybe" (KindFun Star Star)` and `TypeVariable "a" KindStar`.
 data TypeConstant = TypeConstant !Id !Kind
--- A dummy type variable: we can substitute on TypeVariables safely as their names should be "global", but a dummy type
+-- |A dummy type variable: we can substitute on TypeVariables safely as their names should be "global", but a dummy type
 -- variable has "local" names so isn't safe to substitute on (unrelated variables in different types may have the same
 -- name).
 data TypeDummy = TypeDummy !Id !Kind
 
--- The type of a Haskell expression. Parameter allows for customisation of the value stored for a type variable
+-- |The type of a Haskell expression. Parameter allows for customisation of the value stored for a type variable
 data Type t = TypeVar !t
             | TypeConst !TypeConstant
             | TypeApp !(Type t) !(Type t)
     deriving (Eq, Ord, Functor, Foldable, Traversable)
 
--- Type with sanitised variable names (safe to substitute on)
+-- |Type with sanitised variable names (safe to substitute on)
 -- The need for these two types is subtle: say we're given constraints `Eq Int` and `Eq a => Eq [a]` and asked to check
 -- if `[[Int]]` is an instance of `Eq`. If we initially unify `a` with `[Int]` then we ruin later substitutions as
 -- we've polluted `a`. Instead, we call the constraint an uninstantiated constraint, and require it to be instantiated
 -- such that the type variable names are unique across the typechecker before unifying. We'd then unify eg. `a0` with
 --`[Int]`, `a1` with `Int`, and we're done.
 type InstantiatedType = Type TypeVariable
--- "Local" type that's not safe to substitute on
+-- |"Local" type that's not safe to substitute on
 type UninstantiatedType = Type TypeDummy
 
--- A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeVar (TypeVariable "a" KindStar))`
+-- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeVar (TypeVariable "a" KindStar))`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
 data TypePredicate t = IsInstance !Id !t deriving (Eq, Ord, Functor, Foldable, Traversable)
--- Some common applications of type predicates
+-- |Some common applications of type predicates
 type InstantiatedTypePredicate = TypePredicate InstantiatedType
 type UninstantiatedTypePredicate = TypePredicate UninstantiatedType
 
--- A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
+-- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
 -- UninstantiatedType`.
 data Qualified t a = Qualified !(S.Set (TypePredicate t)) !a deriving (Eq, Ord)
--- Some common applications of Qualified
+-- |Some common applications of Qualified
 type QualifiedType = Qualified InstantiatedType InstantiatedType
 type UninstantiatedQualifiedType = Qualified UninstantiatedType UninstantiatedType
 
@@ -78,8 +80,9 @@ instance (Show t, Show a) => Show (Qualified t a) where
             pquals = if S.size quals > 1 then "(" ++ qualifiers ++ ")" else qualifiers
 
 
--- A class for things that have a "kind": kinds themselves, various type variable/constant/dummies, and types.
+-- |A class for things that have a "kind": kinds themselves, various type variable/constant/dummies, and types.
 class HasKind t where
+    -- |Returns the kind of the given `t`
     getKind :: MonadError String m => t -> m Kind
 instance HasKind Kind where
     getKind = return
@@ -120,12 +123,12 @@ instance Show t => Show (TypePredicate t) where
 
 
 
--- A monad that can convert a type with dummy variables into one with (uniquely) named variables
+-- |A monad that can convert a type with dummy variables into one with (uniquely) named variables
 class Monad m => TypeInstantiator m where
-    -- Should generate a new unique name each time it's run
+    -- |Should generate a new unique name each time it's run
     freshName :: m Id
 
-    -- Utility state monad function: given a local name, convert it to a global name, ensuring that matching local
+    -- |Utility state monad function: given a local name, convert it to a global name, ensuring that matching local
     -- names map to the same global name
     freshNameMap :: Id -> StateT (M.Map Id Id) m Id
     freshNameMap localName = gets (M.lookup localName) >>= \case
@@ -134,33 +137,40 @@ class Monad m => TypeInstantiator m where
                 state $ \s -> (globalName, M.insert localName globalName s)
             Just globalName -> return globalName
             
-    instantiateType :: UninstantiatedQualifiedType -> m QualifiedType
-    instantiateType t = evalStateT (instantiate freshNameMap t) M.empty
+    doInstantiate :: Instantiable a b => a -> m b
+    doInstantiate x = evalStateT (instantiate freshNameMap x) M.empty
 
--- Class of things that can be instantiated (from dummy variables to global variables) from a to b
-class Instantiable a b where
+-- |Class of things that can be instantiated (from dummy variables to global variables) from a to b
+-- Functional dependency `a -> b` enforces that each instance can map an `a` to exactly one `b`, removing any ambiguity.
+class Instantiable a b | a -> b where
+    -- |Given an action mapping local variable names to global ones, replace locals with globals
     instantiate :: Monad m => (Id -> m Id) -> a -> m b
+    -- |"Cast" an instantiated expression into an uninstantiated one
+    uninstantiate :: b -> a
 
 instance Instantiable UninstantiatedType InstantiatedType where
     instantiate f = mapM (\(TypeDummy name kind) -> TypeVariable <$> f name <*> pure kind)
+    uninstantiate = fmap (\(TypeVariable name kind) -> TypeDummy name kind)
 instance Instantiable (TypePredicate UninstantiatedType) (TypePredicate InstantiatedType) where
     instantiate f (IsInstance super t) = IsInstance super <$> instantiate f t
+    uninstantiate (IsInstance super t) = IsInstance super (uninstantiate t)
 instance Instantiable UninstantiatedQualifiedType QualifiedType where
-    instantiate f (Qualified quals t) = Qualified <$> quals' <*> instantiate f t
-        where quals' = S.fromList <$> mapM (instantiate f) (S.toList quals)
+    instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
+    uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
+instance (Ord a, Ord b, Instantiable a b) => Instantiable (S.Set a) (S.Set b) where
+    instantiate f s = S.fromList <$> mapM (instantiate f) (S.toList s)
+    uninstantiate = S.map uninstantiate
 
-    
 
--- Utility functions on types
+-- TODO(kc506): Find a better place to put these
+-- |Utility functions on types
 makeList :: Type a -> Type a
 makeList = TypeApp typeList
 makeFun, makeTuple2 :: Type a -> Type a -> Type a
 makeFun = TypeApp . TypeApp typeFun
 makeTuple2 = TypeApp . TypeApp typeTuple2
 
-
--- Built-in types
--- TODO(kc506): Find a better place to put these: somewhere along with their implementations?
+-- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type a
 typeUnit = TypeConst (TypeConstant "()" KindStar)
 typeBool = TypeConst (TypeConstant "Bool" KindStar)

@@ -10,6 +10,7 @@ import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Typechecker
+import Typechecker.Hardcoded
 
 import Control.Monad.Except
 import qualified Data.Set as S
@@ -25,7 +26,8 @@ parseExpression s = head $ map (\(HsPatBind _ _ (HsUnGuardedRhs e) _) -> e) decl
 
 testExpression :: String -> (S.Set InstantiatedTypePredicate, InstantiatedType) -> TestTree
 testExpression s expected@(_, t) = testCase s $ do
-    actual@(_, actualType) <- unpackEither $ runExcept $ runTypeInferrer $ inferExpression $ parseExpression s
+    let inference = withAssumptions builtinConstructors (inferExpression $ parseExpression s)
+    actual@(_, actualType) <- unpackEither $ runExcept $ runTypeInferrer inference
     sub <- unpackEither (mgu t actualType)
     assertEqual s (applySub sub expected) (applySub sub actual)
 
@@ -46,5 +48,18 @@ test = testGroup "Typechecking"
     ,
         let s = "x = \"ab\""
             expected = (S.empty, typeString)
+        in testExpression s expected
+    ,
+        let s = "x = True"
+            expected = (S.empty, typeBool)
+        in testExpression s expected
+    ,
+        let s = "x = False"
+            expected = (S.empty, typeBool)
+        in testExpression s expected
+    ,
+        let s = "x = (+) 3 4" 
+            t = TypeVar (TypeVariable "a" KindStar)
+            expected = (S.singleton (IsInstance "Num" t), t)
         in testExpression s expected
     ]

@@ -22,6 +22,3 @@ compileFile path = do
     case parseModuleWithMode mode contents of
         ParseFailed loc msg -> printParseError loc msg
         ParseOk moduledef -> pPrint moduledef
-
-
--- Look at thih

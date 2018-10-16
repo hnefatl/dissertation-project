@@ -12,7 +12,7 @@ import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Typechecker.Types
 
--- A substitution is a collection of assignments of a type to a variable
+-- |A substitution is a collection of assignments of a type to a variable
 newtype Substitution = Substitution (M.Map TypeVariable InstantiatedType)
     deriving (Eq)
 
@@ -24,12 +24,12 @@ instance Show Substitution where
         where prettyElements = map (\(k, v) -> "(" ++ show v ++ ")/" ++ show k) $ M.toList subs
 
 class Substitutable t where
-    -- Apply the given type variable -> type substitution
+    -- |Apply the given type variable -> type substitution
     applySub :: Substitution -> t -> t
-    -- Return all the contained type variables, in left->right order and without duplicates
+    -- |Return all the contained type variables, in left->right order and without duplicates
     getTypeVars :: t -> [TypeVariable]
 
--- We only allow substitutions on instantiated types: not on uninstantiated ones
+-- |We only allow substitutions on instantiated types: not on uninstantiated ones
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable InstantiatedType where
     applySub (Substitution subs) t@(TypeVar var) = M.findWithDefault t var subs
@@ -66,12 +66,14 @@ subMultiple :: [(TypeVariable, InstantiatedType)] -> Substitution
 subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 
--- Composition of substitutions: (s1 . s2) is left-biased union with s2 applied to s1.
+-- |Composition of substitutions
+-- 
+-- > (s1 `subCompose` s2) `subapply` <exp> = (s1 . s2)<exp> = s2(s1<exp>)
 subCompose :: Substitution -> Substitution -> Substitution
 subCompose (Substitution subs1) s2@(Substitution subs2) = Substitution (M.union subs1' subs2)
     where subs1' = M.map (applySub s2) subs1
 
--- Merging of substitutions (the intersections of the type variables from each substitution must produce the same
+-- |Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
 subMerge :: MonadError String m => Substitution -> Substitution -> m Substitution
 subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
