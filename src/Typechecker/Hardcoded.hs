@@ -5,9 +5,8 @@ import qualified Data.Set as S
 
 import Typechecker.Types
 import Typechecker.Typeclasses
-import Typechecker.Typechecker
 
-builtinConstructors :: Assumptions
+builtinConstructors :: M.Map Id UninstantiatedQualifiedType
 builtinConstructors = M.fromList
     [ ("True", Qualified S.empty typeBool),
       ("False", Qualified S.empty typeBool),
@@ -19,5 +18,5 @@ builtinConstructors = M.fromList
 builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
     [
-        --("Eq", Class S.empty $ S.fromList [Qualified ])
+        ("Eq", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Eq" typeInt)])
     ]

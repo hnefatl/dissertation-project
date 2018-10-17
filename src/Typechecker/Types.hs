@@ -18,6 +18,12 @@ type Id = String
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq)
 
+-- |The number of type arguments that a kind represents: this is one less than the number of nodes on the right-most
+-- branch of a "Kind tree".
+getKindArgCount :: Integral i => Kind -> i
+getKindArgCount KindStar = 0
+getKindArgCount (KindFun _ k) = 1 + getKindArgCount k
+
 -- |A type variable is a named variable tagged with a kind: eg. in the type expression `a b` we'd extract
 -- `TypeVariable "a" (KindFun KindStar KindStar)` and `TypeVariable "b" KindStar`
 data TypeVariable = TypeVariable !Id !Kind
@@ -60,7 +66,13 @@ data Qualified t a = Qualified !(S.Set (TypePredicate t)) !a deriving (Eq, Ord)
 -- |Some common applications of Qualified
 type QualifiedType = Qualified InstantiatedType InstantiatedType
 type UninstantiatedQualifiedType = Qualified UninstantiatedType UninstantiatedType
+-- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
+type UninstantiatedClassInstance = Qualified UninstantiatedType UninstantiatedTypePredicate
+type ClassInstance = Qualified InstantiatedType InstantiatedTypePredicate
 
+-- | Construct a qualified type (without any qualifiers) from a normal type. Useful shorthand sometimes.
+qualifyType :: Type a -> Qualified (Type a) (Type a)
+qualifyType = Qualified S.empty
 
 instance Show TypeVariable where show (TypeVariable name _) = name
 instance Show TypeConstant where show (TypeConstant name _) = name
@@ -73,11 +85,8 @@ instance Eq TypeConstant where TypeConstant id1 _ == TypeConstant id2 _ = id1 ==
 instance Eq TypeDummy where TypeDummy id1 _ == TypeDummy id2 _ = id1 == id2
 
 instance (Show t, Show a) => Show (Qualified t a) where
-    -- Handle eg. `Eq a => ...` vs `(Eq a, Show a) => ...`
-    show (Qualified quals x) = pquals ++ " => " ++ show x
-        where
-            qualifiers = intercalate ", " (map show $ S.toList quals)
-            pquals = if S.size quals > 1 then "(" ++ qualifiers ++ ")" else qualifiers
+    show (Qualified quals x) = qualifiers ++ " => " ++ show x
+        where qualifiers = "(" ++ intercalate ", " (map show $ S.toList quals) ++ ")"
 
 
 -- |A class for things that have a "kind": kinds themselves, various type variable/constant/dummies, and types.
@@ -160,6 +169,9 @@ instance Instantiable UninstantiatedQualifiedType QualifiedType where
 instance (Ord a, Ord b, Instantiable a b) => Instantiable (S.Set a) (S.Set b) where
     instantiate f s = S.fromList <$> mapM (instantiate f) (S.toList s)
     uninstantiate = S.map uninstantiate
+instance Instantiable UninstantiatedClassInstance ClassInstance where
+    instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
+    uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
 
 
 -- TODO(kc506): Find a better place to put these

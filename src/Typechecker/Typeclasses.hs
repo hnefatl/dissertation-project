@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# Language FlexibleContexts, LambdaCase #-}
 
 module Typechecker.Typeclasses where
 
@@ -12,15 +12,6 @@ import ExtraDefs
 import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier
-
--- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
--- We restrict to globally unique type variable names (instantiated types)
-type UninstantiatedClassInstance = Qualified UninstantiatedType UninstantiatedTypePredicate
-type ClassInstance = Qualified InstantiatedType InstantiatedTypePredicate
-
-instance Instantiable UninstantiatedClassInstance ClassInstance where
-    instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
-    uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`

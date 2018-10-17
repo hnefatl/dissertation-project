@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving #-}
 
 module Typechecker.Typechecker where
 
@@ -10,30 +10,41 @@ import ExtraDefs
 import Debug.Trace
 
 import Data.Default
+import Text.Printf
 import Control.Monad.Except
 import Control.Monad.State.Strict
-import Control.Monad.Reader
 import qualified Data.Set as S
 import qualified Data.Map as M
 
 import Language.Haskell.Syntax as Syntax
 
--- |Assumptions on the type of a variable
-type Assumptions = M.Map Id UninstantiatedQualifiedType
+-- |Maps globally unique names of functions/variables/data constructors to their instantiated (for variables) or
+-- uninstantiated (for functions+constructors) types.
+type TypeMap = M.Map Id (Either QualifiedType UninstantiatedQualifiedType)
 
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
-data InferrerState = InferrerState { subs :: Substitution , variableCounter :: Int }
+data InferrerState = InferrerState
+    { subs :: Substitution
+    , types :: TypeMap
+    , typePredicates :: S.Set InstantiatedTypePredicate
+    , variableCounter :: Int }
+    deriving (Show)
+
 instance Default InferrerState where
-    def = InferrerState { subs = def, variableCounter = 1 }
+    def = InferrerState
+            { subs = def
+            , types = M.empty
+            , typePredicates = S.empty
+            , variableCounter = 1 }
 
 -- |A TypeInferrer handles mutable state, some scoped read-only assumptions about the types of variables, and error
 -- reporting
-newtype TypeInferrer a = TypeInferrer (ReaderT Assumptions (StateT InferrerState (Except String) ) a)
-    deriving (Functor, Applicative, Monad, MonadReader Assumptions, MonadState InferrerState, MonadError String)
+newtype TypeInferrer a = TypeInferrer (StateT InferrerState (Except String) a)
+    deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 
 runTypeInferrer :: TypeInferrer a -> Except String a
-runTypeInferrer (TypeInferrer inner) = evalStateT (runReaderT inner M.empty) def
+runTypeInferrer (TypeInferrer inner) = evalStateT inner def
 
 instance TypeInstantiator TypeInferrer where
     freshName = do
@@ -49,14 +60,52 @@ getSubstitution = gets subs
 freshVariable :: Kind -> TypeInferrer InstantiatedType
 freshVariable kind = freshName >>= \name -> return $ TypeVar (TypeVariable name kind)
 
--- |Runs type inference with updated assumptions
-withAssumptions :: Assumptions -> TypeInferrer a -> TypeInferrer a
-withAssumptions as = local (M.union as)
+addTypes :: TypeMap -> TypeInferrer ()
+addTypes vs = modify (\s -> s { types = M.union vs (types s) })
+addType :: Id -> Either QualifiedType UninstantiatedQualifiedType -> TypeInferrer ()
+addType name t = addTypes (M.singleton name t)
 
-getAssumption :: Id -> TypeInferrer UninstantiatedQualifiedType
-getAssumption name = reader (M.lookup name) >>= \case
-    Just t -> return t
-    Nothing -> throwError ("Assumption " ++ name ++ " not in environment" )
+addConstructorType :: Id -> UninstantiatedQualifiedType -> TypeInferrer ()
+addConstructorType name t = addType name (Right t)
+addFunctionType :: Id -> UninstantiatedQualifiedType -> TypeInferrer ()
+addFunctionType name t = addType name (Right t)
+addVariableType :: Id -> QualifiedType -> TypeInferrer()
+addVariableType name t = addType name (Left t)
+
+addTypePredicates :: S.Set InstantiatedTypePredicate -> TypeInferrer ()
+addTypePredicates ps = modify (\s -> s { typePredicates = S.union ps (typePredicates s) })
+addTypePredicate :: InstantiatedTypePredicate -> TypeInferrer ()
+addTypePredicate = addTypePredicates . S.singleton
+
+getType :: Id -> TypeInferrer (Either QualifiedType UninstantiatedQualifiedType)
+getType name = do
+    t <- gets (M.lookup name . types)
+    maybe (throwError $ printf "Symbol %s not in environment" name) return t
+
+-- These should instantiate the type and add the qualifiers automatically
+instantiateConstructor, instantiateFunction :: Id -> TypeInferrer QualifiedType
+(instantiateConstructor, instantiateFunction) = (helper "constructor", helper "function")
+    where helper s name = do
+            t <- getType name >>= either (const $ throwError $ printf "Got instantiated type for %s: %s" s name) return
+            t'@(Qualified quals _) <- doInstantiate t
+            addTypePredicates quals
+            return t'
+getVariableType :: Id -> TypeInferrer QualifiedType
+getVariableType name = do
+        et <- getType name
+        either return (const $ throwError $ printf "Got uninstantiated type for variable %s" name) et
+
+-- Return either a variable, function, or constructor. Instantiate and store qualifiers if necessary
+getInstantiatedType :: Id -> TypeInferrer QualifiedType
+getInstantiatedType name = do
+    et <- getType name
+    case et of
+        Left t -> return t
+        Right uninst -> do
+            t@(Qualified quals _) <- doInstantiate uninst
+            addTypePredicates quals
+            return t
+
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
 unify :: InstantiatedType -> InstantiatedType -> TypeInferrer ()
@@ -66,28 +115,76 @@ unify t1 t2 = do
     modify (\s -> s { subs = subCompose currentSub newSub })
 
 
-inferLiteral :: Syntax.HsLiteral -> TypeInferrer (S.Set InstantiatedTypePredicate, InstantiatedType)
-inferLiteral (HsChar _) = return (S.empty, typeChar)
-inferLiteral (HsString _) = return (S.empty, typeString)
-inferLiteral (HsInt _) = freshVariable KindStar >>= \v -> return (S.singleton $ IsInstance "Num" v, v)
-inferLiteral (HsFrac _) = freshVariable KindStar >>= \v -> return (S.singleton $ IsInstance "Fractional" v, v)
+inferLiteral :: Syntax.HsLiteral -> TypeInferrer InstantiatedType
+inferLiteral (HsChar _) = return typeChar
+inferLiteral (HsString _) = return typeString
+inferLiteral (HsInt _) = do
+    v <- freshVariable KindStar
+    addTypePredicate (IsInstance "Num" v)
+    return v
+inferLiteral (HsFrac _) = do
+    v <- freshVariable KindStar
+    addTypePredicate (IsInstance "Fractional" v)
+    return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
 -- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
 -- into lets? Pg. 26 of thih.pdf
-inferExpression :: Syntax.HsExp -> TypeInferrer (S.Set InstantiatedTypePredicate, InstantiatedType)
+inferExpression :: Syntax.HsExp -> TypeInferrer InstantiatedType
 inferExpression (HsVar name) = do
-    uninstType <- getAssumption (toId name)
-    Qualified quals t <- doInstantiate uninstType
-    return (quals, t)
-inferExpression (HsCon name) = inferExpression (HsVar name) -- We treat variables and type constructors the same here
+    -- Get either a function or a variable, instantiating it if necessary
+    Qualified _ t <- getInstantiatedType (toId name)
+    return t
+inferExpression (HsCon name) = do
+    -- Instantiate the corresponding constructor
+    Qualified _ t <- instantiateConstructor (toId name)
+    return t
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsApp f e) = do
-    (preds1, funType) <- inferExpression f
-    (preds2, argType) <- inferExpression e
+    -- Infer the function's type and the expression's type, then use unification to deduce the return type
+    funType <- inferExpression f
+    argType <- inferExpression e
     t <- freshVariable KindStar
     unify funType (makeFun argType t)
-    s <- getSubstitution
-    traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " subs: " ++ show s ++ " preds1: " ++ show preds1 ++ " preds2: " ++ show preds2)
-    return (S.union preds1 preds2, t)
+    s <- get
+    traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " state: " ++ show s)
+    return t
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
+
+-- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
+-- mapping variable names in the pattern to their inferred types, and an inferred type for the whole expression
+inferPattern :: Syntax.HsPat -> TypeInferrer InstantiatedType
+inferPattern (HsPVar name) = do
+    t <- freshVariable KindStar
+    addVariableType (toId name) (qualifyType t)
+    return t
+inferPattern (HsPLit lit) = inferLiteral lit
+inferPattern HsPWildCard = freshVariable KindStar
+inferPattern (HsPAsPat name pat) = do
+    t <- inferPattern pat
+    addVariableType (toId name) (qualifyType t)
+    return t
+inferPattern (HsPParen pat) = inferPattern pat
+inferPattern (HsPApp constructor pats) = do
+    -- Infer any nested patterns
+    argTypes <- inferPatterns pats
+    -- Get the type of the constructor, instantiate it and add the constraints on the new type variables
+    Qualified _ constructorType <- instantiateConstructor (toId constructor)
+    applicationType <- freshVariable KindStar
+    -- Check we have the right number of arguments to the data constructor
+    expArgCount <- getKindArgCount <$> getKind constructorType
+    let argCount = length argTypes
+    when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
+    -- Unify the expected type with the variables we have to match up their types
+    let constructedFnType = foldr makeFun applicationType argTypes -- a -> (b -> (c -> applicationType)))
+    unify constructorType constructedFnType
+    return applicationType
+-- TODO(kc506): Support more patterns
+inferPattern _ = throwError "Unsupported pattern"
+
+inferPatterns :: [Syntax.HsPat] -> TypeInferrer [InstantiatedType]
+inferPatterns = mapM inferPattern
+
+
+inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> [Syntax.HsDecl] -> TypeInferrer (S.Set InstantiatedTypePredicate, InstantiatedType)
+inferImplicitPatternBinding pat rhs decls = undefined

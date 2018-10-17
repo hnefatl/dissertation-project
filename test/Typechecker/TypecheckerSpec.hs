@@ -7,13 +7,13 @@ import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
 import Typechecker.Types
-import Typechecker.Unifier
-import Typechecker.Substitution
 import Typechecker.Typechecker
 import Typechecker.Hardcoded
 
+import Data.Foldable
 import Control.Monad.Except
 import qualified Data.Set as S
+import qualified Data.Map as M
 
 parse :: String -> HsModule
 parse s = case parseModule s of
@@ -24,12 +24,14 @@ parseExpression :: String -> HsExp
 parseExpression s = head $ map (\(HsPatBind _ _ (HsUnGuardedRhs e) _) -> e) decls
     where (HsModule _ _ _ _ decls) = parse s
 
+-- TODO(kc506): Will need updating. Replace this with some framework based around testing implicitly typed bindings,
+-- using qualified types which include the type constraints and not just the type variable names
 testExpression :: String -> (S.Set InstantiatedTypePredicate, InstantiatedType) -> TestTree
-testExpression s expected@(_, t) = testCase s $ do
-    let inference = withAssumptions builtinConstructors (inferExpression $ parseExpression s)
-    actual@(_, actualType) <- unpackEither $ runExcept $ runTypeInferrer inference
-    sub <- unpackEither (mgu t actualType)
-    assertEqual s (applySub sub expected) (applySub sub actual)
+testExpression s (_, expectedType) = testCase s $ do
+    actualType <- unpackEither $ runExcept $ runTypeInferrer $ do
+        forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
+        inferExpression (parseExpression s)
+    assertEqual s expectedType actualType
 
 unpackEither :: Either String b -> IO b
 unpackEither = either error return
