@@ -169,6 +169,9 @@ instance Instantiable UninstantiatedQualifiedType QualifiedType where
 instance (Ord a, Ord b, Instantiable a b) => Instantiable (S.Set a) (S.Set b) where
     instantiate f s = S.fromList <$> mapM (instantiate f) (S.toList s)
     uninstantiate = S.map uninstantiate
+instance Instantiable a b => Instantiable [a] [b] where
+    instantiate f = mapM (instantiate f)
+    uninstantiate = map uninstantiate
 instance Instantiable UninstantiatedClassInstance ClassInstance where
     instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
     uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)

@@ -64,7 +64,7 @@ addInstance inst@(Qualified _ (IsInstance classname _)) ce =
 --
 -- Given eg. `Eq a => Ord a`, `ifPThenBySuper ce (IsInstance "Ord" t)` returns `{ IsInstance "Ord" t, IsInstance "Eq" t
 -- }`
-ifPThenBySuper :: MonadError String m => ClassEnvironment -> UninstantiatedTypePredicate -> m (S.Set UninstantiatedTypePredicate)
+ifPThenBySuper :: MonadError String m => ClassEnvironment -> InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 ifPThenBySuper ce p@(IsInstance classname ty) = do
     supers <- S.toList <$> superclasses classname ce
     foldM mergeSupers (S.singleton p) supers
@@ -74,22 +74,26 @@ ifPThenBySuper ce p@(IsInstance classname ty) = do
 -- instance, return the qualifiers of the instance that we still need to show hold.
 -- 
 -- Given eg. `Ord a => Ord [a]`, `ifPThenByInstance ce (IsInstance "Ord" [(a,b)])` returns `IsInstance "Ord" (a,b)`.
-ifPThenByInstance :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> UninstantiatedTypePredicate -> m (Maybe (S.Set UninstantiatedTypePredicate))
+ifPThenByInstance :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> InstantiatedTypePredicate -> m (Maybe (S.Set InstantiatedTypePredicate))
 ifPThenByInstance ce p@(IsInstance classname _) = do
-    -- Make a new instantiated qualified type without qualifiers
-    targetInst <- Qualified S.empty <$> doInstantiate p
-    let tryMatchInstance :: ClassInstance -> Maybe (S.Set UninstantiatedTypePredicate)
-        tryMatchInstance inst@(Qualified qualifiers _) = do -- Maybe monad
-            subs <- eitherToMaybe (match inst targetInst) -- Find a substitution
-            -- The new predicates are the constraints on the matching instance
-            Just $ uninstantiate $ applySub subs qualifiers
-    insts <- doInstantiate =<< instances classname ce
-    -- Pick the first non-Nothing value (as we can't have overlapping instances, there's at most one instance)
-    return . msum . map tryMatchInstance . S.toList $ insts
+    insts <- instances classname ce
+    -- See if any instances match the predicate we're exploring, and pick the first non-Nothing value (as we can't have
+    -- overlapping instances, there's at most one instance)
+    msum <$> mapM tryMatchInstance (S.toList insts)
+    where
+        -- Make a new instantiated qualified type without qualifiers
+        targetInst = Qualified S.empty p
+        tryMatchInstance uninst = do
+            inst@(Qualified qualifiers _) <- doInstantiate uninst
+            return $ case match inst targetInst of -- Find a substitution
+                Left _ -> Nothing
+                -- The new predicates are the constraints on the matching instance
+                Right subs -> Just $ applySub subs qualifiers
 
 
--- |Determines if the given predicate can be deduced from the given assumptions and the class environment
-entails :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set UninstantiatedTypePredicate -> UninstantiatedTypePredicate -> m Bool
+-- |Determines if the given predicate can be deduced from the given existing (assumed to be true) predicates and the
+-- class environment
+entails :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set InstantiatedTypePredicate -> InstantiatedTypePredicate -> m Bool
 entails ce assumps p = (||) <$> entailedBySuperset <*> entailedByInstance
     where
         -- Can this predicate be satisfied by the superclasses?

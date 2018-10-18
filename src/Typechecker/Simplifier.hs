@@ -3,6 +3,7 @@
 module Typechecker.Simplifier where
 
 import Typechecker.Types
+import Typechecker.Substitution
 import Typechecker.Typeclasses
 
 import Data.Foldable
@@ -16,7 +17,7 @@ class HasHnf t where
     inHnf :: t -> Bool
 
     -- |Converts a `t` into hnf
-    toHnf :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> t -> m (S.Set UninstantiatedTypePredicate)
+    toHnf :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> t -> m (S.Set InstantiatedTypePredicate)
 
 instance HasHnf (Type a) where
     inHnf (TypeVar _) = True
@@ -25,7 +26,7 @@ instance HasHnf (Type a) where
 
     toHnf _ _ = throwError "Can't convert a type to HNF"
 
-instance HasHnf UninstantiatedTypePredicate where
+instance HasHnf InstantiatedTypePredicate where
     inHnf (IsInstance _ x) = inHnf x
 
     -- |If the predicate is already in head normal form, return it. Otherwise, get the predicates that can be used to
@@ -42,7 +43,7 @@ instance HasHnf t => HasHnf (S.Set t) where
 
 -- |Removes redundant predicates from the given set. A predicate is redundant if it's entailed by any of the other
 -- predicates
-removeRedundant :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set UninstantiatedTypePredicate -> m (S.Set UninstantiatedTypePredicate)
+removeRedundant :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 removeRedundant ce s = foldlM removeIfEntailed S.empty s
     where removeIfEntailed acc p = do
             -- A predicate is redundant if it can be entailed by the other predicates
@@ -51,13 +52,15 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 
 -- |Simplify a context as specified in the Haskell report: reduce each predicate to head-normal form then remove
 -- redundant predicates.
-simplify :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set UninstantiatedTypePredicate -> m (S.Set UninstantiatedTypePredicate)
+simplify :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 simplify ce s = toHnf ce s >>= removeRedundant ce 
 
 
 -- |Splits a set of predicates into those that belong in the constraints for a type, and those which belong in some
 -- enclosing type.
 -- TODO(kc506): thih uses another argument and handles defaults. Can this be ignored here?
-split :: MonadError m => ClassEnvironment -> S.Set TypeVariable -> S.Set TypeVariable -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate, S.Set InstantiatedTypePredicate)
+split :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set TypeVariable -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate, S.Set InstantiatedTypePredicate)
 split env fixed preds = do
     simplePreds <- simplify env preds
+    let (deferredPreds, qualifyingPreds) = S.partition ((`S.isSubsetOf` fixed) . S.fromList . getTypeVars) simplePreds
+    return (qualifyingPreds, deferredPreds)
