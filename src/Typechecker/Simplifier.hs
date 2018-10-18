@@ -53,3 +53,11 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 -- redundant predicates.
 simplify :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set UninstantiatedTypePredicate -> m (S.Set UninstantiatedTypePredicate)
 simplify ce s = toHnf ce s >>= removeRedundant ce 
+
+
+-- |Splits a set of predicates into those that belong in the constraints for a type, and those which belong in some
+-- enclosing type.
+-- TODO(kc506): thih uses another argument and handles defaults. Can this be ignored here?
+split :: MonadError m => ClassEnvironment -> S.Set TypeVariable -> S.Set TypeVariable -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate, S.Set InstantiatedTypePredicate)
+split env fixed preds = do
+    simplePreds <- simplify env preds

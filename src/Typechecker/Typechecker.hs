@@ -186,5 +186,19 @@ inferPatterns :: [Syntax.HsPat] -> TypeInferrer [InstantiatedType]
 inferPatterns = mapM inferPattern
 
 
+inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer InstantiatedType
+inferAlternative pats e = do
+    patternTypes <- inferPatterns pats
+    expType <- inferExpression e
+    -- The "type of the alternative" is the function type that it represents.
+    return $ foldr makeFun expType patternTypes
+
+inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer InstantiatedType
+inferAlternatives alts = do
+    types <- mapM (uncurry inferAlternative) alts
+    commonType <- freshVariable KindStar
+    mapM_ (unify commonType) types
+    return commonType
+
 inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> [Syntax.HsDecl] -> TypeInferrer (S.Set InstantiatedTypePredicate, InstantiatedType)
 inferImplicitPatternBinding pat rhs decls = undefined
