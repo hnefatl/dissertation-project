@@ -9,7 +9,7 @@ import Control.Monad.Except
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List (intercalate)
+import Data.List (intercalate, foldl')
 
 -- |General variable/type name
 type Id = String
@@ -175,6 +175,9 @@ instance Instantiable a b => Instantiable [a] [b] where
 instance Instantiable UninstantiatedClassInstance ClassInstance where
     instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
     uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
+instance Instantiable a b => Instantiable (Maybe a) (Maybe b) where
+    instantiate f = mapM (instantiate f)
+    uninstantiate = fmap uninstantiate
 
 
 -- TODO(kc506): Find a better place to put these
@@ -184,6 +187,8 @@ makeList = TypeApp typeList
 makeFun, makeTuple2 :: Type a -> Type a -> Type a
 makeFun = TypeApp . TypeApp typeFun
 makeTuple2 = TypeApp . TypeApp typeTuple2
+makeTupleN :: [Type a] -> Type a
+makeTupleN ts = foldl' TypeApp (typeTupleN $ length ts) ts
 
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type a
@@ -199,6 +204,9 @@ typeList, typeFun, typeTuple2 :: Type a
 typeList = TypeConst (TypeConstant "[]" (KindFun KindStar KindStar))
 typeFun = TypeConst (TypeConstant "->" (KindFun KindStar (KindFun KindStar KindStar)))
 typeTuple2 = TypeConst (TypeConstant "(,)" (KindFun KindStar (KindFun KindStar KindStar)))
+
+typeTupleN :: Int -> Type a
+typeTupleN n = TypeConst (TypeConstant ("(," ++ show n ++ ",)") $ foldr KindFun KindStar (replicate n KindStar))
 
 typeString :: Type a
 typeString = makeList typeChar

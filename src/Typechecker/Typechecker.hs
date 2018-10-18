@@ -5,6 +5,8 @@ module Typechecker.Typechecker where
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Substitution
+import Typechecker.Typeclasses
+import Typechecker.Simplifier
 import ExtraDefs
 
 import Debug.Trace
@@ -27,6 +29,7 @@ type TypeMap = M.Map Id (Either QualifiedType UninstantiatedQualifiedType)
 data InferrerState = InferrerState
     { subs :: Substitution
     , types :: TypeMap
+    , classEnvironment :: ClassEnvironment
     , typePredicates :: S.Set InstantiatedTypePredicate
     , variableCounter :: Int }
     deriving (Show)
@@ -35,6 +38,7 @@ instance Default InferrerState where
     def = InferrerState
             { subs = def
             , types = M.empty
+            , classEnvironment = M.empty
             , typePredicates = S.empty
             , variableCounter = 1 }
 
@@ -43,8 +47,14 @@ instance Default InferrerState where
 newtype TypeInferrer a = TypeInferrer (StateT InferrerState (Except String) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 
-runTypeInferrer :: TypeInferrer a -> Except String a
-runTypeInferrer (TypeInferrer inner) = evalStateT inner def
+runTypeInferrer :: TypeInferrer a -> Except String (a, InferrerState)
+runTypeInferrer (TypeInferrer inner) = runStateT inner def
+
+evalTypeInferrer :: TypeInferrer a -> Except String a
+evalTypeInferrer (TypeInferrer inner) = evalStateT inner def
+
+execTypeInferrer :: TypeInferrer a -> Except String InferrerState
+execTypeInferrer (TypeInferrer inner) = execStateT inner def
 
 instance TypeInstantiator TypeInferrer where
     freshName = do
@@ -52,13 +62,22 @@ instance TypeInstantiator TypeInferrer where
         modify (\s -> s { variableCounter = counter })
         return ("v" ++ show counter)
 
+-- |Creates a fresh (uniquely named) type
+freshVariable :: Kind -> TypeInferrer InstantiatedType
+freshVariable kind = freshName >>= \name -> return $ TypeVar (TypeVariable name kind)
+
 -- |Returns the current substitution in the monad
 getSubstitution :: TypeInferrer Substitution
 getSubstitution = gets subs
 
--- |Creates a fresh (uniquely named) type
-freshVariable :: Kind -> TypeInferrer InstantiatedType
-freshVariable kind = freshName >>= \name -> return $ TypeVar (TypeVariable name kind)
+getClassEnvironment :: TypeInferrer ClassEnvironment
+getClassEnvironment = gets classEnvironment
+
+getPredicates :: TypeInferrer (S.Set InstantiatedTypePredicate)
+getPredicates = gets typePredicates
+
+addClasses :: ClassEnvironment -> TypeInferrer ()
+addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironment s) })
 
 addTypes :: TypeMap -> TypeInferrer ()
 addTypes vs = modify (\s -> s { types = M.union vs (types s) })
@@ -149,6 +168,7 @@ inferExpression (HsApp f e) = do
     s <- get
     traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " state: " ++ show s)
     return t
+inferExpression (HsTuple exps) = makeTupleN <$> mapM inferExpression exps
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 -- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
@@ -179,8 +199,9 @@ inferPattern (HsPApp constructor pats) = do
     let constructedFnType = foldr makeFun applicationType argTypes -- a -> (b -> (c -> applicationType)))
     unify constructorType constructedFnType
     return applicationType
+inferPattern (HsPTuple pats) = makeTupleN <$> inferPatterns pats
 -- TODO(kc506): Support more patterns
-inferPattern _ = throwError "Unsupported pattern"
+inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 
 inferPatterns :: [Syntax.HsPat] -> TypeInferrer [InstantiatedType]
 inferPatterns = mapM inferPattern
@@ -200,5 +221,18 @@ inferAlternatives alts = do
     mapM_ (unify commonType) types
     return commonType
 
-inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> [Syntax.HsDecl] -> TypeInferrer (S.Set InstantiatedTypePredicate, InstantiatedType)
-inferImplicitPatternBinding pat rhs decls = undefined
+-- |Infers the type of a pattern binding (eg. `foo = 5`) without an explicit type
+inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> TypeInferrer ()
+inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
+    sub <- getSubstitution
+    patType <- applySub sub <$> inferPattern pat
+    rhsType <- applySub sub <$> inferExpression e
+    unify patType rhsType
+    classEnv <- getClassEnvironment
+    preds <- applySub sub <$> getPredicates
+    let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
+    (qualifiers, _) <- split classEnv rhsTypeVariables preds
+    -- TODO(kc506): Set the set of assumptions in the state to be exactly the deferred assumptions?
+    --mapM_ (uncurry addVariableType)
+    return ()
+inferImplicitPatternBinding _ (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"

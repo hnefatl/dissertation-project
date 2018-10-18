@@ -15,7 +15,7 @@ import Typechecker.Unifier
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
-data TypeClass = Class (S.Set Id) (S.Set UninstantiatedClassInstance) deriving (Eq)
+data TypeClass = Class (S.Set Id) (S.Set UninstantiatedClassInstance) deriving (Eq, Show)
 
 -- |Qualified types need to match the same global unique names to the predicates as it does the head
 type ClassEnvironment = M.Map Id TypeClass

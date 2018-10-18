@@ -7,6 +7,7 @@ import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
 import Typechecker.Types
+import Typechecker.Unifier
 import Typechecker.Typechecker
 import Typechecker.Hardcoded
 
@@ -24,14 +25,20 @@ parseExpression :: String -> HsExp
 parseExpression s = head $ map (\(HsPatBind _ _ (HsUnGuardedRhs e) _) -> e) decls
     where (HsModule _ _ _ _ decls) = parse s
 
--- TODO(kc506): Will need updating. Replace this with some framework based around testing implicitly typed bindings,
--- using qualified types which include the type constraints and not just the type variable names
-testExpression :: String -> (S.Set InstantiatedTypePredicate, InstantiatedType) -> TestTree
-testExpression s (_, expectedType) = testCase s $ do
-    actualType <- unpackEither $ runExcept $ runTypeInferrer $ do
+testBindings :: String -> [(Id, QualifiedType)] -> TestTree
+testBindings s cases = testCase s $ do
+    let HsModule _ _ _ _ decls = parse s
+        bindings = [ (pat, rhs) | (HsPatBind _ pat rhs _) <- decls ]
+    state <- unpackEither $ runExcept $ execTypeInferrer $ do
+        addClasses builtinClasses
         forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
-        inferExpression (parseExpression s)
-    assertEqual s expectedType actualType
+        mapM_ (uncurry inferImplicitPatternBinding) bindings
+    let (types', _) = M.mapEither id (types state)
+        -- Remove ambiguity by specifying types explicitly
+        alphaEq' :: Maybe UninstantiatedQualifiedType -> Maybe UninstantiatedQualifiedType -> Bool
+        alphaEq' = alphaEq
+        check (name, t) = assertBool s $ alphaEq' (uninstantiate $ Just t) (uninstantiate $ M.lookup name types')
+    mapM_ check cases
 
 unpackEither :: Either String b -> IO b
 unpackEither = either error return
@@ -41,27 +48,29 @@ test = testGroup "Typechecking"
     [
         let s = "x = 5"
             t = TypeVar (TypeVariable "a" KindStar)
-            expected = (S.singleton (IsInstance "Num" t), t)
-        in testExpression s expected
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
     ,
         let s = "x = 'a'"
-            expected = (S.empty, typeChar)
-        in testExpression s expected
+        in testBindings s [("x", Qualified S.empty typeChar)]
     ,
         let s = "x = \"ab\""
-            expected = (S.empty, typeString)
-        in testExpression s expected
+        in testBindings s [("x", Qualified S.empty typeString)]
     ,
         let s = "x = True"
-            expected = (S.empty, typeBool)
-        in testExpression s expected
+        in testBindings s [("x", Qualified S.empty typeBool)]
     ,
         let s = "x = False"
-            expected = (S.empty, typeBool)
-        in testExpression s expected
+        in testBindings s [("x", Qualified S.empty typeBool)]
+    ,
+        let s = "(x, y) = (1, True)" 
+            t = TypeVar (TypeVariable "a" KindStar)
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t), ("y", Qualified S.empty typeBool)]
+    ,
+        let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
+            t = TypeVar (TypeVariable "a" KindStar)
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t), ("y", Qualified S.empty typeBool), ("z", Qualified S.empty typeBool), ("w", Qualified S.empty typeString)]
     ,
         let s = "x = (+) 3 4" 
             t = TypeVar (TypeVariable "a" KindStar)
-            expected = (S.singleton (IsInstance "Num" t), t)
-        in testExpression s expected
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
     ]

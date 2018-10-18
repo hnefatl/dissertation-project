@@ -18,5 +18,7 @@ builtinConstructors = M.fromList
 builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
     [
-        ("Eq", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Eq" typeInt)])
+        ("Eq", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Eq" typeInt)]),
+        ("Show", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Show" typeInt)]),
+        ("Num", Class (S.singleton "Eq") $ S.fromList [Qualified S.empty (IsInstance "Num" typeInt)])
     ]

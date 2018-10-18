@@ -49,6 +49,12 @@ instance Unifiable a => Unifiable (Qualified t a) where
     -- unify on `Ord [a]`. TODO(kc506): find reference in the haskell report
     mgu (Qualified _ x1) (Qualified _ x2) = mgu x1 x2
     match (Qualified _ x1) (Qualified _ x2) = match x1 x2
+instance Unifiable a => Unifiable (Maybe a) where
+    mgu (Just x) (Just y) = mgu x y
+    mgu _ _ = throwError "Mismatching Maybe types"
+
+    match (Just x) (Just y) = match x y
+    match _ _ = throwError "Mismatching Maybe types"
 
 
 -- |unifyVar v t returns a substitution [t/v] like subSingle but performs additional checks
