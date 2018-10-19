@@ -9,7 +9,6 @@ import Typechecker.Typeclasses
 import Typechecker.Simplifier
 import ExtraDefs
 
-import Debug.Trace
 
 import Data.Default
 import Text.Printf
@@ -166,9 +165,7 @@ inferExpression (HsApp f e) = do
     funType <- inferExpression f
     argType <- inferExpression e
     t <- freshVariable KindStar
-    doMatch (makeFun argType t) funType
-    s <- get
-    traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " state: " ++ show s)
+    doMatch (makeFun [argType] t) funType
     return t
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
@@ -176,7 +173,15 @@ inferExpression (HsInfixApp lhs op rhs) = do
             HsQConOp name -> name
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
     inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
-inferExpression (HsTuple exps) = makeTupleN <$> mapM inferExpression exps
+inferExpression (HsTuple exps) = makeTuple <$> mapM inferExpression exps
+inferExpression (HsLambda _ pats e) = do
+    argTypes <- inferPatterns pats
+    returnType <- inferExpression e
+    return (makeFun argTypes returnType)
+inferExpression (HsLet decls e) = do
+    mapM_ inferDecl decls
+    inferExpression e
+inferExpression (HsIf c e1 e2) = undefined
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 -- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
@@ -198,16 +203,17 @@ inferPattern (HsPApp constructor pats) = do
     argTypes <- inferPatterns pats
     -- Get the type of the constructor, instantiate it and add the constraints on the new type variables
     Qualified _ constructorType <- instantiateConstructor (toId constructor)
-    applicationType <- freshVariable KindStar
+    returnType <- freshVariable KindStar
     -- Check we have the right number of arguments to the data constructor
-    expArgCount <- getKindArgCount <$> getKind constructorType
-    let argCount = length argTypes
+    
+    let expArgCount = getKindArgCount $ getKind constructorType
+        argCount = length argTypes
     when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
     -- Unify the expected type with the variables we have to match up their types
-    let constructedFnType = foldr makeFun applicationType argTypes -- a -> (b -> (c -> applicationType)))
+    let constructedFnType = makeFun argTypes returnType
     unify constructorType constructedFnType
-    return applicationType
-inferPattern (HsPTuple pats) = makeTupleN <$> inferPatterns pats
+    return returnType
+inferPattern (HsPTuple pats) = makeTuple <$> inferPatterns pats
 -- TODO(kc506): Support more patterns
 inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 
@@ -220,13 +226,13 @@ inferAlternative pats e = do
     patternTypes <- inferPatterns pats
     expType <- inferExpression e
     -- The "type of the alternative" is the function type that it represents.
-    return $ foldr makeFun expType patternTypes
+    return $ makeFun patternTypes expType
 
 inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer InstantiatedType
 inferAlternatives alts = do
-    types <- mapM (uncurry inferAlternative) alts
+    ts <- mapM (uncurry inferAlternative) alts
     commonType <- freshVariable KindStar
-    mapM_ (unify commonType) types
+    mapM_ (unify commonType) ts
     return commonType
 
 -- |Infers the type of a pattern binding (eg. `foo = 5`) without an explicit type
@@ -244,3 +250,8 @@ inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
     --mapM_ (uncurry addVariableType)
     return ()
 inferImplicitPatternBinding _ (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
+
+inferDecl :: Syntax.HsDecl -> TypeInferrer ()
+inferDecl (HsPatBind _ pat rhs _) = inferImplicitPatternBinding pat rhs
+inferDecl (HsFunBind _) = throwError "Function declarations not supported"
+inferDecl _ = throwError "Declaration not supported"

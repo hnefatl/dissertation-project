@@ -21,8 +21,7 @@ class HasHnf t where
 
 instance HasHnf (Type a) where
     inHnf (TypeVar _) = True
-    inHnf (TypeConst _) = False
-    inHnf (TypeApp t _) = inHnf t
+    inHnf (TypeConstant _ _ ts) = inHnf ts
 
     toHnf _ _ = throwError "Can't convert a type to HNF"
 
@@ -40,6 +39,9 @@ instance HasHnf t => HasHnf (S.Set t) where
     inHnf = all inHnf
     toHnf ce s = S.unions <$> mapM (toHnf ce) (S.toList s)
 
+instance HasHnf t => HasHnf [t] where
+    inHnf = all inHnf
+    toHnf ce ts = S.unions <$> mapM (toHnf ce) ts
 
 -- |Removes redundant predicates from the given set. A predicate is redundant if it's entailed by any of the other
 -- predicates

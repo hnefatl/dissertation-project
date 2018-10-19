@@ -3,6 +3,8 @@
 
 module Typechecker.Unifier where
 
+import Text.Printf
+import Data.Foldable
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State.Strict
@@ -22,21 +24,17 @@ class Unifiable t where
 instance Unifiable InstantiatedType where
     mgu (TypeVar var) t2 = unifyVar var t2
     mgu t1 (TypeVar var) = unifyVar var t1
-    mgu (TypeApp l1 l2) (TypeApp r1 r2) = do
-        s1 <- mgu l1 r1
-        s2 <- mgu (applySub s1 l2) (applySub s1 r2)
-        return (subCompose s1 s2)
-    mgu (TypeConst tc1) (TypeConst tc2) 
-        | tc1 == tc2 = return subEmpty
-        | otherwise = throwError "Types don't unify: different constants"
-    mgu _ _ = throwError "Types don't unify"
+    mgu (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2) = do
+        when (name1 /= name2) (throwError $ printf "Names don't unify: %s %s" name1 name2)
+        when (ks1 /= ks2) (throwError $ printf "Kinds don't unify: %s %s" (show ks1) (show ks2))
+        mgu (reverse ts1) (reverse ts2)
 
     match (TypeVar var) t2 = unifyVar var t2
-    match (TypeApp t1 t2) (TypeApp s1 s2) = join $ subMerge <$> match t1 s1 <*> match t2 s2
-    match (TypeConst tc1) (TypeConst tc2) 
-        | tc1 == tc2 = return subEmpty
-        | otherwise = throwError "Types don't unify: different constants"
-    match _ _ = throwError "Types don't unify"
+    match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
+        | name1 /= name2 = throwError $ printf "Names don't match: %s %s" name1 name2
+        | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s %s" (show ks1) (show ks2)
+        | otherwise = match (reverse ts1) (reverse ts2)
+    match t1 t2 = throwError $ printf "Failed to match: %s %s" (show t1) (show t2)
 instance Unifiable t => Unifiable (TypePredicate t) where
     mgu (IsInstance name1 t1) (IsInstance name2 t2)
         | name1 == name2 = mgu t1 t2
@@ -49,6 +47,9 @@ instance Unifiable a => Unifiable (Qualified t a) where
     -- unify on `Ord [a]`. TODO(kc506): find reference in the haskell report
     mgu (Qualified _ x1) (Qualified _ x2) = mgu x1 x2
     match (Qualified _ x1) (Qualified _ x2) = match x1 x2
+instance Unifiable a => Unifiable [a] where
+    mgu xs ys = foldl' subCompose subEmpty <$> zipWithM mgu xs ys
+    match xs ys = foldlM subMerge subEmpty =<< zipWithM match xs ys
 instance Unifiable a => Unifiable (Maybe a) where
     mgu (Just x) (Just y) = mgu x y
     mgu _ _ = throwError "Mismatching Maybe types"
@@ -62,10 +63,8 @@ unifyVar :: MonadError String m => TypeVariable -> InstantiatedType -> m Substit
 unifyVar var t
     | TypeVar var == t = return subEmpty
     | var `elem` getTypeVars t = throwError "Fails occurs check" -- The type contains the variable
-    | otherwise = do
-        varKind <- getKind var
-        typeKind <- getKind t
-        if varKind /= typeKind then throwError "Kind mismatch" else return (subSingle var t)
+    | getKind var /= getKind t = throwError "Kind mismatch"
+    | otherwise = return (subSingle var t)
 
 
 

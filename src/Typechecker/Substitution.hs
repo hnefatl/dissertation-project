@@ -33,12 +33,10 @@ class Substitutable t where
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable InstantiatedType where
     applySub (Substitution subs) t@(TypeVar var) = M.findWithDefault t var subs
-    applySub subs (TypeApp t1 t2) = TypeApp (applySub subs t1) (applySub subs t2)
-    applySub _ t = t
+    applySub subs (TypeConstant name ks ts) = TypeConstant name ks (applySub subs ts)
     
     getTypeVars (TypeVar var) = [var]
-    getTypeVars (TypeApp t1 t2) = getTypeVars t1 `union` getTypeVars t2
-    getTypeVars _ = []
+    getTypeVars (TypeConstant _ _ ts) = getTypeVars ts
 instance Substitutable t => Substitutable (TypePredicate t) where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
     getTypeVars (IsInstance _ t) = getTypeVars t
@@ -47,7 +45,10 @@ instance (Ord t, Substitutable t, Substitutable a) => Substitutable (Qualified t
     getTypeVars (Qualified ps x) = getTypeVars ps `union` getTypeVars x
 instance (Ord t, Substitutable t) => Substitutable (S.Set t) where
     applySub subs = S.map (applySub subs)
-    getTypeVars = concatMap getTypeVars . S.toList
+    getTypeVars = getTypeVars . S.toList
+instance Substitutable t => Substitutable [t] where
+    applySub subs = map (applySub subs)
+    getTypeVars = concatMap getTypeVars
 instance (Substitutable a, Substitutable b) => Substitutable (a, b) where
     applySub sub (a, b) = (applySub sub a, applySub sub b)
     getTypeVars (a, b) = getTypeVars a `union` getTypeVars b

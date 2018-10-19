@@ -11,7 +11,7 @@ builtinConstructors = M.fromList
     [ ("True", Qualified S.empty typeBool),
       ("False", Qualified S.empty typeBool),
       let v = TypeVar (TypeDummy "a" KindStar)
-          t = makeFun v (makeFun v v)
+          t = makeFun [v, v] v
       in ("+", Qualified (S.singleton (IsInstance "Num" v)) t)
     ]
 
