@@ -168,6 +168,12 @@ inferExpression (HsApp f e) = do
     s <- get
     traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " state: " ++ show s)
     return t
+inferExpression (HsInfixApp lhs op rhs) = do
+    let opName = case op of
+            HsQVarOp name -> name
+            HsQConOp name -> name
+    -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
+    inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
 inferExpression (HsTuple exps) = makeTupleN <$> mapM inferExpression exps
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 

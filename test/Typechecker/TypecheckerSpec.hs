@@ -21,10 +21,6 @@ parse s = case parseModule s of
     ParseOk m -> m
     (ParseFailed loc msg) -> error (msg ++ ": " ++ show loc)
 
-parseExpression :: String -> HsExp
-parseExpression s = head $ map (\(HsPatBind _ _ (HsUnGuardedRhs e) _) -> e) decls
-    where (HsModule _ _ _ _ decls) = parse s
-
 testBindings :: String -> [(Id, QualifiedType)] -> TestTree
 testBindings s cases = testCase s $ do
     let HsModule _ _ _ _ decls = parse s
@@ -71,6 +67,14 @@ test = testGroup "Typechecking"
         in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t), ("y", Qualified S.empty typeBool), ("z", Qualified S.empty typeBool), ("w", Qualified S.empty typeString)]
     ,
         let s = "x = (+) 3 4" 
+            t = TypeVar (TypeVariable "a" KindStar)
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
+    ,
+        let s = "x = 1 + 2" 
+            t = TypeVar (TypeVariable "a" KindStar)
+        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
+    ,
+        let s = "x = 1 + 2 + 3" 
             t = TypeVar (TypeVariable "a" KindStar)
         in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
     ]
