@@ -127,11 +127,13 @@ getInstantiatedType name = do
 
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
-unify :: InstantiatedType -> InstantiatedType -> TypeInferrer ()
-unify t1 t2 = do
-    currentSub <- getSubstitution
-    newSub <- mgu (applySub currentSub t1) (applySub currentSub t2)
-    modify (\s -> s { subs = subCompose currentSub newSub })
+-- |Same as unify but only unifying variables in the first argument with those in the left
+unify, doMatch :: InstantiatedType -> InstantiatedType -> TypeInferrer ()
+(unify, doMatch) = (helper mgu, helper match)
+    where helper f t1 t2 = do
+            currentSub <- getSubstitution
+            newSub <- f (applySub currentSub t1) (applySub currentSub t2)
+            modify (\s -> s { subs = subCompose currentSub newSub })
 
 
 inferLiteral :: Syntax.HsLiteral -> TypeInferrer InstantiatedType
@@ -164,7 +166,7 @@ inferExpression (HsApp f e) = do
     funType <- inferExpression f
     argType <- inferExpression e
     t <- freshVariable KindStar
-    unify funType (makeFun argType t)
+    doMatch (makeFun argType t) funType
     s <- get
     traceM ("\nfun: " ++ show funType ++ " arg: " ++ show argType ++ " t: " ++ show t ++ " state: " ++ show s)
     return t
