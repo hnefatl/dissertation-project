@@ -15,6 +15,8 @@ Quick notes on milestones/features/problems/bugs during implementation.
   variables enforced at the type level whooo.
 - Type classes have heavy impact on the code gen stage, not just type level stuff. Need to instantiate eg. the `+`
   operator to use addition on the type used at the call site.
-- When inferring the type of a function application, need to use `match` instead of `mgu`. Otherwise can end up unifying
+- ~~When inferring the type of a function application, need to use `match` instead of `mgu`. Otherwise can end up unifying
   the type variables from the function, rather than from the expression, which allows for expressions like `(+) 1 2 3`
-  to type check (see [`sketches/match_not_mgu.jpg`](sketches/match_not_mgu.jpg)).
+  to type check (see [`sketches/match_not_mgu.jpg`](sketches/match_not_mgu.jpg))~~. Actually do use `mgu` - check the
+  type of `(+) 1 2` vs `(+) 1 2 3` in GHCi, looks like Haskell infers that there must be a `Num` instance that's a
+  function, in order for `3` to be the argument to the `Num` instance.
