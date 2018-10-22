@@ -1,5 +1,4 @@
 {-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
-{-# Options_GHC -fno-warn-orphans #-}
 
 module Typechecker.Substitution where
 
