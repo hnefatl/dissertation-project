@@ -9,7 +9,6 @@ import Typechecker.Typeclasses
 import Typechecker.Simplifier
 import ExtraDefs
 
-
 import Data.Default
 import Text.Printf
 import Control.Monad.Except
@@ -43,17 +42,24 @@ instance Default InferrerState where
 
 -- |A TypeInferrer handles mutable state, some scoped read-only assumptions about the types of variables, and error
 -- reporting
-newtype TypeInferrer a = TypeInferrer (StateT InferrerState (Except String) a)
+newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 
-runTypeInferrer :: TypeInferrer a -> Except String (a, InferrerState)
-runTypeInferrer (TypeInferrer inner) = runStateT inner def
+-- |Run type inference, and return the (possible failed) result along with the last state
+runTypeInferrer :: MonadError String m => TypeInferrer a -> (m a, InferrerState)
+runTypeInferrer (TypeInferrer inner) = (liftEither x, s)
+    where (x, s) = runState (runExceptT inner) def
 
-evalTypeInferrer :: TypeInferrer a -> Except String a
-evalTypeInferrer (TypeInferrer inner) = evalStateT inner def
+-- |Run type inference, and return the (possibly failed) result
+evalTypeInferrer :: MonadError String m => TypeInferrer a -> m a
+evalTypeInferrer = fst . runTypeInferrer
 
-execTypeInferrer :: TypeInferrer a -> Except String InferrerState
-execTypeInferrer (TypeInferrer inner) = execStateT inner def
+-- |Run type inference, and return the (possibly failed) state
+execTypeInferrer :: MonadError String m => TypeInferrer a -> m InferrerState
+execTypeInferrer (TypeInferrer inner) = case e of
+    Left err -> throwError err
+    Right _ -> return s
+    where (e, s) = runState (runExceptT inner) def
 
 instance TypeInstantiator TypeInferrer where
     freshName = do
@@ -129,9 +135,9 @@ qualifyType ps t = do
 
 mergeContexts :: [S.Set InstantiatedTypePredicate] -> TypeInferrer (S.Set InstantiatedTypePredicate)
 mergeContexts preds = do
-    subs <- getSubstitution
+    sub <- getSubstitution
     classEnv <- getClassEnvironment
-    simplify classEnv $ S.unions $ map (applySub subs) preds
+    simplify classEnv $ S.unions $ map (applySub sub) preds
         
 unzipQualifieds :: [QualifiedType] -> ([S.Set InstantiatedTypePredicate], [InstantiatedType])
 unzipQualifieds = unzip . map (\(Qualified qs ts) -> (qs, ts))
@@ -170,7 +176,7 @@ inferExpression (HsApp f e) = do
     Qualified funquals funtype <- inferExpression f
     Qualified argquals argtype <- inferExpression e
     t <- freshVariable KindStar
-    doMatch (makeFun [argtype] t) funtype
+    unify (makeFun [argtype] t) funtype
     Qualified <$> mergeContexts [funquals, argquals] <*> pure t
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
@@ -191,8 +197,7 @@ inferExpression (HsLet decls e) = do
 inferExpression (HsIf c e1 e2) = undefined
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
--- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
--- mapping variable names in the pattern to their inferred types, and an inferred type for the whole expression
+
 inferPattern :: Syntax.HsPat -> TypeInferrer QualifiedType
 inferPattern (HsPVar name) = do
     t <- Qualified S.empty <$> freshVariable KindStar

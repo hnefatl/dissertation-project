@@ -130,9 +130,9 @@ instance Show a => Show (Type a) where
     show (TypeConstant "->" _ ts) = case ts of
             [] -> "(->)"
             [t] -> printf "(%s ->)" (assocShow t)
-            [arg, ret] -> printf "%s -> %s" (assocShow arg) (show ret)
+            [arg, ret] -> printf "%s -> %s" (show arg) (assocShow ret)
             _ -> error "Compiler Error: Invalid type"
-        where assocShow (TypeConstant "->" _ ts') = if length ts' >= 2 then printf "(%s)" (show ts') else show ts'
+        where assocShow t@(TypeConstant "->" _ ts') = if length ts' >= 2 then printf "(%s)" (show t) else show t
               assocShow t = show t
 
     -- General show case

@@ -1,3 +1,5 @@
+{-# Language FlexibleContexts #-}
+
 module Typechecker.TypecheckerSpec where
 
 import Test.Tasty
@@ -14,6 +16,9 @@ import Typechecker.Hardcoded
 import Data.List
 import Data.Foldable
 import Data.Either
+import Data.Text.Lazy (unpack)
+import Text.Pretty.Simple
+import Control.Monad.State.Strict (get)
 import Control.Monad.Except
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -27,14 +32,19 @@ deline :: String -> String
 deline = intercalate " \\ne " . lines
 
 inferModule :: String -> Either String InferrerState
-inferModule s = runExcept $ execTypeInferrer $ do
-    -- Add builtins
-    addClasses builtinClasses
-    forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
-    forM_ (M.toList builtinFunctions) (uncurry addFunctionType)
-    -- Parse and run type inference
-    let HsModule _ _ _ _ decls = parse s
-    mapM_ inferDecl decls
+inferModule s = runExcept $ execTypeInferrer $ catchError infer handler
+    where
+        handler err = do
+            state <- get
+            throwError $ unlines [err, unpack $ pShow state]
+        infer = do
+            -- Add builtins
+            addClasses builtinClasses
+            forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
+            forM_ (M.toList builtinFunctions) (uncurry addFunctionType)
+            -- Parse and run type inference
+            let HsModule _ _ _ _ decls = parse s
+            mapM_ inferDecl decls
         
 
 testBindings :: String -> [(Id, QualifiedType)] -> TestTree
@@ -48,7 +58,7 @@ testBindings s cases = testCase (deline s) $ do
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
-testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool (s' ++ ": " ++ show state) (isLeft state)
+testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool (s' ++ ": " ++ unpack (pShow state)) (isLeft state)
     where s' = deline s
           state = inferModule s
 
@@ -100,8 +110,6 @@ test = testGroup "Typechecking"
         in testBindings s [("x", Qualified q t), ("y", Qualified q (makeTuple [t, typeBool]))]
     ,
         testBindingsFail "(x, y) = True" 
-    ,
-        testBindingsFail "x = (+) 1 2 3"
     ,
       let s = "x = 1 + 2\ny = x + 3"
           t = TypeVar (TypeVariable "a" KindStar)

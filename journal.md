@@ -2,6 +2,10 @@
 
 Quick notes on milestones/features/problems/bugs during implementation.
 
+## TODO
+
+- Rewrite to use `Text` instead of `String`.
+
 ## Type Checking
 
 - thih.pdf is generally okay but is noticeably aged. Spent quite a bit of time polishing things up from it (moving from
