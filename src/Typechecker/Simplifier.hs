@@ -6,6 +6,7 @@ import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Typeclasses
 
+import Debug.Trace
 import Data.Foldable
 import Control.Monad.Except
 import qualified Data.Set as S
@@ -56,7 +57,6 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 -- redundant predicates.
 simplify :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 simplify ce s = toHnf ce s >>= removeRedundant ce 
-
 
 -- |Splits a set of predicates into those that belong in the constraints for a type, and those which belong in some
 -- enclosing type.

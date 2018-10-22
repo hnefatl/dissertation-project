@@ -40,8 +40,7 @@ instance Default InferrerState where
             , typePredicates = S.empty
             , variableCounter = 1 }
 
--- |A TypeInferrer handles mutable state, some scoped read-only assumptions about the types of variables, and error
--- reporting
+-- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 
