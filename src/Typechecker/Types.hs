@@ -44,10 +44,10 @@ applyType (TypeConstant name (k:ks) ts) t
     | k == getKind t = return $ TypeConstant name ks (t:ts)
     | otherwise = throwError $ printf "Got type of kind %s, expected kind %s" (show $ getKind t) (show k)
 applyType (TypeConstant _ [] _) _ = throwError "Application of type of kind *"
--- TODO(kc506): This is valid (although maybe with compiler extensions): `Monad m => a -> m a`
+-- TODO(kc506): This is valid (although maybe only with compiler extensions): `Monad m => a -> m a`
 applyType t1 t2 = throwError $ printf "Can't apply type to a type variable - possible missing compiler feature: %s %s" (show t1) (show t2)
 
--- | "Unsafe" version of `applyType` which uses `error` instead of `throwError`: useful for compiler tests etc where
+-- |"Unsafe" version of `applyType` which uses `error` instead of `throwError`: useful for compiler tests etc where
 -- it's convenient to avoid boilerplate and we shouldn't have invalid types being used
 applyTypeUnsafe :: (Show t, HasKind t) => Type t -> Type t -> Type t
 applyTypeUnsafe t1 t2 = case runExcept $ applyType t1 t2 of
@@ -82,10 +82,6 @@ type UninstantiatedQualifiedType = Qualified UninstantiatedType UninstantiatedTy
 -- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
 type UninstantiatedClassInstance = Qualified UninstantiatedType UninstantiatedTypePredicate
 type ClassInstance = Qualified InstantiatedType InstantiatedTypePredicate
-
--- | Construct a qualified type (without any qualifiers) from a normal type. Useful shorthand sometimes.
-qualifyType :: Type a -> Qualified (Type a) (Type a)
-qualifyType = Qualified S.empty
 
 instance Show TypeVariable where show (TypeVariable name _) = name
 instance Show TypeDummy where show (TypeDummy name _) = name
@@ -162,6 +158,8 @@ class Monad m => TypeInstantiator m where
                 state $ \s -> (globalName, M.insert localName globalName s)
             Just globalName -> return globalName
             
+    -- |Instantiate an instantiable, ensuring that variables of the same local name within the structure get mapped to
+    -- the *same globally unique name*.
     doInstantiate :: Instantiable a b => a -> m b
     doInstantiate x = evalStateT (instantiate freshNameMap x) M.empty
 

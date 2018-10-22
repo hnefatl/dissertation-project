@@ -28,11 +28,14 @@ deline = intercalate " \\ne " . lines
 
 inferModule :: String -> Either String InferrerState
 inferModule s = runExcept $ execTypeInferrer $ do
+    -- Add builtins
     addClasses builtinClasses
     forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
-    mapM_ (uncurry inferImplicitPatternBinding) bindings
-    where HsModule _ _ _ _ decls = parse s
-          bindings = [ (pat, rhs) | (HsPatBind _ pat rhs _) <- decls ]
+    forM_ (M.toList builtinFunctions) (uncurry addFunctionType)
+    -- Parse and run type inference
+    let HsModule _ _ _ _ decls = parse s
+    mapM_ inferDecl decls
+        
 
 testBindings :: String -> [(Id, QualifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
@@ -91,13 +94,32 @@ test = testGroup "Typechecking"
             t = TypeVar (TypeVariable "a" KindStar)
         in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
     ,
+        let s = "(x, y) = (1, (True))"
+            t = TypeVar (TypeVariable "a" KindStar)
+            q = (S.singleton $ IsInstance "Num" t)
+        in testBindings s [("x", Qualified q t), ("y", Qualified q (makeTuple [t, typeBool]))]
+    ,
         testBindingsFail "(x, y) = True" 
     ,
-        testBindingsFail "(x, y) = (1, (True))"
-    ,
         testBindingsFail "x = (+) 1 2 3"
-    , let s = "x = 1 + 2\ny = x + 3"
+    ,
+      let s = "x = 1 + 2\ny = x + 3"
           t = TypeVar (TypeVariable "a" KindStar)
           q = Qualified (S.singleton $ IsInstance "Num" t) t
       in testBindings s [("x", q), ("y", q)]
+    ,
+      let s = "x = (\\y -> 1 + y)"
+          t = TypeVar (TypeVariable "a" KindStar)
+          q = S.singleton $ IsInstance "Num" t
+      in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
+    ,
+      let s = "x = (\\y -> False && y)"
+      in testBindings s [("y", Qualified S.empty typeBool), ("x", Qualified S.empty (makeFun [typeBool] typeBool))]
+    ,
+      let s = "x = (\\f -> f True)"
+          t = TypeVar (TypeVariable "a" KindStar)
+      in testBindings s [("x", Qualified S.empty (makeFun [makeFun [typeBool] t] t))]
+    ,
+      let s = "x = (\\f -> f True) (\\y -> not (not y))"
+      in testBindings s [("x", Qualified S.empty typeBool)]
     ]

@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase #-}
 
 module Typechecker.Typechecker where
 
@@ -115,14 +115,26 @@ getVariableType name = do
 
 -- Return either a variable, function, or constructor. Instantiate and store qualifiers if necessary
 getInstantiatedType :: Id -> TypeInferrer QualifiedType
-getInstantiatedType name = do
-    et <- getType name
-    case et of
-        Left t -> return t
-        Right uninst -> do
-            t@(Qualified quals _) <- doInstantiate uninst
-            addTypePredicates quals
-            return t
+getInstantiatedType name = getType name >>= \case
+    Left t -> return t
+    Right uninst -> do
+        t@(Qualified quals _) <- doInstantiate uninst
+        addTypePredicates quals
+        return t
+
+qualifyType :: S.Set InstantiatedTypePredicate -> InstantiatedType -> TypeInferrer QualifiedType
+qualifyType ps t = do
+    addTypePredicates ps
+    return (Qualified ps t)
+
+mergeContexts :: [S.Set InstantiatedTypePredicate] -> TypeInferrer (S.Set InstantiatedTypePredicate)
+mergeContexts preds = do
+    subs <- getSubstitution
+    classEnv <- getClassEnvironment
+    simplify classEnv $ S.unions $ map (applySub subs) preds
+        
+unzipQualifieds :: [QualifiedType] -> ([S.Set InstantiatedTypePredicate], [InstantiatedType])
+unzipQualifieds = unzip . map (\(Qualified qs ts) -> (qs, ts))
 
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
@@ -135,49 +147,44 @@ unify, doMatch :: InstantiatedType -> InstantiatedType -> TypeInferrer ()
             modify (\s -> s { subs = subCompose currentSub newSub })
 
 
-inferLiteral :: Syntax.HsLiteral -> TypeInferrer InstantiatedType
-inferLiteral (HsChar _) = return typeChar
-inferLiteral (HsString _) = return typeString
+inferLiteral :: Syntax.HsLiteral -> TypeInferrer QualifiedType
+inferLiteral (HsChar _) = return (Qualified S.empty typeChar)
+inferLiteral (HsString _) = return (Qualified S.empty typeString)
 inferLiteral (HsInt _) = do
     v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Num" v)
-    return v
+    qualifyType (S.singleton $ IsInstance "Num" v) v
 inferLiteral (HsFrac _) = do
     v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Fractional" v)
-    return v
+    qualifyType (S.singleton $ IsInstance "Fractional" v) v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
 -- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
 -- into lets? Pg. 26 of thih.pdf
-inferExpression :: Syntax.HsExp -> TypeInferrer InstantiatedType
-inferExpression (HsVar name) = do
-    -- Get either a function or a variable, instantiating it if necessary
-    Qualified _ t <- getInstantiatedType (toId name)
-    return t
-inferExpression (HsCon name) = do
-    -- Instantiate the corresponding constructor
-    Qualified _ t <- instantiateConstructor (toId name)
-    return t
+inferExpression :: Syntax.HsExp -> TypeInferrer QualifiedType
+inferExpression (HsVar name) = getInstantiatedType (toId name)
+inferExpression (HsCon name) = instantiateConstructor (toId name)
 inferExpression (HsLit literal) = inferLiteral literal
+inferExpression (HsParen e) = inferExpression e
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, then use unification to deduce the return type
-    funType <- inferExpression f
-    argType <- inferExpression e
+    Qualified funquals funtype <- inferExpression f
+    Qualified argquals argtype <- inferExpression e
     t <- freshVariable KindStar
-    doMatch (makeFun [argType] t) funType
-    return t
+    doMatch (makeFun [argtype] t) funtype
+    Qualified <$> mergeContexts [funquals, argquals] <*> pure t
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
             HsQVarOp name -> name
             HsQConOp name -> name
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
     inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
-inferExpression (HsTuple exps) = makeTuple <$> mapM inferExpression exps
+inferExpression (HsTuple exps) = do
+    (ps, ts) <- unzipQualifieds <$> mapM inferExpression exps
+    Qualified <$> mergeContexts ps <*> pure (makeTuple ts)
 inferExpression (HsLambda _ pats e) = do
-    argTypes <- inferPatterns pats
-    returnType <- inferExpression e
-    return (makeFun argTypes returnType)
+    (argQuals, argTypes) <- unzipQualifieds <$> inferPatterns pats
+    Qualified bodyQuals bodyType <- inferExpression e
+    Qualified <$> mergeContexts (bodyQuals:argQuals) <*> pure (makeFun argTypes bodyType)
 inferExpression (HsLet decls e) = do
     mapM_ inferDecl decls
     inferExpression e
@@ -186,66 +193,68 @@ inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 -- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
 -- mapping variable names in the pattern to their inferred types, and an inferred type for the whole expression
-inferPattern :: Syntax.HsPat -> TypeInferrer InstantiatedType
+inferPattern :: Syntax.HsPat -> TypeInferrer QualifiedType
 inferPattern (HsPVar name) = do
-    t <- freshVariable KindStar
-    addVariableType (toId name) (qualifyType t)
+    t <- Qualified S.empty <$> freshVariable KindStar
+    addVariableType (toId name) t
     return t
 inferPattern (HsPLit lit) = inferLiteral lit
-inferPattern HsPWildCard = freshVariable KindStar
+inferPattern HsPWildCard = Qualified S.empty <$> freshVariable KindStar
 inferPattern (HsPAsPat name pat) = do
     t <- inferPattern pat
-    addVariableType (toId name) (qualifyType t)
+    addVariableType (toId name) t
     return t
 inferPattern (HsPParen pat) = inferPattern pat
 inferPattern (HsPApp constructor pats) = do
     -- Infer any nested patterns
-    argTypes <- inferPatterns pats
+    (argQuals, argTypes) <- unzipQualifieds <$> inferPatterns pats
     -- Get the type of the constructor, instantiate it and add the constraints on the new type variables
-    Qualified _ constructorType <- instantiateConstructor (toId constructor)
-    returnType <- freshVariable KindStar
+    Qualified conQuals constructorType <- instantiateConstructor (toId constructor)
     -- Check we have the right number of arguments to the data constructor
-    
     let expArgCount = getKindArgCount $ getKind constructorType
         argCount = length argTypes
     when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
     -- Unify the expected type with the variables we have to match up their types
+    returnType <- freshVariable KindStar
     let constructedFnType = makeFun argTypes returnType
     unify constructorType constructedFnType
-    return returnType
-inferPattern (HsPTuple pats) = makeTuple <$> inferPatterns pats
+    Qualified <$> mergeContexts (conQuals:argQuals) <*> pure returnType
+inferPattern (HsPTuple pats) = do
+    (qs, ts) <- unzipQualifieds <$> inferPatterns pats
+    Qualified <$> mergeContexts qs <*> pure (makeTuple ts)
 -- TODO(kc506): Support more patterns
 inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 
-inferPatterns :: [Syntax.HsPat] -> TypeInferrer [InstantiatedType]
+inferPatterns :: [Syntax.HsPat] -> TypeInferrer [QualifiedType]
 inferPatterns = mapM inferPattern
 
 
-inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer InstantiatedType
+-- TODO(kc506): Change the return type to just yield all the constituent qualified types.
+-- Might make more useful if this is going to be used for function alternatives as well as case statements, etc.
+inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer QualifiedType
 inferAlternative pats e = do
-    patternTypes <- inferPatterns pats
-    expType <- inferExpression e
+    (patQuals, patTypes) <- unzipQualifieds <$> inferPatterns pats
+    Qualified rhsQuals rhsType <- inferExpression e
     -- The "type of the alternative" is the function type that it represents.
-    return $ makeFun patternTypes expType
+    Qualified <$> mergeContexts (rhsQuals:patQuals) <*> pure (makeFun patTypes rhsType)
 
-inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer InstantiatedType
+inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer QualifiedType
 inferAlternatives alts = do
-    ts <- mapM (uncurry inferAlternative) alts
+    (qs, ts) <- unzipQualifieds <$> mapM (uncurry inferAlternative) alts
     commonType <- freshVariable KindStar
     mapM_ (unify commonType) ts
-    return commonType
+    Qualified <$> mergeContexts qs <*> pure commonType
 
 -- |Infers the type of a pattern binding (eg. `foo = 5`) without an explicit type
 inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> TypeInferrer ()
 inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
-    sub <- getSubstitution
-    patType <- applySub sub <$> inferPattern pat
-    rhsType <- applySub sub <$> inferExpression e
-    unify patType rhsType
-    classEnv <- getClassEnvironment
-    preds <- applySub sub <$> getPredicates
-    let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
-    (qualifiers, _) <- split classEnv rhsTypeVariables preds
+    Qualified patquals pattype <- inferPattern pat
+    Qualified rhsquals rhstype <- inferExpression e
+    unify pattype rhstype
+    --classEnv <- getClassEnvironment
+    --preds <- applySub sub <$> getPredicates
+    --let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
+    --(qualifiers, _) <- split classEnv rhsTypeVariables preds
     -- TODO(kc506): Set the set of assumptions in the state to be exactly the deferred assumptions?
     --mapM_ (uncurry addVariableType)
     return ()

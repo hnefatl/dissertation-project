@@ -25,23 +25,23 @@ instance Unifiable InstantiatedType where
     mgu (TypeVar var) t2 = unifyVar var t2
     mgu t1 (TypeVar var) = unifyVar var t1
     mgu (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2) = do
-        when (name1 /= name2) (throwError $ printf "Names don't unify: %s %s" name1 name2)
-        when (ks1 /= ks2) (throwError $ printf "Kinds don't unify: %s %s" (show ks1) (show ks2))
+        when (name1 /= name2) (throwError $ printf "Names don't unify: %s vs %s" name1 name2)
+        when (ks1 /= ks2) (throwError $ printf "Kinds don't unify: %s vs %s" (show ks1) (show ks2))
         mgu (reverse ts1) (reverse ts2)
 
     match (TypeVar var) t2 = unifyVar var t2
     match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
-        | name1 /= name2 = throwError $ printf "Names don't match: %s %s" name1 name2
-        | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s %s" (show ks1) (show ks2)
+        | name1 /= name2 = throwError $ printf "Names don't match: %s vs %s" name1 name2
+        | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s vs %s" (show ks1) (show ks2)
         | otherwise = match (reverse ts1) (reverse ts2)
-    match t1 t2 = throwError $ printf "Failed to match: %s %s" (show t1) (show t2)
+    match t1 t2 = throwError $ printf "Failed to match: %s vs %s" (show t1) (show t2)
 instance Unifiable t => Unifiable (TypePredicate t) where
     mgu (IsInstance name1 t1) (IsInstance name2 t2)
         | name1 == name2 = mgu t1 t2
-        | otherwise = throwError "Class names are different"
+        | otherwise = throwError $ printf "Class names are different: %s vs %s" name1 name2
     match (IsInstance name1 t1) (IsInstance name2 t2)
         | name1 == name2 = match t1 t2
-        | otherwise = throwError "Class names are different"
+        | otherwise = throwError $ printf "Class names are different: %s vs %s" name1 name2
 instance Unifiable a => Unifiable (Qualified t a) where
     -- |For Qualified things, we only unify on the head (the non-qualification bit), eg. in `Ord a => Ord [a]` we only
     -- unify on `Ord [a]`. TODO(kc506): find reference in the haskell report
