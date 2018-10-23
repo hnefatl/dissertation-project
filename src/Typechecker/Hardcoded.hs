@@ -30,6 +30,12 @@ builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
     [
         ("Eq", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Eq" typeInt)]),
-        ("Show", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Show" typeInt)]),
-        ("Num", Class (S.singleton "Eq") $ S.fromList [Qualified S.empty (IsInstance "Num" typeInt)])
+        ("Num", Class (S.singleton "Eq") $ S.fromList [Qualified S.empty (IsInstance "Num" typeInt)]),
+        ("Show", Class S.empty $ S.fromList 
+            [
+                Qualified S.empty (IsInstance "Show" typeInt)
+            ,
+                let t = TypeVar (TypeDummy "a" KindStar) in 
+                Qualified (S.singleton $ IsInstance "Show" t) (IsInstance "Show" $ makeList t)
+            ])
     ]

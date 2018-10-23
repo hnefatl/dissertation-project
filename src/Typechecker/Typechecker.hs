@@ -137,7 +137,7 @@ mergeContexts preds = do
     sub <- getSubstitution
     classEnv <- getClassEnvironment
     simplify classEnv $ S.unions $ map (applySub sub) preds
-        
+
 unzipQualifieds :: [QualifiedType] -> ([S.Set InstantiatedTypePredicate], [InstantiatedType])
 unzipQualifieds = unzip . map (\(Qualified qs ts) -> (qs, ts))
 
@@ -226,7 +226,6 @@ inferPattern (HsPApp constructor pats) = do
 inferPattern (HsPTuple pats) = do
     (qs, ts) <- unzipQualifieds <$> inferPatterns pats
     Qualified <$> mergeContexts qs <*> pure (makeTuple ts)
--- TODO(kc506): Support more patterns
 inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 
 inferPatterns :: [Syntax.HsPat] -> TypeInferrer [QualifiedType]
@@ -255,6 +254,8 @@ inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
     Qualified patquals pattype <- inferPattern pat
     Qualified rhsquals rhstype <- inferExpression e
     unify pattype rhstype
+    -- TODO(kc506): Check (alpha, don't unify) that qualifiers match?
+
     --classEnv <- getClassEnvironment
     --preds <- applySub sub <$> getPredicates
     --let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
