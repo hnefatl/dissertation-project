@@ -165,8 +165,9 @@ inferExpression (HsApp f e) = do
     funType <- inferExpression f
     argType <- inferExpression e
     t <- freshVariable KindStar
-    doMatch (makeFun [argType] t) funType
+    unify (makeFun [argType] t) funType
     return t
+inferExpression (HsParen e) = inferExpression e
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
             HsQVarOp name -> name
