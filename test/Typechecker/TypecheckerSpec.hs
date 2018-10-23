@@ -1,3 +1,5 @@
+{-# Language FlexibleContexts #-}
+
 module Typechecker.TypecheckerSpec where
 
 import Test.Tasty
@@ -18,10 +20,10 @@ import Control.Monad.Except
 import qualified Data.Set as S
 import qualified Data.Map as M
 
-parse :: String -> HsModule
+parse :: MonadError String m => String -> m HsModule
 parse s = case parseModule s of
-    ParseOk m -> m
-    (ParseFailed loc msg) -> error (msg ++ ": " ++ show loc)
+    ParseOk m -> return m
+    (ParseFailed loc msg) -> throwError (msg ++ ": " ++ show loc)
 
 deline :: String -> String
 deline = intercalate " \\ne " . lines
@@ -30,9 +32,9 @@ inferModule :: String -> Either String InferrerState
 inferModule s = runExcept $ execTypeInferrer $ do
     addClasses builtinClasses
     forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
-    mapM_ (uncurry inferImplicitPatternBinding) bindings
-    where HsModule _ _ _ _ decls = parse s
-          bindings = [ (pat, rhs) | (HsPatBind _ pat rhs _) <- decls ]
+    forM_ (M.toList builtinFunctions) (uncurry addFunctionType)
+    HsModule _ _ _ _ decls <- parse s
+    mapM_ inferDecl decls
 
 testBindings :: String -> [(Id, QualifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
