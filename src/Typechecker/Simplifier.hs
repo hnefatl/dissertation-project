@@ -6,7 +6,6 @@ import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Typeclasses
 
-import Debug.Trace
 import Data.Foldable
 import Control.Monad.Except
 import qualified Data.Set as S

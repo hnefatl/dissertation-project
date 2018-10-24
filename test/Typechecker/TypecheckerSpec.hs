@@ -18,6 +18,7 @@ import Data.Foldable
 import Data.Either
 import Data.Text.Lazy (unpack)
 import Text.Pretty.Simple
+import Debug.Trace
 import Control.Monad.State.Strict (get)
 import Control.Monad.Except
 import qualified Data.Set as S
@@ -31,9 +32,10 @@ parse s = case parseModule s of
 deline :: String -> String
 deline = intercalate " \\n " . lines
 
-inferModule :: String -> Either String InferrerState
-inferModule s = runExcept $ execTypeInferrer $ catchError infer handler
+inferModule :: String -> (Either String (M.Map Id QualifiedType), InferrerState)
+inferModule s = (runExcept out, state)
     where
+        (out, state) = runTypeInferrer $ catchError infer handler
         handler err = do
             state <- get
             throwError $ unlines [err, unpack $ pShow state]
@@ -45,22 +47,24 @@ inferModule s = runExcept $ execTypeInferrer $ catchError infer handler
             -- Parse and run type inference
             HsModule _ _ _ _ decls <- parse s
             mapM_ inferDecl decls
-        
+            getVariableTypes
+
 
 testBindings :: String -> [(Id, QualifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
-    state <- unpackEither $ inferModule s
-    let (ts, _) = M.mapEither id (types state)
-        -- Remove ambiguity by specifying types explicitly
+    let (etypes, _) = inferModule s
+    ts <- unpackEither etypes
+    traceM (unpack $ pShow ts)
+    let -- Remove ambiguity by specifying types explicitly
         alphaEq' :: Maybe UninstantiatedQualifiedType -> Maybe UninstantiatedQualifiedType -> Bool
         alphaEq' = alphaEq
-        check (name,t) = assertBool (deline s) $ alphaEq' (uninstantiate $ Just t) (uninstantiate $ M.lookup name ts)
+        check (name, t) = assertBool (deline s) $ alphaEq' (uninstantiate $ Just t) (uninstantiate $ M.lookup name ts)
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
-testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool (s' ++ ": " ++ unpack (pShow state)) (isLeft state)
+testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool (s' ++ ": " ++ unpack (pShow types)) (isLeft types)
     where s' = deline s
-          state = inferModule s
+          (types, _) = inferModule s
 
 unpackEither :: Either String b -> IO b
 unpackEither = either assertFailure return
@@ -143,15 +147,16 @@ test = testGroup "Typechecking"
     --        q = Qualified (S.singleton $ IsInstance "Num" t) t
     --    in testBindings s [("x", q), ("y", q)]
     --,
-        -- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
-    --     getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
-    --     explicit operation?
-        testBindingsFail "x = 1 && True"
+      -- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
+      -- getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
+      -- explicit operation?
+    --    testBindingsFail "x = 1 && True"
     --,
     --    -- Lambdas
-    --    let s = "x = (\\y -> 1 + y)"
+    --    let s = "x = \\y -> 1 + y"
     --        t = TypeVar (TypeVariable "a" KindStar)
     --        q = S.singleton $ IsInstance "Num" t
+    --    --in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
     --    in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
     --,
     --    let s = "x = (\\y -> False && y)"
@@ -169,8 +174,8 @@ test = testGroup "Typechecking"
     --        b = TypeVar (TypeVariable "b" KindStar)
     --    in testBindings s [("y", Qualified (S.singleton $ IsInstance "Num" b) b), ("f", Qualified (S.singleton $ IsInstance "Num" a) a)]
     --,
-    --    let s = "y = let f = \\x -> x\n" ++
-    --            "        g = \\x y -> y\n" ++
-    --            "    in g (f 5) (f True)"
-    --    in testBindings s [("y", Qualified S.empty typeBool)]
+        let s = "y = let f = \\x -> x\n" ++
+                "        g = \\x y -> y\n" ++
+                "    in g (f 5) (f True)"
+        in testBindings s [("y", Qualified S.empty typeBool)]
     ]

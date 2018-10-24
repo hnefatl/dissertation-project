@@ -4,10 +4,18 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## TODO
 
+- Make sure functions defined in `let` statements are deinstantiated to make them polymorphic - same applies for
+  lambdas??????
+- Optimise finding the predicates for each type: `Map Id [ClassName]`?
+- Replace typechecking's `Either UninstantiatedQualifiedType QualifiedType` with a specific data structure.
 - Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
 - Rewrite to use `Text` instead of `String`.
 
 ## Type Checking
+
+Proposed change: Split type checking into two parts: generate constraints, solve constraints. Generating is building up
+type predicates and building up the substitution that solves "equality" constraints (`a ~ b`), solving takes place after
+all that work and solves the `Num a` constraints.
 
 - thih.pdf is generally okay but is noticeably aged. Spent quite a bit of time polishing things up from it (moving from
   lists to sets etc).
@@ -23,3 +31,4 @@ Quick notes on milestones/features/problems/bugs during implementation.
   type of `(+) 1 2` vs `(+) 1 2 3` in GHCi, looks like Haskell infers that there must be a `Num` instance that's a
   function, in order for `3` to be the argument to the `Num` instance.
 - No defaulting atm - unnecessary complexity, weird language feature.
+- More scalable/local/modular approach? `OutsideIn(X)` claims to be a solution.
