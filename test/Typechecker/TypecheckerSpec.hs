@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts #-}
+{-# Language FlexibleContexts, LambdaCase #-}
 
 module Typechecker.TypecheckerSpec where
 
@@ -10,6 +10,7 @@ import Language.Haskell.Parser
 
 import Typechecker.Types
 import Typechecker.Unifier
+import Typechecker.Substitution
 import Typechecker.Typechecker
 import Typechecker.Hardcoded
 
@@ -40,10 +41,15 @@ testBindings :: String -> [(Id, QualifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
     state <- unpackEither $ inferModule s
     let (ts, _) = M.mapEither id (types state)
-        -- Remove ambiguity by specifying types explicitly
-        alphaEq' :: Maybe UninstantiatedQualifiedType -> Maybe UninstantiatedQualifiedType -> Bool
-        alphaEq' = alphaEq
-        check (name,t) = assertBool (deline s) $ alphaEq' (uninstantiate $ Just t) (uninstantiate $ M.lookup name ts)
+        check (name, t) = either assertFailure return $ runExcept $
+            case M.lookup name (types state) of
+                Nothing -> throwError "Variable not in environment"
+                Just (Left t') -> do
+                    sub <- mgu t t'
+                    let (s1, s2) = (applySub sub t, applySub sub t')
+                    unless (s1 == s2) (throwError $ "Substitutions not equal: " ++ show s1 ++ " vs " ++ show s2)
+                Just (Right t') -> throwError "Unqualified value"
+
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
