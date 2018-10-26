@@ -4,6 +4,12 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## Type Checking
 
+The approach used on this branch doesn't work: say we have an instantiated type `t1` and an uninstantiated type
+`t2`: what type does the pair `(t1, t2)` have?
+
+Consensus from the development of GHC's typechecker that using **references** instead of substitutions and pain is worth
+it.
+
 - thih.pdf is generally okay but is noticeably aged. Spent quite a bit of time polishing things up from it (moving from
   lists to sets etc).
 - Rather than using the hacky runtime-level approach to instantiating variables, I converted it into a type-level
