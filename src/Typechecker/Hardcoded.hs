@@ -31,6 +31,7 @@ builtinClasses = M.fromList
     [
         ("Eq", Class S.empty $ S.fromList [Qualified S.empty (IsInstance "Eq" typeInt)]),
         ("Num", Class (S.singleton "Eq") $ S.fromList [Qualified S.empty (IsInstance "Num" typeInt)]),
+        ("Fractional", Class (S.singleton "Num") $ S.fromList [Qualified S.empty (IsInstance "Fractional" typeFloat)]),
         ("Show", Class S.empty $ S.fromList 
             [
                 Qualified S.empty (IsInstance "Show" typeInt)

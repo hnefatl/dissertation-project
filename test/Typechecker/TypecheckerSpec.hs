@@ -26,7 +26,7 @@ parse s = case parseModule s of
     (ParseFailed loc msg) -> throwError (msg ++ ": " ++ show loc)
 
 deline :: String -> String
-deline = intercalate " \\ne " . lines
+deline = intercalate " \\n " . lines
 
 inferModule :: String -> Either String InferrerState
 inferModule s = runExcept $ execTypeInferrer $ do
