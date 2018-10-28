@@ -11,6 +11,7 @@ import Language.Haskell.Parser
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Typechecker
+import Typechecker.Substitution
 import Typechecker.Hardcoded
 
 import Data.List
@@ -55,10 +56,13 @@ testBindings s cases = testCase (deline s) $ do
     let (etypes, _) = inferModule s
     ts <- unpackEither etypes
     traceM (unpack $ pShow ts)
-    let -- Remove ambiguity by specifying types explicitly
-        alphaEq' :: Maybe UninstantiatedQualifiedType -> Maybe UninstantiatedQualifiedType -> Bool
-        alphaEq' = alphaEq
-        check (name, t) = assertBool (deline s) $ alphaEq' (uninstantiate $ Just t) (uninstantiate $ M.lookup name ts)
+    let check (name, t) = either assertFailure return $ runExcept $
+            case M.lookup name ts of
+                Nothing -> throwError "Variable not in environment"
+                Just t' -> do
+                    sub <- mgu t t'
+                    let (s1, s2) = (applySub sub t, applySub sub t')
+                    unless (s1 == s2) (throwError $ "Substitutions not equal: " ++ show s1 ++ " vs " ++ show s2)
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
@@ -174,8 +178,8 @@ test = testGroup "Typechecking"
     --        b = TypeVar (TypeVariable "b" KindStar)
     --    in testBindings s [("y", Qualified (S.singleton $ IsInstance "Num" b) b), ("f", Qualified (S.singleton $ IsInstance "Num" a) a)]
     --,
-        let s = "y = let f = \\x -> x\n" ++
+        let s = "z = let f = \\x -> x\n" ++
                 "        g = \\x y -> y\n" ++
                 "    in g (f 5) (f True)"
-        in testBindings s [("y", Qualified S.empty typeBool)]
+        in testBindings s [("z", Qualified S.empty typeBool)]
     ]

@@ -50,7 +50,7 @@ applyType t1 t2 = throwError $ printf "Can't apply type to a type variable - pos
 -- |"Unsafe" version of `applyType` which uses `error` instead of `throwError`: useful for compiler tests etc where
 -- it's convenient to avoid boilerplate and we shouldn't have invalid types being used
 applyTypeUnsafe :: (Show t, HasKind t) => Type t -> Type t -> Type t
-applyTypeUnsafe t1 t2 = case runExcept $ applyType t1 t2 of
+applyTypeUnsafe t1 t2 = case applyType t1 t2 of
     Left err -> error err
     Right t -> t
 

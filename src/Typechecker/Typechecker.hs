@@ -259,8 +259,8 @@ getVariableTypes = do
     variables <- applySub sub . M.mapMaybe (either Just (const Nothing)) <$> gets types
     classEnv <- getClassEnvironment
     predicates <- applySub sub <$> getPredicates
-    s <- get
-    traceM (unpack $ pShow s)
+    --s <- get
+    --traceM (unpack $ pShow s)
     let relevantPred t (IsInstance _ x) = S.fromList (getTypeVars x) `S.isSubsetOf` S.fromList (getTypeVars t)
         getRelevantPreds t = simplify classEnv $ S.filter (relevantPred t) predicates
     mapM (\t -> Qualified <$> getRelevantPreds t <*> pure t) variables

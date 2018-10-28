@@ -62,8 +62,8 @@ addInstance inst@(Qualified _ (IsInstance classname _)) ce =
 -- |If the given type predicate is true in the given class environment, then all the predicates returned from this
 -- function are also true (obtained by considering all the superclasses).
 --
--- Given eg. `Eq a => Ord a`, `ifPThenBySuper ce (IsInstance "Ord" t)` returns `{ IsInstance "Ord" t, IsInstance "Eq" t
--- }`
+-- Given eg. `class Eq a => Ord a`, `ifPThenBySuper ce (IsInstance "Ord" t)` returns `{ IsInstance "Ord" t, IsInstance
+-- "Eq" t }`
 ifPThenBySuper :: MonadError String m => ClassEnvironment -> InstantiatedTypePredicate -> m (S.Set InstantiatedTypePredicate)
 ifPThenBySuper ce p@(IsInstance classname ty) = do
     supers <- S.toList <$> superclasses classname ce
@@ -79,25 +79,24 @@ ifPThenByInstance ce p@(IsInstance classname _) = do
     insts <- instances classname ce
     -- See if any instances match the predicate we're exploring, and pick the first non-Nothing value (as we can't have
     -- overlapping instances, there's at most one instance)
-    msum <$> mapM tryMatchInstance (S.toList insts)
+    asum <$> mapM tryMatchInstance (S.toList insts)
     where
         -- Make a new instantiated qualified type without qualifiers
-        targetInst = Qualified S.empty p
         tryMatchInstance uninst = do
-            inst@(Qualified qualifiers _) <- doInstantiate uninst
-            return $ case match inst targetInst of -- Find a substitution
-                Left _ -> Nothing
+            Qualified qualifiers inst <- doInstantiate uninst
+            case match inst p of -- Find a substitution
+                Left _ -> return Nothing
                 -- The new predicates are the constraints on the matching instance
-                Right subs -> Just $ applySub subs qualifiers
+                Right subs -> return $ Just $ applySub subs qualifiers
 
 
 -- |Determines if the given predicate can be deduced from the given existing (assumed to be true) predicates and the
 -- class environment
 entails :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set InstantiatedTypePredicate -> InstantiatedTypePredicate -> m Bool
-entails ce assumps p = (||) <$> entailedBySuperset <*> entailedByInstance
+entails ce assumps p = (||) <$> entailedBySuperclass <*> entailedByInstance
     where
         -- Can this predicate be satisfied by the superclasses?
-        entailedBySuperset = (p `S.member`) . S.unions <$> mapM (ifPThenBySuper ce) (S.toList assumps)
+        entailedBySuperclass = (p `S.member`) . S.unions <$> mapM (ifPThenBySuper ce) (S.toList assumps)
         -- Can this predicate be satisfied by unification with other instances of this class?
         entailedByInstance = ifPThenByInstance ce p >>= \case
             Nothing -> return False

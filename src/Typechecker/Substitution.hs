@@ -57,6 +57,9 @@ instance (Substitutable a, Substitutable b) => Substitutable (a, b) where
 instance Substitutable b => Substitutable (Either a b) where
     applySub sub = fmap (applySub sub)
     getTypeVars = either (const []) getTypeVars
+instance Substitutable a => Substitutable (Maybe a) where
+    applySub sub = fmap (applySub sub)
+    getTypeVars = maybe [] getTypeVars
 
 
 subEmpty :: Substitution
