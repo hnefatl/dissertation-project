@@ -6,16 +6,16 @@ import qualified Data.Set as S
 import Typechecker.Types
 import Typechecker.Typeclasses
 
-builtinConstructors :: M.Map Id UninstantiatedQualifiedType
+builtinConstructors :: M.Map Id QualifiedType
 builtinConstructors = M.fromList
     [ ("True", Qualified S.empty typeBool),
       ("False", Qualified S.empty typeBool)
     ]
 
-builtinFunctions :: M.Map Id UninstantiatedQualifiedType
+builtinFunctions :: M.Map Id QualifiedType
 builtinFunctions = M.fromList
     [
-      let v = TypeVar (TypeDummy "a" KindStar)
+      let v = TypeDummy (TypeVariable "a" KindStar)
           t = makeFun [v, v] v
       in ("+", Qualified (S.singleton (IsInstance "Num" v)) t)
     ,
@@ -58,5 +58,5 @@ builtinClasses = M.fromList
             ])
     ]
     where
-        a = TypeVar (TypeDummy "a" KindStar)
-        b = TypeVar (TypeDummy "a" KindStar)
+        a = TypeDummy (TypeVariable "a" KindStar)
+        b = TypeDummy (TypeVariable "a" KindStar)

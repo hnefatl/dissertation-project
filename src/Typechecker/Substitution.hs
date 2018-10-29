@@ -12,8 +12,7 @@ import qualified Data.Map.Strict as M
 import Typechecker.Types
 
 -- |A substitution is a collection of assignments of a type to a variable
-newtype Substitution = Substitution (M.Map TypeVariable InstantiatedType)
-    deriving (Eq)
+newtype Substitution = Substitution (M.Map TypeVariable Type) deriving (Eq)
 
 instance Default Substitution where
     def = Substitution M.empty
@@ -26,49 +25,63 @@ class Substitutable t where
     -- |Apply the given type variable -> type substitution
     applySub :: Substitution -> t -> t
     -- |Return all the contained type variables, in left->right order and without duplicates
-    getTypeVars :: t -> [TypeVariable]
+    getInstantiatedTypeVars :: t -> [TypeVariable]
+    getUninstantiatedTypeVars :: t -> [TypeVariable]
 
--- |We only allow substitutions on instantiated types: not on uninstantiated ones
+-- |We only allow substitutions on instantiated variables: not on uninstantiated (dummy) ones
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
-instance Substitutable InstantiatedType where
+instance Substitutable Type where
     applySub (Substitution subs) t@(TypeVar var) = M.findWithDefault t var subs
+    applySub _ v@(TypeDummy _) = v
     applySub subs (TypeConstant name ks ts) = TypeConstant name ks (applySub subs ts)
     
-    getTypeVars (TypeVar var) = [var]
-    getTypeVars (TypeConstant _ _ ts) = getTypeVars ts
-instance Substitutable t => Substitutable (TypePredicate t) where
+    getInstantiatedTypeVars (TypeVar var) = [var]
+    getInstantiatedTypeVars (TypeDummy _) = []
+    getInstantiatedTypeVars (TypeConstant _ _ ts) = getInstantiatedTypeVars ts
+
+    getUninstantiatedTypeVars (TypeDummy var) = [var]
+    getUninstantiatedTypeVars (TypeVar _) = []
+    getUninstantiatedTypeVars (TypeConstant _ _ ts) = getUninstantiatedTypeVars ts
+instance Substitutable TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
-    getTypeVars (IsInstance _ t) = getTypeVars t
-instance (Ord t, Substitutable t, Substitutable a) => Substitutable (Qualified t a) where
+    getInstantiatedTypeVars (IsInstance _ t) = getInstantiatedTypeVars t
+    getUninstantiatedTypeVars (IsInstance _ t) = getUninstantiatedTypeVars t
+instance Substitutable a => Substitutable (Qualified a) where
     applySub sub (Qualified ps x) = Qualified (applySub sub ps) (applySub sub x)
-    getTypeVars (Qualified ps x) = getTypeVars ps `union` getTypeVars x
+    getInstantiatedTypeVars (Qualified ps x) = getInstantiatedTypeVars ps `union` getInstantiatedTypeVars x
+    getUninstantiatedTypeVars (Qualified ps x) = getUninstantiatedTypeVars ps `union` getUninstantiatedTypeVars x
 instance (Ord t, Substitutable t) => Substitutable (S.Set t) where
     applySub subs = S.map (applySub subs)
-    getTypeVars = getTypeVars . S.toList
+    getInstantiatedTypeVars = getInstantiatedTypeVars . S.toList
+    getUninstantiatedTypeVars = getUninstantiatedTypeVars . S.toList
 instance (Ord t, Substitutable t) => Substitutable (M.Map a t) where
     applySub subs = M.map (applySub subs)
-    getTypeVars = getTypeVars . M.elems
+    getInstantiatedTypeVars = getInstantiatedTypeVars . M.elems
+    getUninstantiatedTypeVars = getUninstantiatedTypeVars . M.elems
 instance Substitutable t => Substitutable [t] where
     applySub subs = map (applySub subs)
-    getTypeVars = concatMap getTypeVars
+    getInstantiatedTypeVars = concatMap getInstantiatedTypeVars
+    getUninstantiatedTypeVars = concatMap getUninstantiatedTypeVars
 instance (Substitutable a, Substitutable b) => Substitutable (a, b) where
     applySub sub (a, b) = (applySub sub a, applySub sub b)
-    getTypeVars (a, b) = getTypeVars a `union` getTypeVars b
+    getInstantiatedTypeVars (a, b) = getInstantiatedTypeVars a `union` getInstantiatedTypeVars b
+    getUninstantiatedTypeVars (a, b) = getUninstantiatedTypeVars a `union` getUninstantiatedTypeVars b
 instance Substitutable b => Substitutable (Either a b) where
     applySub sub = fmap (applySub sub)
-    getTypeVars = either (const []) getTypeVars
+    getInstantiatedTypeVars = either (const []) getInstantiatedTypeVars
+    getUninstantiatedTypeVars = either (const []) getUninstantiatedTypeVars
 instance Substitutable a => Substitutable (Maybe a) where
     applySub sub = fmap (applySub sub)
-    getTypeVars = maybe [] getTypeVars
-
+    getInstantiatedTypeVars = maybe [] getInstantiatedTypeVars
+    getUninstantiatedTypeVars = maybe [] getUninstantiatedTypeVars
 
 subEmpty :: Substitution
 subEmpty = def
 
-subSingle :: TypeVariable -> InstantiatedType -> Substitution
+subSingle :: TypeVariable -> Type -> Substitution
 subSingle v t = Substitution (M.singleton v t)
 
-subMultiple :: [(TypeVariable, InstantiatedType)] -> Substitution
+subMultiple :: [(TypeVariable, Type)] -> Substitution
 subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 
 

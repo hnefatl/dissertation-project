@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+{-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 {-# Language ScopedTypeVariables, DeriveFunctor, GeneralizedNewtypeDeriving #-}
 
 module Typechecker.Unifier where
@@ -26,28 +26,30 @@ class (Ord t, Show t, Substitutable t) => Unifiable t where
 
 -- |Only allow unification on instantiated types, those with globally unique type variable names.
 -- Otherwise we can accidentally unify on a non-unique variable name, which is a big mistake
-instance Unifiable InstantiatedType where
+instance Unifiable Type where
     mgu (TypeVar var) t2 = unifyVar var t2
     mgu t1 (TypeVar var) = unifyVar var t1
     mgu (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
         | name1 /= name2 = throwError $ printf "Names don't unify: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't unify: %s vs %s" (show ks1) (show ks2)
         | otherwise = mgu ts1 ts2
+    mgu _ _ = return subEmpty
 
     match (TypeVar var) t2 = unifyVar var t2
+    match (TypeDummy _) _ = return subEmpty
     match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
         | name1 /= name2 = throwError $ printf "Names don't match: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s vs %s" (show ks1) (show ks2)
         | otherwise = match ts1 ts2
     match t1 t2 = throwError $ printf "Failed to match: %s vs %s" (show t1) (show t2)
-instance Unifiable t => Unifiable (TypePredicate t) where
+instance Unifiable TypePredicate where
     mgu (IsInstance name1 t1) (IsInstance name2 t2)
         | name1 == name2 = mgu t1 t2
         | otherwise = throwError $ printf "Class names are different: %s vs %s" name1 name2
     match (IsInstance name1 t1) (IsInstance name2 t2)
         | name1 == name2 = match t1 t2
         | otherwise = throwError $ printf "Class names are different: %s vs %s" name1 name2
-instance (Unifiable x, Unifiable t) => Unifiable (Qualified x t) where
+instance Unifiable t => Unifiable (Qualified t) where
     mgu (Qualified q1 x1) (Qualified q2 x2) = do
         s <- mgu x1 x2
         let (q1', q2') = (applySub s q1, applySub s q2)
@@ -68,23 +70,25 @@ instance Unifiable t => Unifiable (Maybe t) where
 
 
 -- |unifyVar v t returns a substitution [t/v] like subSingle but performs additional checks
-unifyVar :: MonadError String m => TypeVariable -> InstantiatedType -> m Substitution
+unifyVar :: MonadError String m => TypeVariable -> Type -> m Substitution
 unifyVar var t
     | TypeVar var == t = return subEmpty
-    | var `elem` getTypeVars t = throwError "Fails occurs check" -- The type contains the variable
+    | var `elem` getInstantiatedTypeVars t = throwError "Fails occurs check" -- The type contains the variable
     | getKind var /= getKind t = throwError "Kind mismatch"
     | otherwise = return (subSingle var t)
-
 
 
 -- Utilities for testing for alpha equivalence - one-off unification where the substitution doesn't escape, so we can
 -- use variable names that are unique only to this call.
 newtype IsolatedTypeInstantiator a = ITI (State Int a)
     deriving (Functor, Applicative, Monad, MonadState Int)
+instance MonadError String IsolatedTypeInstantiator where
+    throwError = error
+    catchError = undefined
 instance TypeInstantiator IsolatedTypeInstantiator where
     freshName = state (\s -> ("v" ++ show s, s + 1))
 
-alphaEq :: (Instantiable a b, Unifiable b) => a -> a -> Bool
+alphaEq :: (Instantiable a, Unifiable a) => a -> a -> Bool
 alphaEq t1 t2 = isRight (mgu t1' t2')
     where ITI s = (,) <$> doInstantiate t1 <*> doInstantiate t2
           (t1', t2') = evalState s 0

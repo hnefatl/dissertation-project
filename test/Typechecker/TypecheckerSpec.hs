@@ -43,8 +43,7 @@ inferModule s = (runExcept out, state)
         infer = do
             -- Add builtins
             addClasses builtinClasses
-            forM_ (M.toList builtinConstructors) (uncurry addConstructorType)
-            forM_ (M.toList builtinFunctions) (uncurry addFunctionType)
+            forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry addFunctionType)
             -- Parse and run type inference
             HsModule _ _ _ _ decls <- parse s
             mapM_ inferDecl decls
