@@ -41,7 +41,7 @@ data Type t = TypeVar !t
 
 applyType :: (Show t, HasKind t, MonadError String m) => Type t -> Type t -> m (Type t)
 applyType (TypeConstant name (k:ks) ts) t
-    | k == getKind t = return $ TypeConstant name ks (t:ts)
+    | k == getKind t = return $ TypeConstant name ks (ts ++ [t])
     | otherwise = throwError $ printf "Got type of kind %s, expected kind %s" (show $ getKind t) (show k)
 applyType (TypeConstant _ [] _) _ = throwError "Application of type of kind *"
 -- TODO(kc506): This is valid (although maybe only with compiler extensions): `Monad m => a -> m a`
@@ -125,7 +125,7 @@ instance Show a => Show (Type a) where
     show (TypeConstant "[]" _ _) = error "compiler Error: Invalid type"
 
     show (TypeConstant "(,)" ks ts) = printf "(%s)" elements
-        where elements = intercalate "," (map show (reverse ts) ++ replicate (length ks) "")
+        where elements = intercalate "," (map show ts ++ replicate (length ks) "")
 
     show (TypeConstant "->" _ ts) = case ts of
             [] -> "(->)"
@@ -137,7 +137,7 @@ instance Show a => Show (Type a) where
 
     -- General show case
     show (TypeConstant name _ []) = name
-    show (TypeConstant name _ ts) = printf "(%s %s)" name (unwords $ map show $ reverse ts)
+    show (TypeConstant name _ ts) = printf "(%s %s)" name (unwords $ map show ts)
 
 instance Show t => Show (TypePredicate t) where
     show (IsInstance name t) = name ++ " (" ++ show t ++ ")"

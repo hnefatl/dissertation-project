@@ -13,15 +13,13 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## Type Checking
 
-Proposed change: Split type checking into two parts: generate constraints, solve constraints. Generating is building up
-type predicates and building up the substitution that solves "equality" constraints (`a ~ b`), solving takes place after
-all that work and solves the `Num a` constraints.
-
 - thih.pdf is generally okay but is noticeably aged. Spent quite a bit of time polishing things up from it (moving from
   lists to sets etc).
-- Rather than using the hacky runtime-level approach to instantiating variables, converted it into a type-level
+- ~~Rather than using the hacky runtime-level approach to instantiating variables, converted it into a type-level
   approach. *demonstrate problems when unifying with local variables*, now this can never happen because globally unique
-  variables enforced at the type level whooo.
+  variables enforced at the type level whooo~~. This **doesn't work** :(. A tuple containing a function and a variable
+  needs to have a type combining uninstantiated and instantiated types.
+- Check for eg. `Num Bool` problems at the end, when converting to HNF.
 - Type classes have heavy impact on the code gen stage, not just type level stuff. Need to instantiate eg. the `+`
   operator to use addition on the type used at the call site. Function resolution has to be done at **runtime**, not
   **compile time** - eg. for polymorphic functions, don't know what we're going to be given in advance.

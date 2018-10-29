@@ -32,13 +32,13 @@ instance Unifiable InstantiatedType where
     mgu (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
         | name1 /= name2 = throwError $ printf "Names don't unify: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't unify: %s vs %s" (show ks1) (show ks2)
-        | otherwise = mgu (reverse ts1) (reverse ts2)
+        | otherwise = mgu ts1 ts2
 
     match (TypeVar var) t2 = unifyVar var t2
     match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
         | name1 /= name2 = throwError $ printf "Names don't match: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s vs %s" (show ks1) (show ks2)
-        | otherwise = match (reverse ts1) (reverse ts2)
+        | otherwise = match ts1 ts2
     match t1 t2 = throwError $ printf "Failed to match: %s vs %s" (show t1) (show t2)
 instance Unifiable t => Unifiable (TypePredicate t) where
     mgu (IsInstance name1 t1) (IsInstance name2 t2)
