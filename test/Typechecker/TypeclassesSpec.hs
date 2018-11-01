@@ -29,5 +29,3 @@ test = testGroup "Typeclasses"
         makeTest builtinClasses S.empty (IsInstance "Eq" typeString),
         makeFailTest builtinClasses S.empty (IsInstance "Eq" typeFloat)
     ]
-    where
-        a = TypeDummy (TypeVariable "a" KindStar)

@@ -14,9 +14,11 @@ import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier
 
+type ClassName = Id
+
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
-data TypeClass = Class (S.Set Id) (S.Set ClassInstance) deriving (Eq, Show)
+data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show)
 
 -- |Qualified types need to match the same global unique names to the predicates as it does the head
 type ClassEnvironment = M.Map Id TypeClass
@@ -59,7 +61,6 @@ addInstance inst@(Qualified _ (IsInstance classname _)) ce =
                 overlaps (Qualified _ head1) (Qualified _ head2) = isRight (mgu head1 head2)
                 overlappingInstances = S.filter (inst `overlaps`) otherInsts
 
-
 -- |If the given type predicate is true in the given class environment, then all the predicates returned from this
 -- function are also true (obtained by considering all the superclasses).
 --
@@ -75,15 +76,13 @@ ifPThenBySuper ce p@(IsInstance classname ty) = do
 -- instance, return the qualifiers of the instance that we still need to show hold.
 -- 
 -- Given eg. `Ord a => Ord [a]`, `ifPThenByInstance ce (IsInstance "Ord" [(a,b)])` returns `IsInstance "Ord" (a,b)`.
-ifPThenByInstance :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> TypePredicate -> m (Maybe (S.Set TypePredicate))
+ifPThenByInstance :: MonadError String m => ClassEnvironment -> TypePredicate -> m (Maybe (S.Set TypePredicate))
 ifPThenByInstance ce p@(IsInstance classname _) = do
     insts <- instances classname ce
     -- See if any instances match the predicate we're exploring, and pick the first non-Nothing value (as we can't have
     -- overlapping instances, there's at most one instance)
     asum <$> mapM tryMatchInstance (S.toList insts)
-    where
-        -- Make a new instantiated qualified type without qualifiers
-        tryMatchInstance (Qualified qualifiers t) = case match t p of -- Find a substitution
+    where tryMatchInstance (Qualified qualifiers t) = case match t p of -- Find a substitution
             Left _ -> return Nothing
             -- The new predicates are the constraints on the matching instance
             Right subs -> return $ Just $ applySub subs qualifiers
@@ -91,7 +90,7 @@ ifPThenByInstance ce p@(IsInstance classname _) = do
 
 -- |Determines if the given predicate can be deduced from the given existing (assumed to be true) predicates and the
 -- class environment
-entails :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> TypePredicate -> m Bool
+entails :: MonadError String m => ClassEnvironment -> S.Set TypePredicate -> TypePredicate -> m Bool
 entails ce assumps p = (||) <$> entailedBySuperclass <*> entailedByInstance
     where
         -- Can this predicate be satisfied by the superclasses?

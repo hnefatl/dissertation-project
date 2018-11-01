@@ -33,7 +33,7 @@ parse s = case parseModule s of
 deline :: String -> String
 deline = intercalate " \\n " . lines
 
-inferModule :: String -> (Either String (M.Map Id QualifiedType), InferrerState)
+inferModule :: String -> (Either String (M.Map Id QuantifiedType), InferrerState)
 inferModule s = (runExcept out, state)
     where
         (out, state) = runTypeInferrer $ catchError infer handler
@@ -43,22 +43,22 @@ inferModule s = (runExcept out, state)
         infer = do
             -- Add builtins
             addClasses builtinClasses
-            forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry addFunctionType)
+            forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
             -- Parse and run type inference
             HsModule _ _ _ _ decls <- parse s
             mapM_ inferDecl decls
             getVariableTypes
 
 
-testBindings :: String -> [(Id, QualifiedType)] -> TestTree
+testBindings :: String -> [(Id, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
     let (etypes, _) = inferModule s
     ts <- unpackEither etypes
-    traceM (unpack $ pShow ts)
-    let check (name, t) = either assertFailure return $ runExcept $
+    --traceM (unpack $ pShow ts)
+    let check (name, Quantified _ t) = either assertFailure return $ runExcept $
             case M.lookup name ts of
                 Nothing -> throwError "Variable not in environment"
-                Just t' -> do
+                Just (Quantified _ t') -> do
                     sub <- mgu t t'
                     let (s1, s2) = (applySub sub t, applySub sub t')
                     unless (s1 == s2) (throwError $ "Substitutions not equal: " ++ show s1 ++ " vs " ++ show s2)
@@ -73,112 +73,119 @@ unpackEither :: Either String b -> IO b
 unpackEither = either assertFailure return
 
 test :: TestTree
-test = testGroup "Typechecking"
+test = let
+        [a, b] = [ TypeVariable s KindStar | s <- ["a", "b"] ]
+        [ta, tb] = map TypeVar [a, b]
+        in
+        testGroup "Typechecking"
     [
-    --    -- Simple literal type checks
-    --    let s = "x = 5"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    --,
-    --    let s = "x = 1.2"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Fractional" t) t)]
-    --,
-    --    let s = "x = 'a'"
-    --    in testBindings s [("x", Qualified S.empty typeChar)]
-    --,
-    --    let s = "x = \"ab\""
-    --    in testBindings s [("x", Qualified S.empty typeString)]
-    --,
-    --    testBindingsFail "x = \"hi"
-    --,
-    --    testBindingsFail "x = 'hi"
-    --,
-    --    -- Data constructors
-    --    let s = "x = True"
-    --    in testBindings s [("x", Qualified S.empty typeBool)]
-    --,
-    --    let s = "x = False"
-    --    in testBindings s [("x", Qualified S.empty typeBool)]
-    --,
-    --    testBindingsFail "x = Foo"
-    --,
-    --    -- Pattern matching
-    --    let s = "(x, y) = (1, True)" 
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t), ("y", Qualified S.empty typeBool)]
-    --,
-    --    let s = "(x, _, _) = (True, False, True)"
-    --    in testBindings s [("x", Qualified S.empty typeBool)]
-    --,
-    --    let s = "a@(x, _, _) = (True, False, True)"
-    --        t = makeTuple (replicate 3 typeBool)
-    --    in testBindings s [("x", Qualified S.empty typeBool), ("a", Qualified S.empty t)]
-    --,
-    --    let s = "a@(_, y) = (1, True)"
-    --        v = TypeVar (TypeVariable "a" KindStar)
-    --        t = makeTuple [v, typeBool]
-    --    in testBindings s [("y", Qualified S.empty typeBool), ("a", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    --,
-    --    let s = "(x, y) = (1, (True))"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --        q = (S.singleton $ IsInstance "Num" t)
-    --    in testBindings s [("x", Qualified q t), ("y", Qualified q (makeTuple [t, typeBool]))]
-    --,
-    --    testBindingsFail "(x, y) = True" 
-    --,
-    --    let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t), ("y", Qualified S.empty typeBool), ("z", Qualified S.empty typeBool), ("w", Qualified S.empty typeString)]
-    --    -- TODO(kc506): Test pattern matching with data constructors
-    --,
-    --    -- Function application (prefix and infix)
-    --    let s = "x = (+) 3 4" 
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    --,
-    --    let s = "x = 1 + 2" 
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    --,
-    --    let s = "x = 1 + 2 + 3" 
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    --,
-    --    let s = "x = 1 + 2\ny = x + 3"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --        q = Qualified (S.singleton $ IsInstance "Num" t) t
-    --    in testBindings s [("x", q), ("y", q)]
-    --,
-      -- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
-      -- getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
-      -- explicit operation?
-    --    testBindingsFail "x = 1 && True"
-    --,
-    --    -- Lambdas
-    --    let s = "x = \\y -> 1 + y"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --        q = S.singleton $ IsInstance "Num" t
-    --    --in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
-    --    in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
-    --,
-    --    let s = "x = (\\y -> False && y)"
-    --    in testBindings s [("y", Qualified S.empty typeBool), ("x", Qualified S.empty (makeFun [typeBool] typeBool))]
-    --,
-    --    let s = "x = (\\f -> f True)"
-    --        t = TypeVar (TypeVariable "a" KindStar)
-    --    in testBindings s [("x", Qualified S.empty (makeFun [makeFun [typeBool] t] t))]
-    --,
-    --    let s = "x = (\\f -> f True) (\\y -> not (not y))"
-    --    in testBindings s [("x", Qualified S.empty typeBool)]
-    --,
-    --    let s = "y = let f = \\x -> x in f 5 + f 6"
-    --        a = TypeVar (TypeVariable "a" KindStar)
-    --        b = TypeVar (TypeVariable "b" KindStar)
-    --    in testBindings s [("y", Qualified (S.singleton $ IsInstance "Num" b) b), ("f", Qualified (S.singleton $ IsInstance "Num" a) a)]
-    --,
-        let s = "z = let f = \\x -> x\n" ++
-                "        g = \\x y -> y\n" ++
+        -- Simple literal type checks
+        let s = "x = 5"
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = 1.2"
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Fractional" ta) ta)]
+    ,
+        let s = "x = 'a'"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeChar)]
+    ,
+        let s = "x = \"ab\""
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeString)]
+    ,
+        testBindingsFail "x = \"hi"
+    ,
+        testBindingsFail "x = 'hi"
+    ,
+        -- Data constructors
+        let s = "x = True"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
+        let s = "x = False"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
+        testBindingsFail "x = Foo"
+    ,
+        -- Pattern matching
+        let s = "(x, y) = (1, True)" 
+        in testBindings s
+            [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        let s = "(x, _, _) = (True, False, True)"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
+        let s = "a@(x, _, _) = (True, False, True)"
+            t = makeTuple (replicate 3 typeBool)
+        in testBindings s
+            [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("a", Quantified S.empty $ Qualified S.empty t) ]
+    ,
+        let s = "a@(_, y) = (1, True)"
+            t = makeTuple [ta, typeBool]
+        in testBindings s
+            [ ("y", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("a", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) t) ]
+    ,
+        let s = "(x, y) = (1, (True))"
+        in testBindings s
+            [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        testBindingsFail "(x, y) = True" 
+    ,
+        let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
+        in testBindings s
+            [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("z", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("w", Quantified S.empty $ Qualified S.empty typeString) ]
+        -- TODO(kc506): Test pattern matching with data constructors
+    ,
+        -- Function application (prefix and infix)
+        let s = "x = (+) 3 4" 
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = 1 + 2" 
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = 1 + 2 + 3" 
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = 1 + 2\ny = x + 3"
+            q = Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta
+        in testBindings s [("x", q), ("y", q)]
+    ,
+    -- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
+    -- getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
+    -- explicit operation?
+        testBindingsFail "x = 1 && True"
+    ,
+        -- Lambdas
+        let s = "x = \\y -> 1 + y"
+            q = S.singleton $ IsInstance "Num" ta
+        --in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
+        in testBindings s
+            [ ("y", Quantified (S.singleton a) $ Qualified q ta)
+            , ("x", Quantified (S.singleton a) $ Qualified q (makeFun [ta] ta)) ]
+    ,
+        let s = "x = (\\y -> False && y)"
+        in testBindings s
+            [ ("y", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("x", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))]
+    ,
+        let s = "x = (\\f -> f True)"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty (makeFun [makeFun [typeBool] ta] ta))]
+    ,
+        let s = "x = (\\f -> f True) (\\y -> not (not y))"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
+        let s = "y = let f = \\x -> x in f 5 + f 6"
+        in testBindings s
+            [ ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance "Num" tb) tb)
+            , ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta) ]
+    ,
+        let s = "a = let f = \\x -> x\n" ++
+                "        g = \\y z -> z\n" ++
                 "    in g (f 5) (f True)"
-        in testBindings s [("z", Qualified S.empty typeBool)]
+        in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
     ]

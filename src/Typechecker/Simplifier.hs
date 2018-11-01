@@ -70,12 +70,3 @@ simplify ce s = do
     hnfs <- toHnf ce s
     mapM_ (detectInvalidPredicate ce) hnfs
     removeRedundant ce hnfs
-
--- |Splits a set of predicates into those that belong in the constraints for a type, and those which belong in some
--- enclosing type.
--- TODO(kc506): thih uses another argument and handles defaults. Can this be ignored here?
-split :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set TypeVariable -> S.Set TypePredicate -> m (S.Set TypePredicate, S.Set TypePredicate)
-split env fixed preds = do
-    simplePreds <- simplify env preds
-    let (deferredPreds, qualifyingPreds) = S.partition ((`S.isSubsetOf` fixed) . S.fromList . getTypeVars) simplePreds
-    return (qualifyingPreds, deferredPreds)

@@ -38,3 +38,7 @@ Quick notes on milestones/features/problems/bugs during implementation.
   function, in order for `3` to be the argument to the `Num` instance.
 - No defaulting atm - unnecessary complexity, weird language feature.
 - More scalable/local/modular approach? `OutsideIn(X)` claims to be a solution.
+- Dealing with typeclasses during inference: if we make a substitution `a/t` then:
+  - If `a` is a type variable then simply substitute `a` for `t` in all of `t`'s constraints and add them to `a`'s
+    constraints.
+  - If `a` is a type constant then unify the head of each constraint with `a` and recurse on sub-type variables.

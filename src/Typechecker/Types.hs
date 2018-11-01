@@ -14,6 +14,9 @@ import Data.List (intercalate, foldl')
 -- |General variable/type name
 type Id = String
 
+type TypeVariableName = Id
+type VariableName = Id
+
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord)
@@ -24,7 +27,7 @@ getKindArgCount :: Integral i => Kind -> i
 getKindArgCount KindStar = 0
 getKindArgCount (KindFun _ k) = 1 + getKindArgCount k
 
-data TypeVariable = TypeVariable !Id !Kind deriving (Eq, Ord)
+data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord)
 
 -- |The type of a Haskell expression.
 -- A `TypeVariable` is a globally unique name for a type variable.
@@ -53,7 +56,7 @@ applyTypeUnsafe t1 t2 = case applyType t1 t2 of
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !Id !Type deriving (Eq, Ord)
+data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord)
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
@@ -66,9 +69,6 @@ type ClassInstance = Qualified TypePredicate
 
 -- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
 data QuantifiedType = Quantified !(S.Set TypeVariable) !QualifiedType deriving (Eq, Ord)
-
-quantifyType :: Type -> QuantifiedType
-quantifyType = Quantified S.empty . Qualified S.empty
 
 -- |A class for things that have a "kind": various type variable/constant/dummies, and types.
 class HasKind t where
@@ -101,7 +101,7 @@ instance Show Type where
     show (TypeConstant "->" _ ts) = case ts of
             [] -> "(->)"
             [t] -> printf "(%s ->)" (assocShow t)
-            [arg, ret] -> printf "%s -> %s" (show arg) (assocShow ret)
+            [arg, ret] -> printf "%s -> %s" (assocShow arg) (show ret)
             _ -> error "Compiler Error: Invalid type"
         where assocShow t@(TypeConstant "->" _ ts') = if length ts' >= 2 then printf "(%s)" (show t) else show t
               assocShow t = show t
@@ -121,19 +121,27 @@ instance Show QuantifiedType where
 -- |A monad that can convert a type with dummy variables into one with (uniquely) named variables
 class MonadError String m => TypeInstantiator m where
     -- |Should generate a new unique name each time it's run
-    freshName :: m Id
+    freshName :: m TypeVariableName
 
     -- |Instantiate a quantified type into a qualified type, replacing all universally quantified variables with new
     -- type variables.
     instantiate :: QuantifiedType -> m QualifiedType
-    instantiate (Quantified quants (Qualified quals t)) = do
-        varMap <- M.fromList <$> mapM (\(TypeVariable name _) -> (name,) <$> freshName) (S.toList quants)
+    instantiate qt@(Quantified _ (Qualified quals t)) = do
+        varMap <- getInstantiatingTypeMap qt
         let instSet = S.fromList . map instPred . S.toList
             instPred (IsInstance classname x) = IsInstance classname (instType x)
-            instType (TypeVar v) = TypeVar (instVar v)
+            instType v@(TypeVar (TypeVariable name _)) = M.findWithDefault v name varMap
             instType (TypeConstant name ks ts) = TypeConstant name ks (map instType ts)
-            instVar (TypeVariable name kind) = TypeVariable (M.findWithDefault name name varMap) kind
         return $ Qualified (instSet quals) (instType t)
+    
+    getInstantiatingTypeMap :: QuantifiedType -> m (M.Map TypeVariableName Type)
+    getInstantiatingTypeMap q = do
+        m <- getInstantiatingMap q
+        return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
+
+    getInstantiatingMap :: QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
+    getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
+        where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types

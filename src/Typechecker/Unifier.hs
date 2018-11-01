@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Data.Either
+import qualified Data.Set as S
 
 import Typechecker.Substitution
 import Typechecker.Types
@@ -69,11 +70,11 @@ instance Unifiable t => Unifiable (Maybe t) where
 
 -- |unifyVar v t returns a substitution [t/v] like subSingle but performs additional checks
 unifyVar :: MonadError String m => TypeVariable -> Type -> m Substitution
-unifyVar var t
+unifyVar var@(TypeVariable name _) t
     | TypeVar var == t = return subEmpty
-    | var `elem` getTypeVars t = throwError "Fails occurs check" -- The type contains the variable
+    | name `S.member` getTypeVars t = throwError $ printf "Fails occurs check: %s with %s" (show var) (show t)
     | getKind var /= getKind t = throwError "Kind mismatch"
-    | otherwise = return (subSingle var t)
+    | otherwise = return (subSingle name t)
 
 
 -- Utilities for testing for alpha equivalence - one-off unification where the substitution doesn't escape, so we can
