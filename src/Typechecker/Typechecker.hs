@@ -21,16 +21,9 @@ import qualified Data.Map as M
 
 import Language.Haskell.Syntax as Syntax
 
--- |A `VarOrFun` is either an instantiated type like `Int` or `v4`, or an uninstantiated qualified type like `Num a => a
--- -> a`. `Fun` is only used to represent functions: when a function is instantiated, the instantiated type predicates
--- are added to the inferrer state and the new type is eg. `Var (v1 -> v1)`.
-data VarOrFun = Var Type
-              | Fun QualifiedType
-    deriving (Eq, Show, Ord)
-
 -- |Maps globally unique names of functions/variables/data constructors to their instantiated (for variables) or
 -- uninstantiated (for functions+constructors) types.
-type TypeMap = M.Map Id VarOrFun
+type TypeMap = M.Map Id QuantifiedType
 
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
@@ -76,9 +69,9 @@ instance TypeInstantiator TypeInferrer where
         modify (\s -> s { variableCounter = counter })
         return ("v" ++ show counter)
 
--- |Creates a fresh (uniquely named) type
-freshVariable :: Kind -> TypeInferrer Type
-freshVariable kind = freshName >>= \name -> return $ TypeVar (TypeVariable name kind)
+-- |Creates a fresh (uniquely named) type variable
+freshTypeVariable :: TypeInferrer TypeVariable
+freshTypeVariable = TypeVariable <$> freshName <*> pure KindStar
 
 -- |Returns the current substitution in the monad
 getSubstitution :: TypeInferrer Substitution
@@ -95,33 +88,22 @@ addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironm
 
 addTypes :: TypeMap -> TypeInferrer ()
 addTypes vs = modify (\s -> s { types = M.union vs (types s) })
-addType :: Id -> VarOrFun -> TypeInferrer ()
+addType :: Id -> QuantifiedType -> TypeInferrer ()
 addType name t = addTypes (M.singleton name t)
-
-addVariableType :: Id -> Type -> TypeInferrer ()
-addVariableType name t = addType name (Var t)
-
-addFunctionType :: Id -> QualifiedType -> TypeInferrer ()
-addFunctionType name t = addType name (Fun t)
 
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
 addTypePredicates ps = modify (\s -> s { typePredicates = S.union ps (typePredicates s) })
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate = addTypePredicates . S.singleton
 
-getType :: Id -> TypeInferrer VarOrFun
+getType :: Id -> TypeInferrer QuantifiedType
 getType name = do
     t <- gets (M.lookup name . types)
     maybe (throwError $ printf "Symbol %s not in environment" name) return t
 
 -- Return either a variable, function, or constructor. Instantiate and store qualifiers if necessary
-getInstantiatedType :: Id -> TypeInferrer Type
-getInstantiatedType name = getType name >>= \case
-    Var v -> return v
-    Fun f -> do
-        Qualified quals t <- doInstantiate f
-        addTypePredicates quals
-        return t
+getInstantiatedType :: Id -> TypeInferrer QualifiedType
+getInstantiatedType name = getType name >>= instantiate
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
 -- |Same as unify but only unifying variables in the first argument with those in the left
@@ -133,33 +115,33 @@ unify, doMatch :: Type -> Type -> TypeInferrer ()
             modify (\s -> s { subs = subCompose currentSub newSub })
 
 
-inferLiteral :: Syntax.HsLiteral -> TypeInferrer Type
-inferLiteral (HsChar _) = return typeChar
-inferLiteral (HsString _) = return typeString
+inferLiteral :: Syntax.HsLiteral -> TypeInferrer QuantifiedType
+inferLiteral (HsChar _) = return (quantifyType typeChar)
+inferLiteral (HsString _) = return (quantifyType typeString)
 inferLiteral (HsInt _) = do
-    v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Num" v)
-    return v
+    v <- freshTypeVariable
+    let t = TypeVar v
+    return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance "Num" t) t
 inferLiteral (HsFrac _) = do
-    v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Fractional" v)
-    return v
+    v <- freshTypeVariable
+    let t = TypeVar v
+    return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance "Fractional" t) t
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
 -- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
 -- into lets? Pg. 26 of thih.pdf
-inferExpression :: Syntax.HsExp -> TypeInferrer Type
-inferExpression (HsVar name) = getInstantiatedType (toId name)
-inferExpression (HsCon name) = getInstantiatedType (toId name)
+inferExpression :: Syntax.HsExp -> TypeInferrer QuantifiedType
+inferExpression (HsVar name) = getType (toId name)
+inferExpression (HsCon name) = getType (toId name)
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, then use unification to deduce the return type
-    funtype <- inferExpression f
+    funtype <- instantiate =<< inferExpression f
     argtype <- inferExpression e
-    retType <- freshVariable KindStar
+    retType <- freshTypeVariable
     unify (makeFun [argtype] retType) funtype
-    return retType
+    return (Var retType)
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
             HsQVarOp name -> name
@@ -248,8 +230,6 @@ getVariableTypes = do
     sub <- getSubstitution
     -- TODO(kc506): Need to get just **user-defined** variables and functions.......
     -- Get only the qualified variables
-    let selectVars (Var t) = Just t
-        selectVars (Fun _) = Nothing
     variables <- applySub sub . M.mapMaybe selectVars <$> gets types
     classEnv <- getClassEnvironment
     predicates <- applySub sub <$> getPredicates

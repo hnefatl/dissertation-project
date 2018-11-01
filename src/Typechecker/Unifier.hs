@@ -33,10 +33,8 @@ instance Unifiable Type where
         | name1 /= name2 = throwError $ printf "Names don't unify: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't unify: %s vs %s" (show ks1) (show ks2)
         | otherwise = mgu ts1 ts2
-    mgu _ _ = return subEmpty
 
     match (TypeVar var) t2 = unifyVar var t2
-    match (TypeDummy _) _ = return subEmpty
     match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
         | name1 /= name2 = throwError $ printf "Names don't match: %s vs %s" name1 name2
         | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s vs %s" (show ks1) (show ks2)
@@ -73,7 +71,7 @@ instance Unifiable t => Unifiable (Maybe t) where
 unifyVar :: MonadError String m => TypeVariable -> Type -> m Substitution
 unifyVar var t
     | TypeVar var == t = return subEmpty
-    | var `elem` getInstantiatedTypeVars t = throwError "Fails occurs check" -- The type contains the variable
+    | var `elem` getTypeVars t = throwError "Fails occurs check" -- The type contains the variable
     | getKind var /= getKind t = throwError "Kind mismatch"
     | otherwise = return (subSingle var t)
 
@@ -87,8 +85,3 @@ instance MonadError String IsolatedTypeInstantiator where
     catchError = undefined
 instance TypeInstantiator IsolatedTypeInstantiator where
     freshName = state (\s -> ("v" ++ show s, s + 1))
-
-alphaEq :: (Instantiable a, Unifiable a) => a -> a -> Bool
-alphaEq t1 t2 = isRight (mgu t1' t2')
-    where ITI s = (,) <$> doInstantiate t1 <*> doInstantiate t2
-          (t1', t2') = evalState s 0

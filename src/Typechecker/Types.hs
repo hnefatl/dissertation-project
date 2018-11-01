@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, LambdaCase, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies #-}
+{-# Language FlexibleContexts, LambdaCase, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies, TupleSections #-}
 {-# Language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 -- We require undecidable instances to make Sets Instantiable
 {-# Language UndecidableInstances#-}
@@ -6,7 +6,6 @@
 module Typechecker.Types where
 
 import Control.Monad.Except
-import Control.Monad.State.Strict
 import Text.Printf
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -33,7 +32,6 @@ data TypeVariable = TypeVariable !Id !Kind deriving (Eq, Ord)
 -- A `TypeConstant` is composed of the name of the constructor being used, along with the kinds of any remaining
 -- arguments and the list of applied types
 data Type = TypeVar !TypeVariable
-          | TypeDummy !TypeVariable
           | TypeConstant !Id ![Kind] ![Type]
     deriving (Eq, Ord)
 
@@ -66,12 +64,13 @@ type QualifiedType = Qualified Type
 -- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
 type ClassInstance = Qualified TypePredicate
 
-instance Show a => Show (Qualified a) where
-    show (Qualified quals x) = qualifiers ++ " => " ++ show x
-        where qualifiers = "(" ++ intercalate ", " (map show $ S.toList quals) ++ ")"
+-- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
+data QuantifiedType = Quantified !(S.Set TypeVariable) !QualifiedType deriving (Eq, Ord)
 
+quantifyType :: Type -> QuantifiedType
+quantifyType = Quantified S.empty . Qualified S.empty
 
--- |A class for things that have a "kind": kinds themselves, various type variable/constant/dummies, and types.
+-- |A class for things that have a "kind": various type variable/constant/dummies, and types.
 class HasKind t where
     -- |Returns the kind of the given `t`
     getKind :: t -> Kind
@@ -79,7 +78,6 @@ instance HasKind TypeVariable where
     getKind (TypeVariable _ k) = k
 instance HasKind Type where
     getKind (TypeVar v) = getKind v
-    getKind (TypeDummy v) = getKind v
     -- The kind of an application is those kinds remaining in the application followed by a KindStar.
     getKind (TypeConstant _ kinds _) = foldr KindFun KindStar kinds
 
@@ -93,16 +91,13 @@ instance Show TypeVariable where
     show (TypeVariable name _) = name
 instance Show Type where
     show (TypeVar v) = show v
-    show (TypeDummy v) = show v
 
     -- Special show cases for builtin types
     show (TypeConstant "[]" _ []) = "[]"
     show (TypeConstant "[]" _ [t]) = printf "[%s]" (show t)
     show (TypeConstant "[]" _ _) = error "compiler Error: Invalid type"
-
     show (TypeConstant "(,)" ks ts) = printf "(%s)" elements
         where elements = intercalate "," (map show ts ++ replicate (length ks) "")
-
     show (TypeConstant "->" _ ts) = case ts of
             [] -> "(->)"
             [t] -> printf "(%s ->)" (assocShow t)
@@ -110,13 +105,17 @@ instance Show Type where
             _ -> error "Compiler Error: Invalid type"
         where assocShow t@(TypeConstant "->" _ ts') = if length ts' >= 2 then printf "(%s)" (show t) else show t
               assocShow t = show t
-
     -- General show case
     show (TypeConstant name _ []) = name
     show (TypeConstant name _ ts) = printf "(%s %s)" name (unwords $ map show ts)
-
 instance Show TypePredicate where
     show (IsInstance name t) = name ++ " (" ++ show t ++ ")"
+instance Show a => Show (Qualified a) where
+    show (Qualified quals x) = "(" ++ qualifiers ++ ") => " ++ show x
+        where qualifiers = intercalate ", " (map show $ S.toList quals)
+instance Show QuantifiedType where
+    show (Quantified quants t) = "forall " ++ quantifiers ++ ". " ++ show t
+        where quantifiers = unwords (map show $ S.toList quants)
 
 
 -- |A monad that can convert a type with dummy variables into one with (uniquely) named variables
@@ -124,58 +123,17 @@ class MonadError String m => TypeInstantiator m where
     -- |Should generate a new unique name each time it's run
     freshName :: m Id
 
-    -- |Utility state monad function: given a local name, convert it to a global name, ensuring that matching local
-    -- names map to the same global name
-    freshNameMap :: Id -> StateT (M.Map Id Id) m Id
-    freshNameMap localName = gets (M.lookup localName) >>= \case
-            Nothing -> do
-                globalName <- lift freshName
-                state $ \s -> (globalName, M.insert localName globalName s)
-            Just globalName -> return globalName
-            
-    -- |Instantiate an instantiable, ensuring that variables of the same local name within the structure get mapped to
-    -- the *same globally unique name*.
-    doInstantiate :: Instantiable a => a -> m a
-    doInstantiate x = evalStateT (instantiate freshNameMap x) M.empty
-
--- |Class of things that can be instantiated (from dummy variables to global variables) from a to b
--- Functional dependency `a -> b` enforces that each instance can map an `a` to exactly one `b`, removing any ambiguity.
-class Instantiable a where
-    -- |Given an action mapping local variable names to global ones, replace locals with globals
-    instantiate :: MonadError String m => (Id -> m Id) -> a -> m a
-    -- |"Cast" an instantiated expression into an uninstantiated one
-    uninstantiate :: a -> a
-
-instance Instantiable TypeVariable where
-    instantiate f (TypeVariable name kind) = TypeVariable <$> f name <*> pure kind
-    uninstantiate = id
-instance Instantiable Type where
-    instantiate f (TypeDummy v) = TypeVar <$> instantiate f v
-    instantiate _ v@(TypeVar _) = throwError ("Probable compiler error when instantiating " ++ show v)
-    instantiate f (TypeConstant name ks ts) = TypeConstant name ks <$> mapM (instantiate f) ts
-
-    uninstantiate (TypeVar v) = TypeDummy (uninstantiate v)
-    uninstantiate d@(TypeDummy _) = error ("Probable compiler error when uninstantiating " ++ show d)
-    uninstantiate (TypeConstant name ks ts) = TypeConstant name ks (map uninstantiate ts)
-instance Instantiable TypePredicate where
-    instantiate f (IsInstance super t) = IsInstance super <$> instantiate f t
-    uninstantiate (IsInstance super t) = IsInstance super (uninstantiate t)
-instance Instantiable QualifiedType where
-    instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
-    uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
-instance (Ord a, Instantiable a) => Instantiable (S.Set a) where
-    instantiate f s = S.fromList <$> mapM (instantiate f) (S.toList s)
-    uninstantiate = S.map uninstantiate
-instance Instantiable a => Instantiable [a] where
-    instantiate f = mapM (instantiate f)
-    uninstantiate = map uninstantiate
-instance Instantiable ClassInstance where
-    instantiate f (Qualified quals t) = Qualified <$> instantiate f quals <*> instantiate f t
-    uninstantiate (Qualified quals t) = Qualified (uninstantiate quals) (uninstantiate t)
-instance Instantiable a => Instantiable (Maybe a) where
-    instantiate f = mapM (instantiate f)
-    uninstantiate = fmap uninstantiate
-
+    -- |Instantiate a quantified type into a qualified type, replacing all universally quantified variables with new
+    -- type variables.
+    instantiate :: QuantifiedType -> m QualifiedType
+    instantiate (Quantified quants (Qualified quals t)) = do
+        varMap <- M.fromList <$> mapM (\(TypeVariable name _) -> (name,) <$> freshName) (S.toList quants)
+        let instSet = S.fromList . map instPred . S.toList
+            instPred (IsInstance classname x) = IsInstance classname (instType x)
+            instType (TypeVar v) = TypeVar (instVar v)
+            instType (TypeConstant name ks ts) = TypeConstant name ks (map instType ts)
+            instVar (TypeVariable name kind) = TypeVariable (M.findWithDefault name name varMap) kind
+        return $ Qualified (instSet quals) (instType t)
 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types

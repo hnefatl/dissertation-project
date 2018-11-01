@@ -23,8 +23,8 @@ class HasHnf t where
 
 instance HasHnf Type where
     inHnf (TypeVar _) = True
-    inHnf (TypeDummy _) = True
-    inHnf (TypeConstant _ _ ts) = inHnf ts
+    inHnf (TypeConstant _ [] ts) = inHnf ts
+    inHnf (TypeConstant _ _ _) = False
 
     toHnf _ _ = throwError "Can't convert a type to HNF"
 instance HasHnf TypePredicate where
@@ -45,11 +45,11 @@ instance HasHnf t => HasHnf [t] where
 
 detectInvalidPredicate :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> TypePredicate -> m ()
 detectInvalidPredicate ce inst@(IsInstance classname (TypeConstant _ _ _)) = do
-    -- valid is true if the given predicate is an "immediate" instance of the class (has no qualifiers, like `Eq Int`)
-    -- and it has the same as the given predicate. We can use `==` instead of eg. `hasMgu` because these ground terms
-    -- should be structurally equal.
-    let valid (Qualified quals t) = (\t' -> S.null quals && inst == t') <$> doInstantiate t
-    isInstance <- anyM valid =<< instances classname ce
+    insts <- instances classname ce
+    -- isInstance is true if the given predicate is an "immediate" instance of the class (has no qualifiers, like `Eq
+    -- Int`) and it has the same as the given predicate. We can use `==` instead of eg. `hasMgu` because these ground
+    -- terms should be structurally and nominally equal.
+    let isInstance = any (\(Qualified quals t) -> S.null quals && inst == t) insts
     unless isInstance (throwError $ printf "Predicate %s doesn't hold in the environment." (show inst))
 detectInvalidPredicate _ _ = return ()
 
@@ -77,5 +77,5 @@ simplify ce s = do
 split :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set TypeVariable -> S.Set TypePredicate -> m (S.Set TypePredicate, S.Set TypePredicate)
 split env fixed preds = do
     simplePreds <- simplify env preds
-    let (deferredPreds, qualifyingPreds) = S.partition ((`S.isSubsetOf` fixed) . S.fromList . getInstantiatedTypeVars) simplePreds
+    let (deferredPreds, qualifyingPreds) = S.partition ((`S.isSubsetOf` fixed) . S.fromList . getTypeVars) simplePreds
     return (qualifyingPreds, deferredPreds)

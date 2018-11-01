@@ -6,24 +6,25 @@ import qualified Data.Set as S
 import Typechecker.Types
 import Typechecker.Typeclasses
 
-builtinConstructors :: M.Map Id QualifiedType
+builtinConstructors :: M.Map Id QuantifiedType
 builtinConstructors = M.fromList
-    [ ("True", Qualified S.empty typeBool),
-      ("False", Qualified S.empty typeBool)
+    [ ("True", Quantified S.empty $ Qualified S.empty typeBool),
+      ("False", Quantified S.empty $ Qualified S.empty typeBool)
     ]
 
-builtinFunctions :: M.Map Id QualifiedType
+builtinFunctions :: M.Map Id QuantifiedType
 builtinFunctions = M.fromList
     [
-      let v = TypeDummy (TypeVariable "a" KindStar)
-          t = makeFun [v, v] v
-      in ("+", Qualified (S.singleton (IsInstance "Num" v)) t)
+      let v = TypeVariable "a" KindStar
+          a = TypeVar v
+          t = makeFun [a, a] a
+      in ("+", Quantified (S.singleton v) $ Qualified (S.singleton (IsInstance "Num" a)) t)
     ,
-      ("&&", Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+      ("&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-      ("||", Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+      ("||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-      ("not", Qualified S.empty (makeFun [typeBool] typeBool))
+      ("not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
     ]
 
 builtinClasses :: ClassEnvironment
@@ -58,5 +59,5 @@ builtinClasses = M.fromList
             ])
     ]
     where
-        a = TypeDummy (TypeVariable "a" KindStar)
-        b = TypeDummy (TypeVariable "a" KindStar)
+        a = TypeVar (TypeVariable "a" KindStar)
+        b = TypeVar (TypeVariable "a" KindStar)

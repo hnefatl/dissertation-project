@@ -28,4 +28,11 @@ test = testGroup "Unification"
             x = IsInstance "Eq" (TypeVar a)
             y = IsInstance "Eq" typeBool
         in testCase "match (Eq a) (Eq Bool)" $ assertEqual "" (Right $ subMultiple [(a, typeBool)]) (match x y)
+    ,
+        let [a, b, c, d] = map (\name -> TypeVariable name KindStar) ["a", "b", "c", "d"]
+            x = makeFun [makeFun [a] typeBool] b
+            y = makeFun [makeFun [c] d] d
+            expected = Right $ subMultiple [(a, c), (d, typeBool), (b, typeBool)]
+            actual = mgu x y
+        in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++")") $ assertEqual "" expected actual
     ]

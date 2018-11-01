@@ -4,10 +4,18 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## TODO
 
+- Use `Qualified` for all types: only way to handle data constructors properly. When assigning a data constructor
+  expression to a pattern, use `simplify` to pull a subset of the predicates from the expression qualifiers to the
+  pattern matched variable qualifiers.
+- Wording change: instantiated/uninstantiated -> concrete/scheme?
+- Need to unique-ify type scheme variables too? Otherwise eg. `A a, B a => (a, a -> a)` is ambiguous if the `a`'s came
+  from different original types when constructing the tuple.
+- ~~Need to handle assigning a type scheme to a variable: `x = \y -> y` should make `x` be a type scheme, but then it
+  needs to handle eg. `x = \y -> y < y` which requires `x` to somehow carry the context of `Ord a`~~. Maybe solved by
+  using `Qualified` for everything.
 - Make sure functions defined in `let` statements are deinstantiated to make them polymorphic - same applies for
   lambdas??????
 - Optimise finding the predicates for each type: `Map Id [ClassName]`?
-- Replace typechecking's `Either UninstantiatedQualifiedType QualifiedType` with a specific data structure.
 - Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
 - Rewrite to use `Text` instead of `String`.
 

@@ -4,6 +4,7 @@ module Typechecker.Typeclasses where
 
 import Prelude hiding (any)
 import Data.Foldable
+import Data.Either
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import Control.Monad.Except
@@ -55,7 +56,7 @@ addInstance inst@(Qualified _ (IsInstance classname _)) ce =
             return $ M.insert classname (Class supers (S.insert inst otherInsts)) ce
             where
                 -- Two instances overlap if there's a substitution which unifies their heads
-                overlaps (Qualified _ head1) (Qualified _ head2) = alphaEq head1 head2
+                overlaps (Qualified _ head1) (Qualified _ head2) = isRight (mgu head1 head2)
                 overlappingInstances = S.filter (inst `overlaps`) otherInsts
 
 
@@ -82,12 +83,10 @@ ifPThenByInstance ce p@(IsInstance classname _) = do
     asum <$> mapM tryMatchInstance (S.toList insts)
     where
         -- Make a new instantiated qualified type without qualifiers
-        tryMatchInstance uninst = do
-            Qualified qualifiers inst <- doInstantiate uninst
-            case match inst p of -- Find a substitution
-                Left _ -> return Nothing
-                -- The new predicates are the constraints on the matching instance
-                Right subs -> return $ Just $ applySub subs qualifiers
+        tryMatchInstance (Qualified qualifiers t) = case match t p of -- Find a substitution
+            Left _ -> return Nothing
+            -- The new predicates are the constraints on the matching instance
+            Right subs -> return $ Just $ applySub subs qualifiers
 
 
 -- |Determines if the given predicate can be deduced from the given existing (assumed to be true) predicates and the
