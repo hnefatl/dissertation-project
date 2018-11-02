@@ -26,6 +26,7 @@ dependencies:
 - pretty-simple
 - extra
 - data-default
+- text
 
 library:
   source-dirs: src

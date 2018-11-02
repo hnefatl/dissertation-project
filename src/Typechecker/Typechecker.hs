@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase #-}
 
 module Typechecker.Typechecker where
 
@@ -9,51 +9,62 @@ import Typechecker.Typeclasses
 import Typechecker.Simplifier
 import ExtraDefs
 
-
 import Data.Default
 import Text.Printf
 import Control.Monad.Except
 import Control.Monad.State.Strict
+import Debug.Trace
+import Text.Pretty.Simple
+import Data.Text.Lazy (unpack)
 import qualified Data.Set as S
 import qualified Data.Map as M
 
 import Language.Haskell.Syntax as Syntax
 
--- |Maps globally unique names of functions/variables/data constructors to their instantiated (for variables) or
--- uninstantiated (for functions+constructors) types.
-type TypeMap = M.Map Id (Either QualifiedType UninstantiatedQualifiedType)
+-- |Maps globally unique names of functions/variables/data constructors to a type variable representing their type.
+type TypeMap = M.Map VariableName TypeVariableName
 
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
 data InferrerState = InferrerState
-    { subs :: Substitution
+    { substitutions :: Substitution
     , types :: TypeMap
     , classEnvironment :: ClassEnvironment
-    , typePredicates :: S.Set InstantiatedTypePredicate
+    , kinds :: M.Map TypeVariableName Kind
+    , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
+    , freeVariables :: S.Set TypeVariableName
     , variableCounter :: Int }
     deriving (Show)
 
 instance Default InferrerState where
     def = InferrerState
-            { subs = def
+            { substitutions = def
             , types = M.empty
             , classEnvironment = M.empty
-            , typePredicates = S.empty
-            , variableCounter = 1 }
+            , kinds = M.empty
+            , typePredicates = M.empty
+            , freeVariables = S.empty
+            , variableCounter = 0 }
 
--- |A TypeInferrer handles mutable state, some scoped read-only assumptions about the types of variables, and error
--- reporting
-newtype TypeInferrer a = TypeInferrer (StateT InferrerState (Except String) a)
+-- |A TypeInferrer handles mutable state and error reporting
+newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 
-runTypeInferrer :: TypeInferrer a -> Except String (a, InferrerState)
-runTypeInferrer (TypeInferrer inner) = runStateT inner def
+-- |Run type inference, and return the (possible failed) result along with the last state
+runTypeInferrer :: MonadError String m => TypeInferrer a -> (m a, InferrerState)
+runTypeInferrer (TypeInferrer inner) = (liftEither x, s)
+    where (x, s) = runState (runExceptT inner) def
 
-evalTypeInferrer :: TypeInferrer a -> Except String a
-evalTypeInferrer (TypeInferrer inner) = evalStateT inner def
+-- |Run type inference, and return the (possibly failed) result
+evalTypeInferrer :: MonadError String m => TypeInferrer a -> m a
+evalTypeInferrer = fst . runTypeInferrer
 
-execTypeInferrer :: TypeInferrer a -> Except String InferrerState
-execTypeInferrer (TypeInferrer inner) = execStateT inner def
+-- |Run type inference, and return the (possibly failed) state
+execTypeInferrer :: MonadError String m => TypeInferrer a -> m InferrerState
+execTypeInferrer (TypeInferrer inner) = case e of
+    Left err -> throwError err
+    Right _ -> return s
+    where (e, s) = runState (runExceptT inner) def
 
 instance TypeInstantiator TypeInferrer where
     freshName = do
@@ -61,198 +72,296 @@ instance TypeInstantiator TypeInferrer where
         modify (\s -> s { variableCounter = counter })
         return ("v" ++ show counter)
 
--- |Creates a fresh (uniquely named) type
-freshVariable :: Kind -> TypeInferrer InstantiatedType
-freshVariable kind = freshName >>= \name -> return $ TypeVar (TypeVariable name kind)
+-- |Creates a fresh (uniquely named) type variable
+freshTypeVariable :: TypeInferrer TypeVariableName
+freshTypeVariable = freshName
+
+nameToType :: TypeVariableName -> TypeInferrer Type
+nameToType name = TypeVar <$> nameToTypeVariable name
+nameToTypeVariable :: TypeVariableName -> TypeInferrer TypeVariable
+nameToTypeVariable name = TypeVariable name <$> getTypeVariableKind name
+
+-- |Generate a type variable name and make it refer to the given type.
+nameSimpleType :: Type -> TypeInferrer TypeVariableName
+nameSimpleType t = do
+    name <- freshTypeVariable
+    t' <- nameToType name
+    unify t' t
+    return name
 
 -- |Returns the current substitution in the monad
 getSubstitution :: TypeInferrer Substitution
-getSubstitution = gets subs
+getSubstitution = gets substitutions
+
+composeSubstitution :: Substitution -> TypeInferrer ()
+composeSubstitution sub = modify (\s -> s { substitutions = substitutions s `subCompose` sub })
+
+-- |If the variable's not in the map, default to it being *: we only store interesting kinds for efficiency.
+getTypeVariableKind :: TypeVariableName -> TypeInferrer Kind
+getTypeVariableKind name = gets (M.findWithDefault KindStar name . kinds)
 
 getClassEnvironment :: TypeInferrer ClassEnvironment
 getClassEnvironment = gets classEnvironment
 
-getPredicates :: TypeInferrer (S.Set InstantiatedTypePredicate)
-getPredicates = gets typePredicates
+getFreeVariables :: TypeInferrer (S.Set TypeVariableName)
+getFreeVariables = gets freeVariables
+
+addFreeVariable :: TypeVariableName -> TypeInferrer ()
+addFreeVariable = addFreeVariables . S.singleton
+addFreeVariables :: S.Set TypeVariableName -> TypeInferrer ()
+addFreeVariables names = modify (\s -> s { freeVariables = S.union names (freeVariables s) })
+
+getConstraints :: TypeVariableName -> TypeInferrer (S.Set ClassName)
+getConstraints name = gets (M.findWithDefault S.empty name . typePredicates)
 
 addClasses :: ClassEnvironment -> TypeInferrer ()
 addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironment s) })
 
-addTypes :: TypeMap -> TypeInferrer ()
-addTypes vs = modify (\s -> s { types = M.union vs (types s) })
-addType :: Id -> Either QualifiedType UninstantiatedQualifiedType -> TypeInferrer ()
-addType name t = addTypes (M.singleton name t)
+addVariableType :: VariableName -> TypeVariableName -> TypeInferrer ()
+addVariableType name t = addVariableTypes (M.singleton name t)
+addVariableTypes :: TypeMap -> TypeInferrer ()
+addVariableTypes vs = modify (\s -> s { types = M.union vs (types s) })
 
-addConstructorType :: Id -> UninstantiatedQualifiedType -> TypeInferrer ()
-addConstructorType name t = addType name (Right t)
-addFunctionType :: Id -> UninstantiatedQualifiedType -> TypeInferrer ()
-addFunctionType name t = addType name (Right t)
-addVariableType :: Id -> QualifiedType -> TypeInferrer()
-addVariableType name t = addType name (Left t)
+addTypeConstraint :: TypeVariableName -> ClassName -> TypeInferrer ()
+addTypeConstraint varname classname = addTypeConstraints varname (S.singleton classname)
+addTypeConstraints:: TypeVariableName -> S.Set ClassName -> TypeInferrer ()
+addTypeConstraints name preds = mergeTypeConstraints (M.singleton name preds)
+mergeTypeConstraints :: M.Map TypeVariableName (S.Set ClassName) -> TypeInferrer ()
+mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union ps (typePredicates s) })
+addTypePredicate :: TypePredicate -> TypeInferrer ()
+addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
+addTypePredicate (IsInstance _ (TypeConstant _ _ _)) = throwError "Not implemented"
+addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
+addTypePredicates = mapM_ addTypePredicate
 
-addTypePredicates :: S.Set InstantiatedTypePredicate -> TypeInferrer ()
-addTypePredicates ps = modify (\s -> s { typePredicates = S.union ps (typePredicates s) })
-addTypePredicate :: InstantiatedTypePredicate -> TypeInferrer ()
-addTypePredicate = addTypePredicates . S.singleton
+-- |Intended for use in injecting a known named quantified type into the environment
+insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
+insertQuantifiedType name t@(Quantified quants qualType) = do
+    nameSub <- getInstantiatingMap t
+    let typeSub = M.map (\name -> TypeVar (TypeVariable name KindStar)) nameSub
+    forM_ quants $ \(TypeVariable old _) -> addFreeVariable (nameSub M.! old)
+    let Qualified quals t' = applySub (Substitution typeSub) qualType
+    addTypePredicates quals
+    funVar <- freshTypeVariable
+    funType <- nameToType funVar
+    unify funType t'
+    addVariableType name funVar
 
-getType :: Id -> TypeInferrer (Either QualifiedType UninstantiatedQualifiedType)
-getType name = do
+-- |Given a variable name, get the type variable name that corresponds
+getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
+getVariableTypeVariable name = do
     t <- gets (M.lookup name . types)
     maybe (throwError $ printf "Symbol %s not in environment" name) return t
 
--- These should instantiate the type and add the qualifiers automatically
-instantiateConstructor, instantiateFunction :: Id -> TypeInferrer QualifiedType
-(instantiateConstructor, instantiateFunction) = (helper "constructor", helper "function")
-    where helper s name = do
-            t <- getType name >>= either (const $ throwError $ printf "Got instantiated type for %s: %s" s name) return
-            t'@(Qualified quals _) <- doInstantiate t
-            addTypePredicates quals
-            return t'
-getVariableType :: Id -> TypeInferrer QualifiedType
-getVariableType name = do
-        et <- getType name
-        either return (const $ throwError $ printf "Got uninstantiated type for variable %s" name) et
-
--- Return either a variable, function, or constructor. Instantiate and store qualifiers if necessary
-getInstantiatedType :: Id -> TypeInferrer QualifiedType
-getInstantiatedType name = do
-    et <- getType name
-    case et of
-        Left t -> return t
-        Right uninst -> do
-            t@(Qualified quals _) <- doInstantiate uninst
-            addTypePredicates quals
-            return t
-
+-- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
+-- if we have `Num t1` and `[t2/t1]` we add a constraint `Num t2`, and if we have `instance (Foo a, Bar b) => Baz (Maybe
+-- a b)`, `Foo t1` and `[(Maybe t2 t3)/t1]` then we add constraints `Foo t2` and `Bar t3`.
+updateTypeConstraints :: Substitution -> TypeInferrer ()
+updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
+    where helper old (TypeVar (TypeVariable new _)) = addTypeConstraints new =<< getConstraints old
+          helper old (TypeConstant _ _ _) = do
+            constraints <- getConstraints old
+            forM_ constraints $ \classInstance -> do
+                ce <- getClassEnvironment
+                -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
+                pred <- IsInstance classInstance <$> nameToType old
+                newConstraints <- ifPThenByInstance ce (applySub sub pred) >>= \case
+                    Nothing -> throwError $ "No matching instance for " ++ show classInstance
+                    Just constraints -> return constraints
+                addTypePredicates newConstraints
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
 -- |Same as unify but only unifying variables in the first argument with those in the left
-unify, doMatch :: InstantiatedType -> InstantiatedType -> TypeInferrer ()
-(unify, doMatch) = (helper mgu, helper match)
-    where helper f t1 t2 = do
-            currentSub <- getSubstitution
-            newSub <- f (applySub currentSub t1) (applySub currentSub t2)
-            modify (\s -> s { subs = subCompose currentSub newSub })
+unify :: Type -> Type -> TypeInferrer ()
+unify t1 t2 = do
+    currentSub <- getSubstitution
+    newSub <- mgu (applySub currentSub t1) (applySub currentSub t2)
+    composeSubstitution newSub
 
 
-inferLiteral :: Syntax.HsLiteral -> TypeInferrer InstantiatedType
-inferLiteral (HsChar _) = return typeChar
-inferLiteral (HsString _) = return typeString
+getTypePredicates :: TypeVariableName -> TypeInferrer (S.Set TypePredicate)
+getTypePredicates name = do
+    constraints <- getConstraints name
+    S.fromList <$> mapM (\classname -> IsInstance classname <$> nameToType name) (S.toList constraints)
+
+getVariableType :: VariableName -> TypeInferrer QuantifiedType
+getVariableType name = getType =<< getVariableTypeVariable name
+
+getType :: TypeVariableName -> TypeInferrer QuantifiedType
+getType name = do
+    sub <- getSubstitution
+    t <- applySub sub <$> nameToType name
+    let typeVars = getTypeVars t
+    predicates <- S.unions <$> mapM getTypePredicates (S.toList typeVars)
+    let qualType = Qualified predicates t
+    quantifierVars <- (S.intersection typeVars) <$> getFreeVariables
+    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList quantifierVars)
+    return $ Quantified quantifiers (Qualified predicates t)
+
+
+inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
+inferLiteral (HsChar _) = nameSimpleType typeChar
+inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
-    v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Num" v)
+    v <- freshTypeVariable
+    addFreeVariable v
+    addTypeConstraint v "Num"
     return v
 inferLiteral (HsFrac _) = do
-    v <- freshVariable KindStar
-    addTypePredicate (IsInstance "Fractional" v)
+    v <- freshTypeVariable
+    addFreeVariable v
+    addTypeConstraint v "Fractional"
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
 -- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
 -- into lets? Pg. 26 of thih.pdf
-inferExpression :: Syntax.HsExp -> TypeInferrer InstantiatedType
-inferExpression (HsVar name) = do
-    -- Get either a function or a variable, instantiating it if necessary
-    Qualified _ t <- getInstantiatedType (toId name)
-    return t
-inferExpression (HsCon name) = do
-    -- Instantiate the corresponding constructor
-    Qualified _ t <- instantiateConstructor (toId name)
-    return t
+inferExpression :: Syntax.HsExp -> TypeInferrer TypeVariableName
+inferExpression (HsVar name) = getVariableTypeVariable (toId name)
+inferExpression (HsCon name) = getVariableTypeVariable (toId name)
 inferExpression (HsLit literal) = inferLiteral literal
-inferExpression (HsApp f e) = do
-    -- Infer the function's type and the expression's type, then use unification to deduce the return type
-    funType <- inferExpression f
-    argType <- inferExpression e
-    t <- freshVariable KindStar
-    unify (makeFun [argType] t) funType
-    return t
 inferExpression (HsParen e) = inferExpression e
+inferExpression (HsLambda _ pats e) = do
+    retVar <- freshTypeVariable
+    retType <- nameToType retVar
+    argVars <- inferPatterns pats
+    argTypes <- mapM nameToType argVars
+    bodyType <- nameToType =<< inferExpression e
+    unify (makeFun argTypes bodyType) retType
+    addFreeVariables (S.fromList argVars)
+    return retVar
+inferExpression (HsApp f e) = do
+    -- Infer the function's type and the expression's type, and instantiate any quantified variables
+    funQuant@(Quantified _ funQual) <- getType =<< inferExpression f
+    funSub <- Substitution <$> getInstantiatingTypeMap funQuant
+    let Qualified _ funType = applySub funSub funQual
+    argQuant@(Quantified _ argQual) <- getType =<< inferExpression e
+    argSub <- Substitution <$> getInstantiatingTypeMap argQuant
+    let Qualified _ argType = applySub argSub argQual
+    -- Generate a fresh variable for the return type
+    retVar <- freshTypeVariable
+    let retType = TypeVar (TypeVariable retVar KindStar)
+    -- Unify `function` with `argument -> returntype` to match up the types.
+    sub <- mgu (makeFun [argType] retType) funType
+    -- Update our running substitution with this new one.
+    composeSubstitution sub
+    -- Add new type constraints
+    -- We propagate constraints from the function/argument instantiating substitutions, but we make sure not to add
+    -- these to the global substitution: otherwise free variables become bound after a single use.
+    updateTypeConstraints funSub
+    updateTypeConstraints argSub
+    updateTypeConstraints sub
+    --traceM $ printf "%s %s %s %s" retVar (show funSub) (show argSub) (show sub)
+    return retVar
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
             HsQVarOp name -> name
             HsQConOp name -> name
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
     inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
-inferExpression (HsTuple exps) = makeTuple <$> mapM inferExpression exps
-inferExpression (HsLambda _ pats e) = do
-    argTypes <- inferPatterns pats
-    returnType <- inferExpression e
-    return (makeFun argTypes returnType)
+inferExpression (HsTuple exps) = do
+    expTypes <- mapM nameToType =<< mapM inferExpression exps
+    retVar <- freshTypeVariable
+    retType <- nameToType retVar
+    unify retType (makeTuple expTypes)
+    return retVar
 inferExpression (HsLet decls e) = do
+    -- Process the declarations first (bring into scope any variables etc)
     mapM_ inferDecl decls
     inferExpression e
 inferExpression (HsIf c e1 e2) = undefined
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
--- The returned set contains type predicates on the type variables returned in the instantiated type, assumptions
--- mapping variable names in the pattern to their inferred types, and an inferred type for the whole expression
-inferPattern :: Syntax.HsPat -> TypeInferrer InstantiatedType
+
+inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
 inferPattern (HsPVar name) = do
-    t <- freshVariable KindStar
-    addVariableType (toId name) (qualifyType t)
-    return t
+    v <- freshTypeVariable
+    addVariableType (toId name) v
+    return v
 inferPattern (HsPLit lit) = inferLiteral lit
-inferPattern HsPWildCard = freshVariable KindStar
+inferPattern HsPWildCard = freshTypeVariable
 inferPattern (HsPAsPat name pat) = do
     t <- inferPattern pat
-    addVariableType (toId name) (qualifyType t)
+    addVariableType (toId name) t
     return t
 inferPattern (HsPParen pat) = inferPattern pat
 inferPattern (HsPApp constructor pats) = do
-    -- Infer any nested patterns
-    argTypes <- inferPatterns pats
-    -- Get the type of the constructor, instantiate it and add the constraints on the new type variables
-    Qualified _ constructorType <- instantiateConstructor (toId constructor)
-    returnType <- freshVariable KindStar
-    -- Check we have the right number of arguments to the data constructor
-    
-    let expArgCount = getKindArgCount $ getKind constructorType
-        argCount = length argTypes
-    when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
-    -- Unify the expected type with the variables we have to match up their types
-    let constructedFnType = makeFun argTypes returnType
-    unify constructorType constructedFnType
-    return returnType
-inferPattern (HsPTuple pats) = makeTuple <$> inferPatterns pats
--- TODO(kc506): Support more patterns
+    throwError "Currently not supported"
+    ---- Infer any nested patterns
+    --argTypes <- inferPatterns pats
+    ---- Get the type of the constructor, instantiate it and add the constraints on the new type variables
+    --constructorType <- getVariableType (toId constructor)
+    ---- Check we have the right number of arguments to the data constructor
+    --let expArgCount = getKindArgCount $ getKind constructorType
+    --    argCount = length argTypes
+    --when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
+    ---- Unify the expected type with the variables we have to match up their types
+    --returnType <- freshTypeVariable
+    --let constructedFnType = makeFun argTypes returnType
+    --unify constructorType constructedFnType
+    --return returnType
+inferPattern (HsPTuple pats) = do
+    vs <- mapM nameToType =<< inferPatterns pats
+    v <- freshTypeVariable
+    vt <- nameToType v
+    unify vt (makeTuple vs)
+    return v
 inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 
-inferPatterns :: [Syntax.HsPat] -> TypeInferrer [InstantiatedType]
+inferPatterns :: [Syntax.HsPat] -> TypeInferrer [TypeVariableName]
 inferPatterns = mapM inferPattern
 
 
-inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer InstantiatedType
+-- TODO(kc506): Change the return type to just yield all the constituent qualified types.
+-- Might make more useful if this is going to be used for function alternatives as well as case statements, etc.
+inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer TypeVariableName
 inferAlternative pats e = do
-    patternTypes <- inferPatterns pats
-    expType <- inferExpression e
-    -- The "type of the alternative" is the function type that it represents.
-    return $ makeFun patternTypes expType
+    retVar <- freshTypeVariable
+    retType <- nameToType retVar
+    patTypes <- mapM nameToType =<< inferPatterns pats
+    exprType <- nameToType =<< inferExpression e
+    unify (makeFun patTypes retType) exprType
+    return retVar
 
-inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer InstantiatedType
+inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer TypeVariableName
 inferAlternatives alts = do
-    ts <- mapM (uncurry inferAlternative) alts
-    commonType <- freshVariable KindStar
+    ts <- mapM nameToType =<< mapM (uncurry inferAlternative) alts
+    commonVar <- freshTypeVariable
+    commonType <- nameToType commonVar
     mapM_ (unify commonType) ts
-    return commonType
+    return commonVar
 
 -- |Infers the type of a pattern binding (eg. `foo = 5`) without an explicit type
 inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> TypeInferrer ()
 inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
-    sub <- getSubstitution
-    patType <- applySub sub <$> inferPattern pat
-    rhsType <- applySub sub <$> inferExpression e
+    patType <- nameToType =<< inferPattern pat
+    rhsType <- nameToType =<< inferExpression e
     unify patType rhsType
-    classEnv <- getClassEnvironment
-    preds <- applySub sub <$> getPredicates
-    let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
-    (qualifiers, _) <- split classEnv rhsTypeVariables preds
+    -- TODO(kc506): Check (alpha, don't unify) that qualifiers match?
+
+    --classEnv <- getClassEnvironment
+    --preds <- applySub sub <$> getPredicates
+    --let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
+    --(qualifiers, _) <- split classEnv rhsTypeVariables preds
     -- TODO(kc506): Set the set of assumptions in the state to be exactly the deferred assumptions?
-    --mapM_ (uncurry addVariableType)
-    return ()
+    --mapM_ (uncurry addType)
 inferImplicitPatternBinding _ (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
 inferDecl :: Syntax.HsDecl -> TypeInferrer ()
 inferDecl (HsPatBind _ pat rhs _) = inferImplicitPatternBinding pat rhs
 inferDecl (HsFunBind _) = throwError "Function declarations not supported"
 inferDecl _ = throwError "Declaration not supported"
+
+getVariableTypes :: TypeInferrer (M.Map TypeVariableName QuantifiedType)
+getVariableTypes = mapM getType =<< gets types
+    --sub <- getSubstitution
+    ---- TODO(kc506): Need to get just **user-defined** variables and functions.......
+    ---- Get only the qualified variables
+    --variables <- applySub sub . M.mapMaybe selectVars <$> gets types
+    --classEnv <- getClassEnvironment
+    --predicates <- applySub sub <$> getPredicates
+    --s <- get
+    --traceM (unpack $ pShow s)
+    --let relevantPred t (IsInstance _ x) = S.fromList (getInstantiatedTypeVars x) `S.isSubsetOf` S.fromList (getInstantiatedTypeVars t)
+    --    getRelevantPreds t = simplify classEnv $ S.filter (relevantPred t) predicates
+    --mapM (\t -> Qualified <$> getRelevantPreds t <*> pure t) variables
