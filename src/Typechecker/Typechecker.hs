@@ -312,8 +312,6 @@ inferPatterns :: [Syntax.HsPat] -> TypeInferrer [TypeVariableName]
 inferPatterns = mapM inferPattern
 
 
--- TODO(kc506): Change the return type to just yield all the constituent qualified types.
--- Might make more useful if this is going to be used for function alternatives as well as case statements, etc.
 inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer TypeVariableName
 inferAlternative pats e = do
     retVar <- freshTypeVariable
@@ -337,14 +335,6 @@ inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
     patType <- nameToType =<< inferPattern pat
     rhsType <- nameToType =<< inferExpression e
     unify patType rhsType
-    -- TODO(kc506): Check (alpha, don't unify) that qualifiers match?
-
-    --classEnv <- getClassEnvironment
-    --preds <- applySub sub <$> getPredicates
-    --let rhsTypeVariables = S.fromList $ getTypeVars $ applySub sub rhsType
-    --(qualifiers, _) <- split classEnv rhsTypeVariables preds
-    -- TODO(kc506): Set the set of assumptions in the state to be exactly the deferred assumptions?
-    --mapM_ (uncurry addType)
 inferImplicitPatternBinding _ (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
 inferDecl :: Syntax.HsDecl -> TypeInferrer ()
@@ -354,14 +344,3 @@ inferDecl _ = throwError "Declaration not supported"
 
 getVariableTypes :: TypeInferrer (M.Map TypeVariableName QuantifiedType)
 getVariableTypes = mapM getType =<< gets types
-    --sub <- getSubstitution
-    ---- TODO(kc506): Need to get just **user-defined** variables and functions.......
-    ---- Get only the qualified variables
-    --variables <- applySub sub . M.mapMaybe selectVars <$> gets types
-    --classEnv <- getClassEnvironment
-    --predicates <- applySub sub <$> getPredicates
-    --s <- get
-    --traceM (unpack $ pShow s)
-    --let relevantPred t (IsInstance _ x) = S.fromList (getInstantiatedTypeVars x) `S.isSubsetOf` S.fromList (getInstantiatedTypeVars t)
-    --    getRelevantPreds t = simplify classEnv $ S.filter (relevantPred t) predicates
-    --mapM (\t -> Qualified <$> getRelevantPreds t <*> pure t) variables
