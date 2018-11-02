@@ -89,19 +89,11 @@ test = let
         let s = "x = 1.2"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Fractional" ta) ta)]
     ,
-        let s = "x = 1.2"
-            t = TypeVar (TypeVariable "a" KindStar)
-        in testBindings s [("x", Qualified (S.singleton $ IsInstance "Fractional" t) t)]
-    ,
         let s = "x = 'a'"
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeChar)]
     ,
         let s = "x = \"ab\""
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeString)]
-    ,
-        testBindingsFail "x = \"hi"
-    ,
-        testBindingsFail "x = 'hi"
     ,
         -- Data constructors
         let s = "x = True"
@@ -137,25 +129,6 @@ test = let
         in testBindings s
             [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        testBindingsFail "(x, y) = True" 
-    ,
-        let s = "(x, _, _) = (True, False, True)"
-        in testBindings s [("x", Qualified S.empty typeBool)]
-    ,
-        let s = "a@(x, _, _) = (True, False, True)"
-            t = makeTuple (replicate 3 typeBool)
-        in testBindings s [("x", Qualified S.empty typeBool), ("a", Qualified S.empty t)]
-    ,
-        let s = "a@(_, y) = (1, True)"
-            v = TypeVar (TypeVariable "a" KindStar)
-            t = makeTuple [v, typeBool]
-        in testBindings s [("y", Qualified S.empty typeBool), ("a", Qualified (S.singleton $ IsInstance "Num" t) t)]
-    ,
-        let s = "(x, y) = (1, (True))"
-            t = TypeVar (TypeVariable "a" KindStar)
-            q = (S.singleton $ IsInstance "Num" t)
-        in testBindings s [("x", Qualified q t), ("y", Qualified q (makeTuple [t, typeBool]))]
     ,
         testBindingsFail "(x, y) = True" 
     ,

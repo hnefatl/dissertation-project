@@ -60,4 +60,4 @@ builtinClasses = M.fromList
     ]
     where
         a = TypeVar (TypeVariable "a" KindStar)
-        b = TypeVar (TypeVariable "a" KindStar)
+        b = TypeVar (TypeVariable "b" KindStar)
