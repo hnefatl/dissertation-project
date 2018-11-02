@@ -30,7 +30,6 @@ data InferrerState = InferrerState
     { substitutions :: Substitution
     , types :: TypeMap
     , classEnvironment :: ClassEnvironment
-    , restricted :: S.Set TypeVariableName
     , kinds :: M.Map TypeVariableName Kind
     , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
     , freeVariables :: S.Set TypeVariableName
@@ -42,7 +41,6 @@ instance Default InferrerState where
             { substitutions = def
             , types = M.empty
             , classEnvironment = M.empty
-            , restricted = S.empty
             , kinds = M.empty
             , typePredicates = M.empty
             , freeVariables = S.empty
@@ -76,9 +74,7 @@ instance TypeInstantiator TypeInferrer where
 
 -- |Creates a fresh (uniquely named) type variable
 freshTypeVariable :: TypeInferrer TypeVariableName
-freshTypeVariable = do
-    name <- freshName
-    return name
+freshTypeVariable = freshName
 
 nameToType :: TypeVariableName -> TypeInferrer Type
 nameToType name = TypeVar <$> nameToTypeVariable name
@@ -131,7 +127,7 @@ addTypeConstraint varname classname = addTypeConstraints varname (S.singleton cl
 addTypeConstraints:: TypeVariableName -> S.Set ClassName -> TypeInferrer ()
 addTypeConstraints name preds = mergeTypeConstraints (M.singleton name preds)
 mergeTypeConstraints :: M.Map TypeVariableName (S.Set ClassName) -> TypeInferrer ()
-mergeTypeConstraints ps = modify (\s -> s { typePredicates = ps `M.union` typePredicates s })
+mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union ps (typePredicates s) })
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
 addTypePredicate (IsInstance _ (TypeConstant _ _ _)) = throwError "Not implemented"
@@ -164,7 +160,7 @@ getVariableTypeVariable name = do
 updateTypeConstraints :: Substitution -> TypeInferrer ()
 updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
     where helper old (TypeVar (TypeVariable new _)) = addTypeConstraints new =<< getConstraints old
-          helper old (TypeConstant _ ks ts) = do
+          helper old (TypeConstant _ _ _) = do
             constraints <- getConstraints old
             forM_ constraints $ \classInstance -> do
                 ce <- getClassEnvironment
@@ -234,7 +230,7 @@ inferExpression (HsApp f e) = do
     let Qualified argQuals argType = applySub argSub argQual
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVariable
-    let retType = (TypeVar (TypeVariable retVar KindStar))
+    let retType = TypeVar (TypeVariable retVar KindStar)
     -- Unify `function` with `argument -> returntype` to match up the types.
     sub <- mgu (makeFun [argType] retType) funType
     -- Update our running substitution with this new one.

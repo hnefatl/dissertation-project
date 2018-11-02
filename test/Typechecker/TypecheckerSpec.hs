@@ -18,6 +18,7 @@ import Data.List
 import Data.Foldable
 import Data.Either
 import Data.Text.Lazy (unpack)
+import Text.Printf
 import Text.Pretty.Simple
 import Debug.Trace
 import Control.Monad.State.Strict (get)
@@ -52,16 +53,17 @@ inferModule s = (runExcept out, state)
 
 testBindings :: String -> [(Id, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
-    let (etypes, _) = inferModule s
+    let (etypes, state) = inferModule s
     ts <- unpackEither etypes
     --traceM (unpack $ pShow ts)
-    let check (name, Quantified _ t) = either assertFailure return $ runExcept $
+    let addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
+        check (name, Quantified _ t) = either assertFailure return $ runExcept $ addDebugInfo $
             case M.lookup name ts of
                 Nothing -> throwError "Variable not in environment"
                 Just (Quantified _ t') -> do
                     sub <- mgu t t'
                     let (s1, s2) = (applySub sub t, applySub sub t')
-                    unless (s1 == s2) (throwError $ "Substitutions not equal: " ++ show s1 ++ " vs " ++ show s2)
+                    unless (s1 == s2) (throwError $ printf "Substitutions not equal: %s vs %s" (show s1) (show s2))
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
