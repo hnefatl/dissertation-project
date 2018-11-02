@@ -145,7 +145,6 @@ insertQuantifiedType name t@(Quantified quants qualType) = do
     funVar <- freshTypeVariable
     funType <- nameToType funVar
     unify funType t'
-    addFreeVariable funVar
     addVariableType name funVar
 
 -- |Given a variable name, get the type variable name that corresponds
@@ -205,10 +204,12 @@ inferLiteral (HsChar _) = nameSimpleType typeChar
 inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVariable
+    addFreeVariable v
     addTypeConstraint v "Num"
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVariable
+    addFreeVariable v
     addTypeConstraint v "Fractional"
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
@@ -220,14 +221,23 @@ inferExpression (HsVar name) = getVariableTypeVariable (toId name)
 inferExpression (HsCon name) = getVariableTypeVariable (toId name)
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
+inferExpression (HsLambda _ pats e) = do
+    retVar <- freshTypeVariable
+    retType <- nameToType retVar
+    argVars <- inferPatterns pats
+    argTypes <- mapM nameToType argVars
+    bodyType <- nameToType =<< inferExpression e
+    unify (makeFun argTypes bodyType) retType
+    addFreeVariables (S.fromList argVars)
+    return retVar
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
     funQuant@(Quantified _ funQual) <- getType =<< inferExpression f
     funSub <- Substitution <$> getInstantiatingTypeMap funQuant
-    let Qualified funQuals funType = applySub funSub funQual
+    let Qualified _ funType = applySub funSub funQual
     argQuant@(Quantified _ argQual) <- getType =<< inferExpression e
     argSub <- Substitution <$> getInstantiatingTypeMap argQuant
-    let Qualified argQuals argType = applySub argSub argQual
+    let Qualified _ argType = applySub argSub argQual
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVariable
     let retType = TypeVar (TypeVariable retVar KindStar)
@@ -236,7 +246,12 @@ inferExpression (HsApp f e) = do
     -- Update our running substitution with this new one.
     composeSubstitution sub
     -- Add new type constraints
+    -- We propagate constraints from the function/argument instantiating substitutions, but we make sure not to add
+    -- these to the global substitution: otherwise free variables become bound after a single use.
+    updateTypeConstraints funSub
+    updateTypeConstraints argSub
     updateTypeConstraints sub
+    --traceM $ printf "%s %s %s %s" retVar (show funSub) (show argSub) (show sub)
     return retVar
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
@@ -249,16 +264,6 @@ inferExpression (HsTuple exps) = do
     retVar <- freshTypeVariable
     retType <- nameToType retVar
     unify retType (makeTuple expTypes)
-    return retVar
-inferExpression (HsLambda _ pats e) = do
-    argVars <- inferPatterns pats
-    argTypes <- mapM nameToType argVars
-    retVar <- freshTypeVariable
-    retType <- nameToType retVar
-    bodyVar <- inferExpression e
-    bodyType <- nameToType bodyVar
-    unify (makeFun argTypes bodyType) retType
-    addFreeVariable retVar
     return retVar
 inferExpression (HsLet decls e) = do
     -- Process the declarations first (bring into scope any variables etc)

@@ -143,6 +143,10 @@ test = let
             , ("w", Quantified S.empty $ Qualified S.empty typeString) ]
         -- TODO(kc506): Test pattern matching with data constructors
     ,
+        let s = "x = (+)"
+            t = makeFun [ta, ta] ta
+        in testBindings s [("+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) t)]
+    ,
         -- Function application (prefix and infix)
         let s = "x = (+) 3 4" 
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
@@ -181,13 +185,25 @@ test = let
         let s = "x = (\\f -> f True) (\\y -> not (not y))"
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
     ,
-        let s = "y = let f = \\x -> x in f 5 + f 6"
+        let s = "y = let f = \\x -> x in f 5"
+            tf = makeFun [ta] ta
         in testBindings s
-            [ ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance "Num" tb) tb)
-            , ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta) ]
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
+            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance "Num" tb) tb) ]
+    ,
+        let s = "y = let f = \\x -> x in f 5 + f 6"
+            tf = makeFun [ta] ta
+        in testBindings s
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
+            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance "Num" tb) tb) ]
     ,
         let s = "a = let f = \\x -> x\n" ++
                 "        g = \\y z -> z\n" ++
                 "    in g (f 5) (f True)"
         in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
+    ,
+        -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
+        -- Contrast to the above where f is bound in a let-expression so is quantified
+        let s = "let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
+        in testBindingsFail s
     ]
