@@ -159,16 +159,17 @@ getVariableTypeVariable name = do
 updateTypeConstraints :: Substitution -> TypeInferrer ()
 updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
     where helper old (TypeVar (TypeVariable new _)) = addTypeConstraints new =<< getConstraints old
-          helper old (TypeConstant _ _ _) = do
+          helper old TypeConstant{} = do
             constraints <- getConstraints old
             forM_ constraints $ \classInstance -> do
                 ce <- getClassEnvironment
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
-                pred <- IsInstance classInstance <$> nameToType old
-                newConstraints <- ifPThenByInstance ce (applySub sub pred) >>= \case
-                    Nothing -> throwError $ "No matching instance for " ++ show classInstance
-                    Just constraints -> return constraints
-                addTypePredicates newConstraints
+                pred <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
+                newPredicates <- ifPThenByInstance ce pred >>= \case
+                    Nothing -> throwError $ "No matching instance for " ++ show pred
+                    Just cs -> return cs
+                detectInvalidPredicates ce newPredicates
+                addTypePredicates newPredicates
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
 -- |Same as unify but only unifying variables in the first argument with those in the left
@@ -176,6 +177,7 @@ unify :: Type -> Type -> TypeInferrer ()
 unify t1 t2 = do
     currentSub <- getSubstitution
     newSub <- mgu (applySub currentSub t1) (applySub currentSub t2)
+    updateTypeConstraints newSub
     composeSubstitution newSub
 
 
@@ -190,9 +192,10 @@ getVariableType name = getType =<< getVariableTypeVariable name
 getType :: TypeVariableName -> TypeInferrer QuantifiedType
 getType name = do
     sub <- getSubstitution
+    ce <- getClassEnvironment
     t <- applySub sub <$> nameToType name
     let typeVars = getTypeVars t
-    predicates <- S.unions <$> mapM getTypePredicates (S.toList typeVars)
+    predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
     let qualType = Qualified predicates t
     quantifierVars <- (S.intersection typeVars) <$> getFreeVariables
     quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList quantifierVars)
@@ -270,6 +273,15 @@ inferExpression (HsLet decls e) = do
     mapM_ inferDecl decls
     inferExpression e
 inferExpression (HsIf c e1 e2) = undefined
+inferExpression (HsList exps) = do
+    ets <- mapM nameToType =<< mapM inferExpression exps
+    -- Check each element has the same type
+    commonType <- nameToType =<< freshTypeVariable
+    mapM_ (unify commonType) ets
+    v <- freshTypeVariable
+    vt <- nameToType v
+    unify vt (makeList commonType)
+    return v
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 
@@ -285,26 +297,21 @@ inferPattern (HsPAsPat name pat) = do
     addVariableType (toId name) t
     return t
 inferPattern (HsPParen pat) = inferPattern pat
-inferPattern (HsPApp constructor pats) = do
-    throwError "Currently not supported"
-    ---- Infer any nested patterns
-    --argTypes <- inferPatterns pats
-    ---- Get the type of the constructor, instantiate it and add the constraints on the new type variables
-    --constructorType <- getVariableType (toId constructor)
-    ---- Check we have the right number of arguments to the data constructor
-    --let expArgCount = getKindArgCount $ getKind constructorType
-    --    argCount = length argTypes
-    --when (expArgCount /= argCount) (throwError $ printf "Function expected %d args, got %d" expArgCount argCount)
-    ---- Unify the expected type with the variables we have to match up their types
-    --returnType <- freshTypeVariable
-    --let constructedFnType = makeFun argTypes returnType
-    --unify constructorType constructedFnType
-    --return returnType
+inferPattern (HsPApp constructor pats) = throwError "Currently not supported"
 inferPattern (HsPTuple pats) = do
-    vs <- mapM nameToType =<< inferPatterns pats
+    pts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVariable
     vt <- nameToType v
-    unify vt (makeTuple vs)
+    unify vt (makeTuple pts)
+    return v
+inferPattern (HsPList pats) = do
+    pts <- mapM nameToType =<< inferPatterns pats
+    -- Check each element has the same type
+    commonType <- nameToType =<< freshTypeVariable
+    mapM_ (unify commonType) pts
+    v <- freshTypeVariable
+    vt <- nameToType v
+    unify vt (makeList commonType)
     return v
 inferPattern p = throwError ("Unsupported pattern: " ++ show p)
 

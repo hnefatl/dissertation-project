@@ -67,7 +67,7 @@ subSingle :: TypeVariableName -> Type -> Substitution
 subSingle v t = Substitution (M.singleton v t)
 
 subMultiple :: [(TypeVariableName, Type)] -> Substitution
-subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
+subMultiple = subComposes . map (uncurry subSingle)
 
 
 -- |Composition of substitutions
@@ -76,6 +76,9 @@ subMultiple = foldl subCompose subEmpty . map (uncurry subSingle)
 subCompose :: Substitution -> Substitution -> Substitution
 subCompose (Substitution subs1) s2@(Substitution subs2) = Substitution (M.union subs1' subs2)
     where subs1' = M.map (applySub s2) subs1
+
+subComposes :: [Substitution] -> Substitution
+subComposes = foldl' subCompose subEmpty
 
 -- |Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
@@ -86,3 +89,6 @@ subMerge (Substitution subs1) (Substitution subs2) =
           -- Check that both substitutions give the same type when applied to the same type variables
           -- Ensures that eg. `[b/a, Int/b]` and `c/a, Int/c]` are merged
           subsGiveSameResult var = M.lookup var subs1 == M.lookup var subs2
+
+subMerges :: MonadError String m => [Substitution] -> m Substitution
+subMerges = foldM subMerge subEmpty

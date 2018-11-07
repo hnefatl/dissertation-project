@@ -57,20 +57,21 @@ testBindings s cases = testCase (deline s) $ do
     let (etypes, state) = inferModule s
     ts <- unpackEither etypes
     --traceM (unpack $ pShow ts)
-    let addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
-        check (name, Quantified _ t) = either assertFailure return $ runExcept $ addDebugInfo $
+    let check (name, Quantified _ t) = either assertFailure return $ runExcept $ addDebugInfo $
             case M.lookup name ts of
                 Nothing -> throwError "Variable not in environment"
                 Just (Quantified _ t') -> do
                     sub <- mgu t t'
                     let (s1, s2) = (applySub sub t, applySub sub t')
                     unless (s1 == s2) (throwError $ printf "Substitutions not equal: %s vs %s" (show s1) (show s2))
+        addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
-testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool (s' ++ ": " ++ unpack (pShow types)) (isLeft types)
+testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool errMsg (isLeft result)
     where s' = deline s
-          (types, _) = inferModule s
+          (result, state) = inferModule s
+          errMsg = printf "%s: Got %s\n%s" s' (unpack $ pShow result) (unpack $ pShow state)
 
 unpackEither :: Either String b -> IO b
 unpackEither = either assertFailure return
@@ -140,6 +141,20 @@ test = let
             , ("w", Quantified S.empty $ Qualified S.empty typeString) ]
         -- TODO(kc506): Test pattern matching with data constructors
     ,
+        let s = "x = [True, False]"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty (makeList typeBool))]
+    ,
+        let s = "x = [1, 2, 3]"
+        in testBindings s
+            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) (makeList ta))]
+    ,
+        let s = "x = [True, 2]"
+        in testBindingsFail s
+    ,
+        let s = "x = [1, 2.2]"
+        in testBindings s
+            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Fractional" ta) (makeList ta))]
+    ,
         let s = "x = (+)"
             t = makeFun [ta, ta] ta
         in testBindings s [("+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) t)]
@@ -201,6 +216,15 @@ test = let
     ,
         -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
         -- Contrast to the above where f is bound in a let-expression so is quantified
-        let s = "let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
+        let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
         in testBindingsFail s
+    ,
+        let s = "x = (\\(y, z) -> y + z) (1, 2)"
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = (\\[y, z] -> y && z) [True, False]"
+        in testBindings s
+            [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool)
+            , ("z", Quantified S.empty $ Qualified S.empty typeBool) ]
     ]

@@ -44,14 +44,17 @@ instance HasHnf t => HasHnf [t] where
     toHnf ce ts = S.unions <$> mapM (toHnf ce) ts
 
 detectInvalidPredicate :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> TypePredicate -> m ()
-detectInvalidPredicate ce inst@(IsInstance classname (TypeConstant _ _ _)) = do
+detectInvalidPredicate _ (IsInstance _ TypeVar{}) = return ()
+detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
     insts <- instances classname ce
     -- isInstance is true if the given predicate is an "immediate" instance of the class (has no qualifiers, like `Eq
-    -- Int`) and it has the same as the given predicate. We can use `==` instead of eg. `hasMgu` because these ground
-    -- terms should be structurally and nominally equal.
+    -- Int`) and it has the same head as the given predicate. We can use `==` instead of eg. `hasMgu` because these
+    -- ground terms should be structurally and nominally equal.
     let isInstance = any (\(Qualified quals t) -> S.null quals && inst == t) insts
     unless isInstance (throwError $ printf "Predicate %s doesn't hold in the environment." (show inst))
-detectInvalidPredicate _ _ = return ()
+
+detectInvalidPredicates :: (TypeInstantiator m, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m ()
+detectInvalidPredicates ce = mapM_ (detectInvalidPredicate ce)
 
 -- |Removes redundant predicates from the given set. A predicate is redundant if it's entailed by any of the other
 -- predicates
