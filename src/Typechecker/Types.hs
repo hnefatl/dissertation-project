@@ -1,5 +1,4 @@
-{-# Language FlexibleContexts, LambdaCase, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies, TupleSections #-}
-{-# Language DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
+{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections #-}
 -- We require undecidable instances to make Sets Instantiable
 {-# Language UndecidableInstances#-}
 

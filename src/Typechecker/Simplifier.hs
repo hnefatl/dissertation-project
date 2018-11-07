@@ -24,7 +24,7 @@ class HasHnf t where
 instance HasHnf Type where
     inHnf (TypeVar _) = True
     inHnf (TypeConstant _ [] ts) = inHnf ts
-    inHnf (TypeConstant _ _ _) = False
+    inHnf TypeConstant{} = False
 
     toHnf _ _ = throwError "Can't convert a type to HNF"
 instance HasHnf TypePredicate where

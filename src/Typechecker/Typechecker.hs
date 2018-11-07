@@ -130,7 +130,7 @@ mergeTypeConstraints :: M.Map TypeVariableName (S.Set ClassName) -> TypeInferrer
 mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union ps (typePredicates s) })
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
-addTypePredicate (IsInstance _ (TypeConstant _ _ _)) = throwError "Not implemented"
+addTypePredicate (IsInstance _ TypeConstant{}) = throwError "Not implemented"
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
 addTypePredicates = mapM_ addTypePredicate
 
@@ -197,7 +197,7 @@ getType name = do
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
     let qualType = Qualified predicates t
-    quantifierVars <- (S.intersection typeVars) <$> getFreeVariables
+    quantifierVars <- S.intersection typeVars <$> getFreeVariables
     quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList quantifierVars)
     return $ Quantified quantifiers (Qualified predicates t)
 
@@ -272,7 +272,17 @@ inferExpression (HsLet decls e) = do
     -- Process the declarations first (bring into scope any variables etc)
     mapM_ inferDecl decls
     inferExpression e
-inferExpression (HsIf c e1 e2) = undefined
+inferExpression (HsIf c e1 e2) = do
+    ct <- getType =<< inferExpression c
+    let expectedType = Quantified S.empty (Qualified S.empty typeBool)
+    unless (ct == expectedType) (throwError $ printf "`if` expression condition %s doesn't have type bool" (show c))
+    e1t <- nameToType =<< inferExpression e1
+    e2t <- nameToType =<< inferExpression e2
+    commonVar <- freshTypeVariable
+    commonType <- nameToType commonVar
+    unify commonType e1t
+    unify commonType e2t
+    return commonVar
 inferExpression (HsList exps) = do
     ets <- mapM nameToType =<< mapM inferExpression exps
     -- Check each element has the same type

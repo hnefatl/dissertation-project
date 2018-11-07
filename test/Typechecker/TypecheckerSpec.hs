@@ -10,7 +10,6 @@ import Language.Haskell.Parser
 
 import Typechecker.Types
 import Typechecker.Unifier
-import Typechecker.Substitution
 import Typechecker.Typechecker
 import Typechecker.Substitution
 import Typechecker.Hardcoded
@@ -21,7 +20,6 @@ import Data.Either
 import Data.Text.Lazy (unpack)
 import Text.Printf
 import Text.Pretty.Simple
-import Debug.Trace
 import Control.Monad.State.Strict (get)
 import Control.Monad.Except
 import qualified Data.Set as S
@@ -227,4 +225,19 @@ test = let
             [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool)
             , ("z", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        let s = "x = if True then 1 else 2"
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Num" ta) ta)]
+    ,
+        let s = "x = if True then 1.2 else 2"
+        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Fractional" ta) ta)]
+    ,
+        let s = "x = if True then True else False"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
+        let s = "x = if 1 then True else False"
+        in testBindingsFail s
+    ,
+        let s = "x = if False then 1 else True"
+        in testBindingsFail s
     ]

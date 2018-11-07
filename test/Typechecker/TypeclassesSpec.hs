@@ -1,6 +1,7 @@
 module Typechecker.TypeclassesSpec where
 
 import qualified Data.Set as S
+import Control.Monad
 
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -19,7 +20,7 @@ makeTest ce ps goal = testCase (show goal) $ case result of
 makeFailTest :: ClassEnvironment -> S.Set TypePredicate -> TypePredicate -> TestTree
 makeFailTest ce ps goal = testCase ("Fails: " ++ show goal) $ case result of
         Left _ -> return ()
-        Right success -> if success then assertFailure "Succeeded in proving" else return ()
+        Right success -> when success (assertFailure "Succeeded in proving")
     where result = evalTypeInferrer $ entails ce ps goal
 
 test :: TestTree
