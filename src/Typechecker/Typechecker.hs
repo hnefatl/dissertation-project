@@ -13,9 +13,6 @@ import Data.Default
 import Text.Printf
 import Control.Monad.Except
 import Control.Monad.State.Strict
-import Debug.Trace
-import Text.Pretty.Simple
-import Data.Text.Lazy (unpack)
 import qualified Data.Set as S
 import qualified Data.Map as M
 
@@ -49,6 +46,12 @@ instance Default InferrerState where
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
+instance NameGenerator TypeInferrer where
+    freshName = do
+        counter <- (1 +) <$> gets variableCounter
+        modify (\s -> s { variableCounter = counter })
+        return ("t" ++ show counter)
+
 
 -- |Run type inference, and return the (possible failed) result along with the last state
 runTypeInferrer :: MonadError String m => TypeInferrer a -> (m a, InferrerState)
@@ -65,12 +68,6 @@ execTypeInferrer (TypeInferrer inner) = case e of
     Left err -> throwError err
     Right _ -> return s
     where (e, s) = runState (runExceptT inner) def
-
-instance TypeInstantiator TypeInferrer where
-    freshName = do
-        counter <- (1 +) <$> gets variableCounter
-        modify (\s -> s { variableCounter = counter })
-        return ("v" ++ show counter)
 
 -- |Creates a fresh (uniquely named) type variable
 freshTypeVariable :: TypeInferrer TypeVariableName

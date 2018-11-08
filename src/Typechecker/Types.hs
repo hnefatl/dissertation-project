@@ -1,6 +1,4 @@
 {-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections #-}
--- We require undecidable instances to make Sets Instantiable
-{-# Language UndecidableInstances#-}
 
 module Typechecker.Types where
 
@@ -10,8 +8,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (intercalate, foldl')
 
--- |General variable/type name
-type Id = String
+import ExtraDefs
 
 type TypeVariableName = Id
 type VariableName = Id
@@ -117,30 +114,25 @@ instance Show QuantifiedType where
         where quantifiers = unwords (map show $ S.toList quants)
 
 
--- |A monad that can convert a type with dummy variables into one with (uniquely) named variables
-class MonadError String m => TypeInstantiator m where
-    -- |Should generate a new unique name each time it's run
-    freshName :: m TypeVariableName
+-- |Instantiate a quantified type into a qualified type, replacing all universally quantified variables with new
+-- type variables.
+instantiate :: (NameGenerator m, MonadError String m) => QuantifiedType -> m QualifiedType
+instantiate qt@(Quantified _ (Qualified quals t)) = do
+    varMap <- getInstantiatingTypeMap qt
+    let instSet = S.fromList . map instPred . S.toList
+        instPred (IsInstance classname x) = IsInstance classname (instType x)
+        instType v@(TypeVar (TypeVariable name _)) = M.findWithDefault v name varMap
+        instType (TypeConstant name ks ts) = TypeConstant name ks (map instType ts)
+    return $ Qualified (instSet quals) (instType t)
 
-    -- |Instantiate a quantified type into a qualified type, replacing all universally quantified variables with new
-    -- type variables.
-    instantiate :: QuantifiedType -> m QualifiedType
-    instantiate qt@(Quantified _ (Qualified quals t)) = do
-        varMap <- getInstantiatingTypeMap qt
-        let instSet = S.fromList . map instPred . S.toList
-            instPred (IsInstance classname x) = IsInstance classname (instType x)
-            instType v@(TypeVar (TypeVariable name _)) = M.findWithDefault v name varMap
-            instType (TypeConstant name ks ts) = TypeConstant name ks (map instType ts)
-        return $ Qualified (instSet quals) (instType t)
-    
-    getInstantiatingTypeMap :: QuantifiedType -> m (M.Map TypeVariableName Type)
-    getInstantiatingTypeMap q = do
-        m <- getInstantiatingMap q
-        return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
+getInstantiatingTypeMap :: (NameGenerator m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
+getInstantiatingTypeMap q = do
+    m <- getInstantiatingMap q
+    return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
 
-    getInstantiatingMap :: QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
-    getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
-        where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
+getInstantiatingMap :: (NameGenerator m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
+getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
+    where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types

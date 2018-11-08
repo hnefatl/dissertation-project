@@ -11,6 +11,7 @@ import Control.Monad.State.Strict
 import Data.Either
 import qualified Data.Set as S
 
+import ExtraDefs
 import Typechecker.Substitution
 import Typechecker.Types
 
@@ -84,5 +85,5 @@ newtype IsolatedTypeInstantiator a = ITI (State Int a)
 instance MonadError String IsolatedTypeInstantiator where
     throwError = error
     catchError = undefined
-instance TypeInstantiator IsolatedTypeInstantiator where
+instance NameGenerator IsolatedTypeInstantiator where
     freshName = state (\s -> ("v" ++ show s, s + 1))

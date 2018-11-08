@@ -8,6 +8,7 @@ import Test.Tasty.HUnit
 import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
+import ExtraDefs
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Typechecker

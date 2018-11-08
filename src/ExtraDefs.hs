@@ -6,10 +6,11 @@ import Data.Foldable
 
 import Language.Haskell.Syntax as Syntax
 
-allM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
-allM f = foldlM (\x y -> (x &&) <$> f y) True
+-- |General variable/type name
+type Id = String
 
-anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
+allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
+allM f = foldlM (\x y -> (x &&) <$> f y) True
 anyM f = foldlM (\x y -> (x ||) <$> f y) False
 
 -- |foldlM strict in the accumulator
@@ -29,3 +30,7 @@ instance ToId Syntax.HsQName where
     toId (Qual _ name) = toId name
     toId (UnQual name) = toId name
     toId (Special _) = error "Add support for special constructors"
+
+class Monad m => NameGenerator m where
+    -- |Should generate a new unique name each time it's run
+    freshName :: m String
