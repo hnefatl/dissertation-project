@@ -27,6 +27,7 @@ dependencies:
 - extra
 - data-default
 - text
+- bytestring
 - bytestring-trie
 
 library:
