@@ -19,16 +19,15 @@ synopsis:            Short description of your package
 description:         Please see the README on Github at <https://github.com/hnefatl/compiler#readme>
 
 dependencies:
-- base >= 4.7 && < 4.11
+- base >= 4.7 && < 5
 - containers
+- unordered-containers
 - mtl
 - haskell-src
 - pretty-simple
 - extra
 - data-default
 - text
-- bytestring
-- bytestring-trie
 
 library:
   source-dirs: src
