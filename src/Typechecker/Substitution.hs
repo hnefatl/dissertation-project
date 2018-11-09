@@ -20,7 +20,7 @@ instance Default Substitution where
 
 instance Show Substitution where
     show (Substitution subs) = "[" ++ intercalate ", " prettyElements ++ "]"
-        where prettyElements = map (\(k, v) -> "(" ++ show v ++ ")/" ++ k) $ M.toList subs
+        where prettyElements = map (\(k, v) -> "(" ++ show v ++ ")/" ++ show k) $ M.toList subs
 
 class Substitutable t where
     -- |Apply the given type variable -> type substitution

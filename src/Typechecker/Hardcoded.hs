@@ -9,56 +9,60 @@ import Typechecker.Typeclasses
 
 builtinConstructors :: M.Map Id QuantifiedType
 builtinConstructors = M.fromList
-    [ ("True", Quantified S.empty $ Qualified S.empty typeBool),
-      ("False", Quantified S.empty $ Qualified S.empty typeBool)
+    [ (Id "True", Quantified S.empty $ Qualified S.empty typeBool),
+      (Id "False", Quantified S.empty $ Qualified S.empty typeBool)
     ]
 
 builtinFunctions :: M.Map Id QuantifiedType
 builtinFunctions = M.fromList
     [
-      let v = TypeVariable "a" KindStar
+      let v = TypeVariable (Id "a") KindStar
           a = TypeVar v
           t = makeFun [a, a] a
-      in ("+", Quantified (S.singleton v) $ Qualified (S.singleton (IsInstance "Num" a)) t)
+      in (Id "+", Quantified (S.singleton v) $ Qualified (S.singleton (IsInstance (Id "Num") a)) t)
     ,
-      ("&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+      (Id "&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-      ("||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+      (Id "||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-      ("not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
+      (Id "not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
     ]
 
 builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
     [
-        ("Eq", Class S.empty $ S.fromList
+        (classEq, Class S.empty $ S.fromList
             [
-                Qualified S.empty (IsInstance "Eq" typeBool),
-                Qualified S.empty (IsInstance "Eq" typeInt),
-                Qualified S.empty (IsInstance "Eq" typeChar),
-                Qualified (S.fromList [IsInstance "Eq" a]) (IsInstance "Eq" $ makeList a),
-                Qualified (S.fromList [IsInstance "Eq" a, IsInstance "Eq" b]) (IsInstance "Eq" $ makeTuple [a, b])
+                Qualified S.empty (IsInstance classEq typeBool),
+                Qualified S.empty (IsInstance classEq typeInt),
+                Qualified S.empty (IsInstance classEq typeChar),
+                Qualified (S.fromList [IsInstance classEq a]) (IsInstance classEq $ makeList a),
+                Qualified (S.fromList [IsInstance classEq a, IsInstance classEq b]) (IsInstance classEq $ makeTuple [a, b])
             ]
         ),
-        ("Num", Class (S.singleton "Eq") $ S.fromList
+        (classNum, Class (S.singleton classEq) $ S.fromList
             [
-                Qualified S.empty (IsInstance "Num" typeInt)
+                Qualified S.empty (IsInstance classNum typeInt)
             ]
         ),
-        ("Fractional", Class (S.singleton "Num") $ S.fromList
+        (classFractional, Class (S.singleton classNum) $ S.fromList
             [
-                Qualified S.empty (IsInstance "Fractional" typeFloat)
+                Qualified S.empty (IsInstance classFractional typeFloat)
             ]
         ),
-        ("Show", Class S.empty $ S.fromList 
+        (classShow, Class S.empty $ S.fromList 
             [
-                Qualified S.empty (IsInstance "Show" typeBool),
-                Qualified S.empty (IsInstance "Show" typeInt),
-                Qualified S.empty (IsInstance "Show" typeChar),
-                Qualified (S.singleton $ IsInstance "Show" a) (IsInstance "Show" $ makeList a),
-                Qualified (S.fromList [IsInstance "Show" a, IsInstance "Show" b]) (IsInstance "Show" $ makeTuple [a, b])
+                Qualified S.empty (IsInstance classShow typeBool),
+                Qualified S.empty (IsInstance classShow typeInt),
+                Qualified S.empty (IsInstance classShow typeChar),
+                Qualified (S.singleton $ IsInstance classShow a) (IsInstance classShow $ makeList a),
+                Qualified (S.fromList [IsInstance classShow a, IsInstance classShow b]) (IsInstance classShow $ makeTuple [a, b])
             ])
     ]
     where
-        a = TypeVar (TypeVariable "a" KindStar)
-        b = TypeVar (TypeVariable "b" KindStar)
+        a = TypeVar (TypeVariable (Id "a") KindStar)
+        b = TypeVar (TypeVariable (Id "b") KindStar)
+        classShow = Id "Show"
+        classEq = Id "Eq"
+        classNum = Id "Num"
+        classFractional = Id "Fractional"

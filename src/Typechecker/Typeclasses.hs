@@ -42,7 +42,7 @@ emptyClassEnv = M.empty
 -- Check that the class hasn't already been added and that all the superclasses exist
 addClass :: MonadError String m => Id -> S.Set Id -> ClassEnvironment -> m ClassEnvironment
 addClass name supers ce
-    | name `M.member` ce = throwError ("Class " ++ name ++ " already exists")
+    | name `M.member` ce = throwError ("Class " ++ show name ++ " already exists")
     | not $ null missingSupers = throwError ("Missing superclasses " ++ show missingSupers)
     | otherwise = return $ M.insert name (Class supers S.empty) ce
         where missingSupers = S.filter (not . (`M.member` ce)) supers
@@ -52,7 +52,7 @@ addClass name supers ce
 addInstance :: MonadError String m => ClassInstance -> ClassEnvironment -> m ClassEnvironment
 addInstance inst@(Qualified _ (IsInstance classname _)) ce =
     case M.lookup classname ce of -- Find the class we're making an instance of
-        Nothing -> throwError ("Class " ++ classname ++ " doesn't exist")
+        Nothing -> throwError ("Class " ++ show classname ++ " doesn't exist")
         Just (Class supers otherInsts) -> do
             unless (null overlappingInstances) $ throwError ("Overlapping instances " ++ show overlappingInstances)
             return $ M.insert classname (Class supers (S.insert inst otherInsts)) ce

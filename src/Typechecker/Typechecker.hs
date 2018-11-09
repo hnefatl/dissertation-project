@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses #-}
 
 module Typechecker.Typechecker where
 
@@ -46,11 +46,11 @@ instance Default InferrerState where
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
-instance NameGenerator TypeInferrer where
+instance NameGenerator TypeInferrer Id where
     freshName = do
         counter <- (1 +) <$> gets variableCounter
         modify (\s -> s { variableCounter = counter })
-        return ("t" ++ show counter)
+        return (Id $ "t" ++ show counter)
 
 
 -- |Run type inference, and return the (possible failed) result along with the last state
@@ -148,7 +148,7 @@ insertQuantifiedType name t@(Quantified quants qualType) = do
 getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariable name = do
     t <- gets (M.lookup name . types)
-    maybe (throwError $ printf "Symbol %s not in environment" name) return t
+    maybe (throwError $ printf "Symbol %s not in environment" (show name)) return t
 
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
 -- if we have `Num t1` and `[t2/t1]` we add a constraint `Num t2`, and if we have `instance (Foo a, Bar b) => Baz (Maybe
@@ -205,12 +205,12 @@ inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVariable
     addFreeVariable v
-    addTypeConstraint v "Num"
+    addTypeConstraint v (Id "Num")
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVariable
     addFreeVariable v
-    addTypeConstraint v "Fractional"
+    addTypeConstraint v (Id "Fractional")
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 

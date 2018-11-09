@@ -18,7 +18,7 @@ class HasHnf t where
     inHnf :: t -> Bool
 
     -- |Converts a `t` into hnf
-    toHnf :: (NameGenerator m, MonadError String m) => ClassEnvironment -> t -> m (S.Set TypePredicate)
+    toHnf :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> t -> m (S.Set TypePredicate)
 
 instance HasHnf Type where
     inHnf (TypeVar _) = True
@@ -42,7 +42,7 @@ instance HasHnf t => HasHnf [t] where
     inHnf = all inHnf
     toHnf ce ts = S.unions <$> mapM (toHnf ce) ts
 
-detectInvalidPredicate :: (NameGenerator m, MonadError String m) => ClassEnvironment -> TypePredicate -> m ()
+detectInvalidPredicate :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> TypePredicate -> m ()
 detectInvalidPredicate _ (IsInstance _ TypeVar{}) = return ()
 detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
     insts <- instances classname ce
@@ -52,12 +52,12 @@ detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
     let isInstance = any (\(Qualified quals t) -> S.null quals && inst == t) insts
     unless isInstance (throwError $ printf "Predicate %s doesn't hold in the environment." (show inst))
 
-detectInvalidPredicates :: (NameGenerator m, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m ()
+detectInvalidPredicates :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m ()
 detectInvalidPredicates ce = mapM_ (detectInvalidPredicate ce)
 
 -- |Removes redundant predicates from the given set. A predicate is redundant if it's entailed by any of the other
 -- predicates
-removeRedundant :: (NameGenerator m, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+removeRedundant :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
 removeRedundant ce s = foldlM removeIfEntailed S.empty s
     where removeIfEntailed acc p = do
             -- A predicate is redundant if it can be entailed by the other predicates
@@ -67,7 +67,7 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 
 -- |Simplify a context as specified in the Haskell report: reduce each predicate to head-normal form then remove
 -- redundant predicates.
-simplify :: (NameGenerator m, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+simplify :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
 simplify ce s = do
     hnfs <- toHnf ce s
     mapM_ (detectInvalidPredicate ce) hnfs

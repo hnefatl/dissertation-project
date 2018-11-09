@@ -3,16 +3,16 @@ module Typechecker.UnifierSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import ExtraDefs
 import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Types
 
 
-
 test :: TestTree
 test = let
-        [a, b, c, d] = ["a", "b", "c", "d"]
-        [ta, tb, tc, td] = [TypeVar (TypeVariable v KindStar) | v <- [a, b, c, d]]
+        [a, b, c] = map Id ["a", "b", "c"]
+        [ta, tb, tc] = [TypeVar (TypeVariable v KindStar) | v <- [a, b, c]]
     in testGroup "Unification"
     [
         let -- x = [(a, (Int, c))]
@@ -26,7 +26,7 @@ test = let
 
         in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
     ,
-        let x = IsInstance "Eq" (TypeVar (TypeVariable a KindStar))
-            y = IsInstance "Eq" typeBool
+        let x = IsInstance (Id "Eq") (TypeVar (TypeVariable a KindStar))
+            y = IsInstance (Id "Eq") typeBool
         in testCase "match (Eq a) (Eq Bool)" $ assertEqual "" (Right $ subMultiple [(a, typeBool)]) (match x y)
     ]

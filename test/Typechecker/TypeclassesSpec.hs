@@ -6,6 +6,7 @@ import Control.Monad
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import ExtraDefs
 import Typechecker.Typechecker
 import Typechecker.Hardcoded
 import Typechecker.Typeclasses
@@ -26,7 +27,7 @@ makeFailTest ce ps goal = testCase ("Fails: " ++ show goal) $ case result of
 test :: TestTree
 test = testGroup "Typeclasses"
     [ 
-        makeTest builtinClasses S.empty (IsInstance "Eq" typeBool),
-        makeTest builtinClasses S.empty (IsInstance "Eq" typeString),
-        makeFailTest builtinClasses S.empty (IsInstance "Eq" typeFloat)
+        makeTest builtinClasses S.empty (IsInstance (Id "Eq") typeBool),
+        makeTest builtinClasses S.empty (IsInstance (Id "Eq") typeString),
+        makeFailTest builtinClasses S.empty (IsInstance (Id "Eq") typeFloat)
     ]
