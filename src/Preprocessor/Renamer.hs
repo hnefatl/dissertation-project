@@ -126,7 +126,6 @@ getDeclsBoundNames ds = disjointUnions =<< mapM getDeclBoundNames ds
 
 renameModule :: Rename HsModule
 renameModule (HsModule a b c d e) = HsModule a b c d <$> renameDeclGroup e
--- TODO(kc506): Need to handle location information.......
 
 rename :: Rename HsName
 rename (HsIdent name) = getUniqueScopedName (Name $ Id name) >>= \(UniqueName (Id name')) -> return (HsIdent name')
