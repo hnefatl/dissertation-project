@@ -4,6 +4,7 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## TODO
 
+- Mutually recursive typechecking.
 - Rewrite to use `Text` instead of `String`.
 - Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
 

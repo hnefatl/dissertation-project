@@ -15,7 +15,6 @@ import Typechecker.Typechecker
 import Typechecker.Substitution
 import Typechecker.Hardcoded
 
-import Data.List
 import Data.Foldable
 import Data.Either
 import Data.Text.Lazy (unpack)
@@ -29,10 +28,7 @@ import qualified Data.Map as M
 parse :: MonadError String m => String -> m HsModule
 parse s = case parseModule s of
     ParseOk m -> return m
-    (ParseFailed loc msg) -> throwError (msg ++ ": " ++ show loc)
-
-deline :: String -> String
-deline = intercalate " \\n " . lines
+    ParseFailed loc msg -> throwError (msg ++ ": " ++ show loc)
 
 inferModule :: String -> (Either String (M.Map Id QuantifiedType), InferrerState)
 inferModule s = (runExcept out, state)
@@ -241,4 +237,10 @@ test = let
     ,
         let s = "x = if False then 1 else True"
         in testBindingsFail s
+    --,
+    --    let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
+    --        pred t = makeFun [t] typeBool
+    --    in testBindings s
+    --        [ (Id "even", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (pred ta))
+    --        , (Id "odd", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) (pred tb)) ]
     ]

@@ -2,6 +2,7 @@
 
 module ExtraDefs where
 
+import Data.List
 import Data.Foldable
 import Data.Hashable
 import qualified Data.Set as S
@@ -9,7 +10,9 @@ import qualified Data.Set as S
 import Language.Haskell.Syntax as Syntax
 
 -- |General variable/type name
-newtype Id = Id String deriving (Eq, Ord, Show, Hashable)
+newtype Id = Id String deriving (Eq, Ord, Hashable)
+instance Show Id where
+    show (Id s) = s
 
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
@@ -39,3 +42,6 @@ instance ToId Syntax.HsQName where
 class Monad m => NameGenerator m a where
     -- |Should generate a new unique name each time it's run
     freshName :: m a
+
+deline :: String -> String
+deline = intercalate " \\n " . lines

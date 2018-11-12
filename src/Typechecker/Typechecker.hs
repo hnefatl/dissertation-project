@@ -48,8 +48,8 @@ newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Monad, MonadState InferrerState, MonadError String)
 instance NameGenerator TypeInferrer Id where
     freshName = do
-        counter <- (1 +) <$> gets variableCounter
-        modify (\s -> s { variableCounter = counter })
+        counter <- gets variableCounter
+        modify (\s -> s { variableCounter = counter + 1 })
         return (Id $ "t" ++ show counter)
 
 

@@ -16,16 +16,21 @@ builtinConstructors = M.fromList
 builtinFunctions :: M.Map Id QuantifiedType
 builtinFunctions = M.fromList
     [
-      let v = TypeVariable (Id "a") KindStar
-          a = TypeVar v
-          t = makeFun [a, a] a
-      in (Id "+", Quantified (S.singleton v) $ Qualified (S.singleton (IsInstance (Id "Num") a)) t)
+        let v = TypeVariable (Id "a") KindStar
+            a = TypeVar v
+            t = makeFun [a, a] a
+        in (Id "+", Quantified (S.singleton v) $ Qualified (S.singleton (IsInstance (Id "Num") a)) t)
     ,
-      (Id "&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        let a = TypeVariable (Id "a") KindStar
+            ta = TypeVar a
+            t = makeFun [ta, ta] typeBool
+        in (Id "==", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance (Id "Eq") ta) t)
     ,
-      (Id "||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        (Id "&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-      (Id "not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
+        (Id "||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+    ,
+        (Id "not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
     ]
 
 builtinClasses :: ClassEnvironment
