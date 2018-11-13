@@ -28,6 +28,10 @@ class Substitutable t where
     -- |Return all the contained type variables, in left->right order and without duplicates
     getTypeVars :: t -> S.Set TypeVariableName
 
+getSubstitutedTypeVariables :: Substitution -> S.Set TypeVariableName -> S.Set TypeVariableName
+getSubstitutedTypeVariables (Substitution sub) tvs = S.unions $ map getTvs (S.toList tvs)
+    where getTvs name = getTypeVars $ M.findWithDefault (TypeVar $ TypeVariable name KindStar) name sub
+
 -- |We only allow substitutions on instantiated variables: not on uninstantiated (dummy) ones
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable Type where

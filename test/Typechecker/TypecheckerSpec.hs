@@ -30,42 +30,41 @@ parse s = case parseModule s of
     ParseOk m -> return m
     ParseFailed loc msg -> throwError (msg ++ ": " ++ show loc)
 
-inferModule :: String -> (Either String (M.Map Id QuantifiedType), InferrerState)
-inferModule s = (runExcept out, state)
-    where
-        (out, state) = runTypeInferrer $ catchError infer handler
-        handler err = do
-            state <- get
-            throwError $ unlines [err, unpack $ pShow state]
-        infer = do
+inferModule' :: String -> (Either String (M.Map Id QuantifiedType), InferrerState)
+inferModule' s = (runExcept out, state)
+    where (out, state) = runTypeInferrer $ catchError infer handler
+          handler err = get >>= \st -> throwError $ unlines [err, unpack $ pShow st]
+          infer = do
             -- Add builtins
             addClasses builtinClasses
             forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
             -- Parse and run type inference
-            HsModule _ _ _ _ decls <- parse s
-            mapM_ inferDecl decls
+            m <- parse s
+            inferModule m
             getVariableTypes
 
 
 testBindings :: String -> [(Id, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
-    let (etypes, state) = inferModule s
+    let (etypes, state) = inferModule' s
     ts <- unpackEither etypes
     --traceM (unpack $ pShow ts)
-    let check (name, Quantified _ t) = either assertFailure return $ runExcept $ addDebugInfo $
+    let check (name, Quantified q1 t) = either (assertFailure . printf "%s: %s" (show name)) return $ runExcept $ addDebugInfo $
             case M.lookup name ts of
                 Nothing -> throwError "Variable not in environment"
-                Just (Quantified _ t') -> do
+                Just (Quantified q2 t') -> do
                     sub <- mgu t t'
-                    let (s1, s2) = (applySub sub t, applySub sub t')
-                    unless (s1 == s2) (throwError $ printf "Substitutions not equal: %s vs %s" (show s1) (show s2))
+                    let (s1, s2) = pairmap (applySub sub) (t, t')
+                        (q1', q2') = pairmap (getSubstitutedTypeVariables sub . S.map getTvName) (q1, q2)
+                    unless (q1' == q2') (throwError $ printf "Quantifiers not equal: %s vs %s" (show q1') (show q2'))
+                    unless (s1 == s2) (throwError $ printf "Qualifiers not equal: %s vs %s" (show s1) (show s2))
         addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
     mapM_ check cases
 
 testBindingsFail :: String -> TestTree
 testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool errMsg (isLeft result)
     where s' = deline s
-          (result, state) = inferModule s
+          (result, state) = inferModule' s
           errMsg = printf "%s: Got %s\n%s" s' (unpack $ pShow result) (unpack $ pShow state)
 
 unpackEither :: Either String b -> IO b
@@ -79,164 +78,170 @@ test = let
     in
         testGroup "Typechecking"
     [
-        -- Simple literal type checks
-        let s = "x = 5"
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = 1.2"
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
-    ,
-        let s = "x = 'a'"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeChar)]
-    ,
-        let s = "x = \"ab\""
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeString)]
-    ,
-        -- Data constructors
-        let s = "x = True"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "x = False"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        testBindingsFail "x = Foo"
-    ,
-        -- Pattern matching
-        let s = "(x, y) = (1, True)" 
-        in testBindings s
-            [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
-            , (Id "y", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        let s = "(x, _, _) = (True, False, True)"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "a@(x, _, _) = (True, False, True)"
-            t = makeTuple (replicate 3 typeBool)
-        in testBindings s
-            [ (Id "x", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "a", Quantified S.empty $ Qualified S.empty t) ]
-    ,
-        let s = "a@(_, y) = (1, True)"
-            t = makeTuple [ta, typeBool]
-        in testBindings s
-            [ (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "a", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t) ]
-    ,
-        let s = "(x, y) = (1, (True))"
-        in testBindings s
-            [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
-            , (Id "y", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        testBindingsFail "(x, y) = True" 
-    ,
-        let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
-        in testBindings s
-            [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
-            , (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "z", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "w", Quantified S.empty $ Qualified S.empty typeString) ]
-        -- TODO(kc506): Test pattern matching with data constructors
-    ,
-        let s = "x = [True, False]"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty (makeList typeBool))]
-    ,
-        let s = "x = [1, 2, 3]"
-        in testBindings s
-            [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (makeList ta))]
-    ,
-        let s = "x = [True, 2]"
-        in testBindingsFail s
-    ,
-        let s = "x = [1, 2.2]"
-        in testBindings s
-            [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) (makeList ta))]
-    ,
-        let s = "x = (+)"
-            t = makeFun [ta, ta] ta
-        in testBindings s [(Id "+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
-    ,
+    --    -- Simple literal type checks
+    --    let s = "x = 5"
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = 1.2"
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
+    --,
+    --    let s = "x = 'a'"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeChar)]
+    --,
+    --    let s = "x = \"ab\""
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeString)]
+    --,
+    --    -- Data constructors
+    --    let s = "x = True"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "x = False"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    testBindingsFail "x = Foo"
+    --,
+    --    -- Pattern matching
+    --    let s = "(x, y) = (1, True)" 
+    --    in testBindings s
+    --        [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
+    --        , (Id "y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    let s = "(x, _, _) = (True, False, True)"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "a@(x, _, _) = (True, False, True)"
+    --        t = makeTuple (replicate 3 typeBool)
+    --    in testBindings s
+    --        [ (Id "x", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "a", Quantified S.empty $ Qualified S.empty t) ]
+    --,
+    --    let s = "a@(_, y) = (1, True)"
+    --        t = makeTuple [ta, typeBool]
+    --    in testBindings s
+    --        [ (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "a", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t) ]
+    --,
+    --    let s = "(x, y) = (1, (True))"
+    --    in testBindings s
+    --        [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
+    --        , (Id "y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    testBindingsFail "(x, y) = True" 
+    --,
+    --    let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
+    --    in testBindings s
+    --        [ (Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
+    --        , (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "z", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "w", Quantified S.empty $ Qualified S.empty typeString) ]
+    --    -- TODO(kc506): Test pattern matching with data constructors
+    --,
+    --    let s = "x = [True, False]"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty (makeList typeBool))]
+    --,
+    --    let s = "x = [1, 2, 3]"
+    --    in testBindings s
+    --        [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (makeList ta))]
+    --,
+    --    let s = "x = [True, 2]"
+    --    in testBindingsFail s
+    --,
+    --    let s = "x = [1, 2.2]"
+    --    in testBindings s
+    --        [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) (makeList ta))]
+    --,
+    --    let s = "x = (+)"
+    --        t = makeFun [ta, ta] ta
+    --    in testBindings s [(Id "+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
+    --,
         -- Function application (prefix and infix)
+        let s = "x = (+) 3" 
+            t = makeFun [ta] ta
+        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
+    ,
         let s = "x = (+) 3 4" 
         in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     ,
-        let s = "x = 1 + 2" 
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = 1 + 2 + 3" 
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = 1 + 2\ny = x + 3"
-            q = Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta
-        in testBindings s [(Id "x", q), (Id "y", q)]
-    ,
-    -- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
-    -- getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
-    -- explicit operation?
-        testBindingsFail "x = 1 && True"
-    ,
-        -- Lambdas
-        let s = "x = \\y -> 1 + y"
-            q = S.singleton $ IsInstance num ta --in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
-        in testBindings s
-            [ (Id "y", Quantified (S.singleton a) $ Qualified q ta)
-            , (Id "x", Quantified (S.singleton a) $ Qualified q (makeFun [ta] ta)) ]
-    ,
-        let s = "x = (\\y -> False && y)"
-        in testBindings s
-            [ (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "x", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))]
-    ,
+    --    let s = "x = 1 + 2" 
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = 1 + 2 + 3" 
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = 1 + 2\ny = x + 3"
+    --        q = Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta
+    --    in testBindings s [(Id "x", q), (Id "y", q)]
+    --,
+    ---- TODO(kc506): This doesn't fail as `Num Bool` doesn't fail - check paper for where it should
+    ---- getQualifiedTypeFrom typechecker state? Revert from qualified types and make getting the qualified version an
+    ---- explicit operation?
+    --    testBindingsFail "x = 1 && True"
+    --,
+    --    -- Lambdas
+    --    let s = "x = \\y -> 1 + y"
+    --        q = S.singleton $ IsInstance num ta --in testBindings s [("y", Qualified q t), ("x", Qualified q (makeFun [t] t))]
+    --    in testBindings s
+    --        [ (Id "y", Quantified (S.singleton a) $ Qualified q ta)
+    --        , (Id "x", Quantified (S.singleton a) $ Qualified q (makeFun [ta] ta)) ]
+    --,
+    --    let s = "x = (\\y -> False && y)"
+    --    in testBindings s
+    --        [ (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "x", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))]
+    --,
         let s = "x = (\\f -> f True)"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty (makeFun [makeFun [typeBool] ta] ta))]
-    ,
-        let s = "x = (\\f -> f True) (\\y -> not (not y))"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "y = let f = \\x -> x in f 5"
-            tf = makeFun [ta] ta
         in testBindings s
-            [ (Id "f", Quantified (S.singleton a) $ Qualified S.empty tf)
-            , (Id "y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    ,
-        let s = "y = let f = \\x -> x in f 5 + f 6"
-            tf = makeFun [ta] ta
-        in testBindings s
-            [ (Id "f", Quantified (S.singleton a) $ Qualified S.empty tf)
-            , (Id "y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    ,
-        let s = "a = let f = \\x -> x\n" ++
-                "        g = \\y z -> z\n" ++
-                "    in g (f 5) (f True)"
-        in testBindings s [(Id "a", Quantified S.empty (Qualified S.empty typeBool))]
-    ,
-        -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
-        -- Contrast to the above where f is bound in a let-expression so is quantified
-        let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
-        in testBindingsFail s
-    ,
-        let s = "x = (\\(y, z) -> y + z) (1, 2)"
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = (\\[y, z] -> y && z) [True, False]"
-        in testBindings s
-            [ (Id "x", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
-            , (Id "z", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        let s = "x = if True then 1 else 2"
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = if True then 1.2 else 2"
-        in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
-    ,
-        let s = "x = if True then True else False"
-        in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "x = if 1 then True else False"
-        in testBindingsFail s
-    ,
-        let s = "x = if False then 1 else True"
-        in testBindingsFail s
+            [ (Id "x", Quantified (S.singleton b) $ Qualified S.empty (makeFun [makeFun [typeBool] tb] tb))
+            , (Id "f", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] ta))]
+    --,
+    --    let s = "x = (\\f -> f True) (\\y -> not (not y))"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "y = let f = \\x -> x in f 5"
+    --        tf = makeFun [ta] ta
+    --    in testBindings s
+    --        [ (Id "f", Quantified (S.singleton a) $ Qualified S.empty tf)
+    --        , (Id "y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    --,
+    --    let s = "y = let f = \\x -> x in f 5 + f 6"
+    --        tf = makeFun [ta] ta
+    --    in testBindings s
+    --        [ (Id "f", Quantified (S.singleton a) $ Qualified S.empty tf)
+    --        , (Id "y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    --,
+    --    let s = "a = let f = \\x -> x\n" ++
+    --            "        g = \\y z -> z\n" ++
+    --            "    in g (f 5) (f True)"
+    --    in testBindings s [(Id "a", Quantified S.empty (Qualified S.empty typeBool))]
+    --,
+    --    -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
+    --    -- Contrast to the above where f is bound in a let-expression so is quantified
+    --    let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
+    --    in testBindingsFail s
+    --,
+    --    let s = "x = (\\(y, z) -> y + z) (1, 2)"
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = (\\[y, z] -> y && z) [True, False]"
+    --    in testBindings s
+    --        [ (Id "x", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "y", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , (Id "z", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    let s = "x = if True then 1 else 2"
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = if True then 1.2 else 2"
+    --    in testBindings s [(Id "x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
+    --,
+    --    let s = "x = if True then True else False"
+    --    in testBindings s [(Id "x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "x = if 1 then True else False"
+    --    in testBindingsFail s
+    --,
+    --    let s = "x = if False then 1 else True"
+    --    in testBindingsFail s
     --,
     --    let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
     --        pred t = makeFun [t] typeBool

@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses, TupleSections #-}
 
 module Typechecker.Typechecker where
 
@@ -7,6 +7,7 @@ import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Typeclasses
 import Typechecker.Simplifier
+import Preprocessor.Renamer (getDeclsBoundNames, Name(..))
 import ExtraDefs
 
 import Data.Default
@@ -30,7 +31,8 @@ data InferrerState = InferrerState
     , kinds :: M.Map TypeVariableName Kind
     , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
     , freeVariables :: S.Set TypeVariableName
-    , variableCounter :: Int }
+    , variableCounter :: Int
+    , logs :: [String] }
     deriving (Show)
 
 instance Default InferrerState where
@@ -41,7 +43,8 @@ instance Default InferrerState where
             , kinds = M.empty
             , typePredicates = M.empty
             , freeVariables = S.empty
-            , variableCounter = 0 }
+            , variableCounter = 0
+            , logs = [] }
 
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
@@ -68,6 +71,11 @@ execTypeInferrer (TypeInferrer inner) = case e of
     Left err -> throwError err
     Right _ -> return s
     where (e, s) = runState (runExceptT inner) def
+
+doLog :: String -> TypeInferrer ()
+doLog l = modify (\s -> s { logs = l:(logs s) })
+getLogs :: TypeInferrer [String]
+getLogs = reverse <$> gets logs
 
 -- |Creates a fresh (uniquely named) type variable
 freshTypeVariable :: TypeInferrer TypeVariableName
@@ -107,6 +115,10 @@ addFreeVariable :: TypeVariableName -> TypeInferrer ()
 addFreeVariable = addFreeVariables . S.singleton
 addFreeVariables :: S.Set TypeVariableName -> TypeInferrer ()
 addFreeVariables names = modify (\s -> s { freeVariables = S.union names (freeVariables s) })
+removeFreeVariable :: TypeVariableName -> TypeInferrer ()
+removeFreeVariable = removeFreeVariables . S.singleton
+removeFreeVariables :: S.Set TypeVariableName -> TypeInferrer ()
+removeFreeVariables vs = modify (\s -> s { freeVariables = S.difference (freeVariables s) vs })
 
 getConstraints :: TypeVariableName -> TypeInferrer (S.Set ClassName)
 getConstraints name = gets (M.findWithDefault S.empty name . typePredicates)
@@ -118,6 +130,11 @@ addVariableType :: VariableName -> TypeVariableName -> TypeInferrer ()
 addVariableType name t = addVariableTypes (M.singleton name t)
 addVariableTypes :: TypeMap -> TypeInferrer ()
 addVariableTypes vs = modify (\s -> s { types = M.union vs (types s) })
+-- |Given a variable name, get the type variable name that corresponds
+getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
+getVariableTypeVariable name = do
+    t <- gets (M.lookup name . types)
+    maybe (throwError $ printf "Symbol %s not in environment" (show name)) return t
 
 addTypeConstraint :: TypeVariableName -> ClassName -> TypeInferrer ()
 addTypeConstraint varname classname = addTypeConstraints varname (S.singleton classname)
@@ -135,20 +152,16 @@ addTypePredicates = mapM_ addTypePredicate
 insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
 insertQuantifiedType name t@(Quantified quants qualType) = do
     nameSub <- getInstantiatingMap t
-    let typeSub = M.map (\name -> TypeVar (TypeVariable name KindStar)) nameSub
+    let typeSub = M.map (\n -> TypeVar (TypeVariable n KindStar)) nameSub
     forM_ quants $ \(TypeVariable old _) -> addFreeVariable (nameSub M.! old)
+    doLog $ show name ++ " " ++ show quants ++ " " ++ show nameSub
     let Qualified quals t' = applySub (Substitution typeSub) qualType
     addTypePredicates quals
     funVar <- freshTypeVariable
     funType <- nameToType funVar
-    unify funType t'
+    sub <- mgu funType t'
+    composeSubstitution sub
     addVariableType name funVar
-
--- |Given a variable name, get the type variable name that corresponds
-getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
-getVariableTypeVariable name = do
-    t <- gets (M.lookup name . types)
-    maybe (throwError $ printf "Symbol %s not in environment" (show name)) return t
 
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
 -- if we have `Num t1` and `[t2/t1]` we add a constraint `Num t2`, and if we have `instance (Foo a, Bar b) => Baz (Maybe
@@ -161,20 +174,26 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
             forM_ constraints $ \classInstance -> do
                 ce <- getClassEnvironment
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
-                pred <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
-                newPredicates <- ifPThenByInstance ce pred >>= \case
-                    Nothing -> throwError $ "No matching instance for " ++ show pred
+                predicate <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
+                newPredicates <- ifPThenByInstance ce predicate >>= \case
+                    Nothing -> throwError $ "No matching instance for " ++ show predicate
                     Just cs -> return cs
                 detectInvalidPredicates ce newPredicates
                 addTypePredicates newPredicates
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
--- |Same as unify but only unifying variables in the first argument with those in the left
 unify :: Type -> Type -> TypeInferrer ()
 unify t1 t2 = do
     currentSub <- getSubstitution
-    newSub <- mgu (applySub currentSub t1) (applySub currentSub t2)
+    -- Update the qualifiers
+    newSub@(Substitution sub) <- mgu (applySub currentSub t1) (applySub currentSub t2)
     updateTypeConstraints newSub
+    -- Update the quantified variables
+    freeVars <- getFreeVariables
+    let restrictedDomainTvs = S.difference (M.keysSet sub) freeVars
+        restrictedRangeTvs = S.unions $ map (\d -> getTypeVars (sub M.! d)) (S.toList restrictedDomainTvs)
+    doLog $ printf "%s %s %s %s %s %s" (show t1) (show t2) (show sub) (show freeVars) (show restrictedDomainTvs) (show restrictedRangeTvs)
+    removeFreeVariables restrictedRangeTvs
     composeSubstitution newSub
 
 
@@ -183,20 +202,20 @@ getTypePredicates name = do
     constraints <- getConstraints name
     S.fromList <$> mapM (\classname -> IsInstance classname <$> nameToType name) (S.toList constraints)
 
-getVariableType :: VariableName -> TypeInferrer QuantifiedType
-getVariableType name = getType =<< getVariableTypeVariable name
+getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
+getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
 
-getType :: TypeVariableName -> TypeInferrer QuantifiedType
-getType name = do
+getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
+getQuantifiedType name = do
     sub <- getSubstitution
     ce <- getClassEnvironment
     t <- applySub sub <$> nameToType name
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
-    let qualType = Qualified predicates t
-    quantifierVars <- S.intersection typeVars <$> getFreeVariables
+    freeVars <- getSubstitutedTypeVariables sub <$> getFreeVariables
+    let quantifierVars = S.intersection typeVars freeVars
     quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList quantifierVars)
-    return $ Quantified quantifiers (Qualified predicates t)
+    return $ Quantified quantifiers $ Qualified predicates t
 
 
 inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
@@ -228,30 +247,30 @@ inferExpression (HsLambda _ pats e) = do
     argTypes <- mapM nameToType argVars
     bodyType <- nameToType =<< inferExpression e
     unify (makeFun argTypes bodyType) retType
-    addFreeVariables (S.fromList argVars)
     return retVar
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
-    funQuant@(Quantified _ funQual) <- getType =<< inferExpression f
+    funQuant@(Quantified _ funQual) <- getQuantifiedType =<< inferExpression f
     funSub <- Substitution <$> getInstantiatingTypeMap funQuant
     let Qualified _ funType = applySub funSub funQual
-    argQuant@(Quantified _ argQual) <- getType =<< inferExpression e
+    argQuant@(Quantified _ argQual) <- getQuantifiedType =<< inferExpression e
     argSub <- Substitution <$> getInstantiatingTypeMap argQuant
     let Qualified _ argType = applySub argSub argQual
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVariable
+    addFreeVariable retVar
     let retType = TypeVar (TypeVariable retVar KindStar)
     -- Unify `function` with `argument -> returntype` to match up the types.
-    sub <- mgu (makeFun [argType] retType) funType
+    unify (makeFun [argType] retType) funType
+    --sub <- mgu (makeFun [argType] retType) funType
     -- Update our running substitution with this new one.
-    composeSubstitution sub
+    --composeSubstitution sub
     -- Add new type constraints
     -- We propagate constraints from the function/argument instantiating substitutions, but we make sure not to add
     -- these to the global substitution: otherwise free variables become bound after a single use.
     updateTypeConstraints funSub
     updateTypeConstraints argSub
-    updateTypeConstraints sub
-    --traceM $ printf "%s %s %s %s" retVar (show funSub) (show argSub) (show sub)
+    --updateTypeConstraints sub
     return retVar
 inferExpression (HsInfixApp lhs op rhs) = do
     let opName = case op of
@@ -267,10 +286,10 @@ inferExpression (HsTuple exps) = do
     return retVar
 inferExpression (HsLet decls e) = do
     -- Process the declarations first (bring into scope any variables etc)
-    mapM_ inferDecl decls
+    inferDeclGroup decls
     inferExpression e
 inferExpression (HsIf c e1 e2) = do
-    ct <- getType =<< inferExpression c
+    ct <- getQuantifiedType =<< inferExpression c
     let expectedType = Quantified S.empty (Qualified S.empty typeBool)
     unless (ct == expectedType) (throwError $ printf "`if` expression condition %s doesn't have type bool" (show c))
     e1t <- nameToType =<< inferExpression e1
@@ -293,10 +312,12 @@ inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 
 inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
-inferPattern (HsPVar name) = do
-    v <- freshTypeVariable
-    addVariableType (toId name) v
-    return v
+inferPattern (HsPVar name) = gets (M.lookup (toId name) . types) >>= \case
+    Just tv -> return tv  -- If the variable's already been processed then there'll already be a type variable
+    Nothing -> do
+        tv <- freshTypeVariable -- Otherwise bind a new type variable to this variable
+        addVariableType (toId name) tv
+        return tv
 inferPattern (HsPLit lit) = inferLiteral lit
 inferPattern HsPWildCard = freshTypeVariable
 inferPattern (HsPAsPat name pat) = do
@@ -304,7 +325,7 @@ inferPattern (HsPAsPat name pat) = do
     addVariableType (toId name) t
     return t
 inferPattern (HsPParen pat) = inferPattern pat
-inferPattern (HsPApp constructor pats) = throwError "Currently not supported"
+inferPattern (HsPApp _ _) = throwError "Currently not supported"
 inferPattern (HsPTuple pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVariable
@@ -343,18 +364,30 @@ inferAlternatives alts = do
     mapM_ (unify commonType) ts
     return commonVar
 
--- |Infers the type of a pattern binding (eg. `foo = 5`) without an explicit type
-inferImplicitPatternBinding :: Syntax.HsPat -> Syntax.HsRhs -> TypeInferrer ()
-inferImplicitPatternBinding pat (HsUnGuardedRhs e) = do
-    patType <- nameToType =<< inferPattern pat
-    rhsType <- nameToType =<< inferExpression e
-    unify patType rhsType
-inferImplicitPatternBinding _ (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
+inferRhs :: Syntax.HsRhs -> TypeInferrer TypeVariableName
+inferRhs (HsUnGuardedRhs e) = inferExpression e
+inferRhs (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
 inferDecl :: Syntax.HsDecl -> TypeInferrer ()
-inferDecl (HsPatBind _ pat rhs _) = inferImplicitPatternBinding pat rhs
-inferDecl (HsFunBind _) = throwError "Function declarations not supported"
-inferDecl _ = throwError "Declaration not supported"
+inferDecl (HsPatBind _ pat rhs _) = do
+    patType <- nameToType =<< inferPattern pat
+    rhsType <- nameToType =<< inferRhs rhs
+    unify patType rhsType
+inferDecl (HsFunBind _) = throwError "Functions not yet supported"
+inferDecl _ = throwError "Declaration not yet supported"
+
+inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
+inferDeclGroup ds = do
+    names <- getDeclsBoundNames ds
+    typeVarMapping <- M.fromList <$> mapM (\(Name n) -> (n,) <$> freshName) (S.toList names)
+    addVariableTypes typeVarMapping
+    mapM_ inferDecl ds
+
+-- TODO(kc506): Dependency analysis, split into typechecking groups and process individually
+-- TODO(kc506): Take advantage of explicit type hints
+inferModule :: Syntax.HsModule -> TypeInferrer ()
+inferModule (HsModule _ _ _ _ decls) = inferDeclGroup decls
+
 
 getVariableTypes :: TypeInferrer (M.Map TypeVariableName QuantifiedType)
-getVariableTypes = mapM getType =<< gets types
+getVariableTypes = mapM getQuantifiedType =<< gets types

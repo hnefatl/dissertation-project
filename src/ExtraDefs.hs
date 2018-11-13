@@ -22,6 +22,9 @@ anyM f = foldlM (\x y -> (x ||) <$> f y) False
 foldlM' :: (Foldable f, Monad m) => (a -> b -> m a) -> a -> f b -> m a
 foldlM' f !e = foldlM (\(!acc) x -> f acc x) e
 
+pairmap :: (a -> b) -> (a, a) -> (b, b)
+pairmap f (x, y) = (f x, f y)
+
 eitherToMaybe :: Either a b -> Maybe b
 eitherToMaybe = either (const Nothing) Just
 

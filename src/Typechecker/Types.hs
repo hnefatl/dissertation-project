@@ -25,6 +25,9 @@ getKindArgCount (KindFun _ k) = 1 + getKindArgCount k
 
 data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord)
 
+getTvName :: TypeVariable -> TypeVariableName
+getTvName (TypeVariable name _) = name
+
 -- |The type of a Haskell expression.
 -- A `TypeVariable` is a globally unique name for a type variable.
 -- A `TypeDummy` is a locally (within the type) unique name for a type variable.
