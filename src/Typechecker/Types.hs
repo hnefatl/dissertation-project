@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections #-}
+{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections, GeneralizedNewtypeDeriving #-}
 
 module Typechecker.Types where
 
@@ -108,25 +108,19 @@ instance Show Type where
     show (TypeConstant (Id name) _ []) = name
     show (TypeConstant (Id name) _ ts) = printf "(%s %s)" name (unwords $ map show ts)
 instance Show TypePredicate where
-    show (IsInstance (Id name) t) = name ++ " (" ++ show t ++ ")"
+    show (IsInstance (Id name) t@TypeVar{}) = printf "%s %s" name (show t)
+    show (IsInstance (Id name) t@TypeConstant{}) = printf "%s (%s)" name (show t)
 instance Show a => Show (Qualified a) where
-    show (Qualified quals x) = "(" ++ qualifiers ++ ") => " ++ show x
-        where qualifiers = intercalate ", " (map show $ S.toList quals)
+    show (Qualified quals x) = prefix ++ show x
+        where prefix = case S.size quals of
+                0 -> ""
+                1 -> qualifiers ++ " => "
+                _ -> printf "(%s) => " qualifiers
+              qualifiers = intercalate ", " (map show $ S.toList quals)
 instance Show QuantifiedType where
-    show (Quantified quants t) = "forall " ++ quantifiers ++ ". " ++ show t
-        where quantifiers = unwords (map show $ S.toList quants)
+    show (Quantified quants t) = (if S.null quants then "" else quantifiers) ++ show t
+        where quantifiers = printf "∀%s. " (intercalate ", " $ map show $ S.toList quants)
 
-
--- |Instantiate a quantified type into a qualified type, replacing all universally quantified variables with new
--- type variables.
-instantiate :: (NameGenerator m Id, MonadError String m) => QuantifiedType -> m QualifiedType
-instantiate qt@(Quantified _ (Qualified quals t)) = do
-    varMap <- getInstantiatingTypeMap qt
-    let instSet = S.fromList . map instPred . S.toList
-        instPred (IsInstance classname x) = IsInstance classname (instType x)
-        instType v@(TypeVar (TypeVariable name _)) = M.findWithDefault v name varMap
-        instType (TypeConstant name ks ts) = TypeConstant name ks (map instType ts)
-    return $ Qualified (instSet quals) (instType t)
 
 getInstantiatingTypeMap :: (NameGenerator m Id, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
