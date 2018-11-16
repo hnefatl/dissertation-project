@@ -69,3 +69,6 @@ containsDuplicates l = length l /= S.size (foldl' (flip S.insert) S.empty l)
 
 deline :: String -> String
 deline = intercalate " \\n " . lines
+
+dedupe :: Ord a => [a] -> [a]
+dedupe = S.toList . S.fromList
