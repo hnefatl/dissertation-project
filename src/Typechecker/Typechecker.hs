@@ -8,7 +8,7 @@ import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Typeclasses
 import Typechecker.Simplifier
-import Preprocessor.Renamer (getDeclsBoundNames)
+import Preprocessor.ContainedNames (getDeclsBoundNames)
 
 import Text.Printf
 import Control.Applicative

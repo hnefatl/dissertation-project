@@ -8,11 +8,11 @@ import Data.Default
 import Data.Tuple
 import Control.Monad.State
 import Control.Monad.Except
-import Text.Printf
 import qualified Data.Set as S
 import qualified Data.HashMap.Strict as M
 
 import ExtraDefs
+import Preprocessor.ContainedNames
 
 data RenamerState = RenamerState
       -- Used to generate unique variable names
@@ -42,13 +42,6 @@ runRenamer (Renamer inner) = (liftEither x, s)
 
 type Rename a = a -> Renamer a
 
-disjointUnion :: (MonadError String m, Ord a, Show a) => S.Set a -> S.Set a -> m (S.Set a)
-disjointUnion s1 s2 = if S.null inter then return (S.union s1 s2) else throwError err
-    where inter = S.intersection s1 s2
-          err = printf "Duplicate binding names in same level: %s" (show $ S.toList inter)
-disjointUnions :: (MonadError String m, Foldable f, Ord a, Show a) => f (S.Set a) -> m (S.Set a)
-disjointUnions = foldlM disjointUnion S.empty
-
 getUniqueScopedName :: VariableName -> Renamer UniqueVariableName
 getUniqueScopedName name = gets (M.lookup name . bindings) >>= \case
     Nothing -> throwError $ "Missing unique name for variable " ++ show name
@@ -72,49 +65,6 @@ bindForScope names action = do
             Just [] -> throwError $ "Variable " ++ show name ++ " is not in scope."
             Just (_:bs) -> modify (\s -> s { bindings = M.insert name bs bindings' }) -- Pop the first binding
     return result
-
--- |The `getXBoundNames` functions should return the "binding" names of an `X`: eg. for a pattern binding, we want to
--- return all the variables in the pattern but not any in eg. a `where` clause attached to the binding. For a function
--- binding, we want to return the function name but not the variables bound by the argument patterns or any attached
--- `where` clauses.
-
--- |Return all variable names bound in this pattern (recursively)
-getPatBoundNames :: MonadError String m => HsPat -> m (S.Set VariableName)
-getPatBoundNames (HsPVar v) = return $ S.singleton (convertName v)
-getPatBoundNames (HsPLit _) = return S.empty
-getPatBoundNames HsPWildCard = return S.empty
-getPatBoundNames (HsPNeg p) = getPatBoundNames p
-getPatBoundNames (HsPParen p) = getPatBoundNames p
-getPatBoundNames (HsPIrrPat p) = getPatBoundNames p
-getPatBoundNames (HsPAsPat v p) = disjointUnion (S.singleton $ convertName v) =<< getPatBoundNames p
-getPatBoundNames (HsPInfixApp p1 _ p2) = do
-    ns1 <- getPatBoundNames p1
-    ns2 <- getPatBoundNames p2
-    disjointUnion ns1 ns2
-getPatBoundNames (HsPApp _ ps) = disjointUnions =<< mapM getPatBoundNames ps
-getPatBoundNames (HsPTuple ps) = disjointUnions =<< mapM getPatBoundNames ps
-getPatBoundNames (HsPList ps) = disjointUnions =<< mapM getPatBoundNames ps
-getPatBoundNames (HsPRec _ _) = throwError "Pattern records not supported"
-
--- |Get all variable names bound in this list of patterns
-getPatsBoundNames :: MonadError String m => [HsPat] -> m (S.Set VariableName)
-getPatsBoundNames ps = disjointUnions =<< mapM getPatBoundNames ps
-
--- |Get all variable names top-level bound by this declaration, **not recursively**. Eg. for the pattern binding:
--- > x = y
--- >   where y = 5
--- we return `x` but not `y`, as `x` is visible to horizontally defined bindings, whereas y is not.
-getDeclBoundNames :: MonadError String m => HsDecl -> m (S.Set VariableName)
-getDeclBoundNames (HsPatBind _ pat _ _) = getPatBoundNames pat
-getDeclBoundNames (HsFunBind matches) = do
-    let names = map (\(HsMatch _ name _ _ _) -> convertName name) matches
-        funName = head names
-        allNamesMatch = all (== funName) names
-    if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
-getDeclBoundNames _ = throwError "Declaration not supported"
-
-getDeclsBoundNames :: MonadError String m => [HsDecl] -> m (S.Set VariableName)
-getDeclsBoundNames ds = disjointUnions =<< mapM getDeclBoundNames ds
 
 
 -- |The `renameX` functions handle replacing variables in the syntax tree. They correctly handle horizontally-referenced
@@ -151,7 +101,7 @@ renameDecl _ = throwError "Declaration not supported"
 
 renameMatch :: Rename HsMatch
 renameMatch (HsMatch loc funName pats rhs decls) = do
-    argVars <- getPatsBoundNames pats
+    argVars <- getPatsContainedNames pats
     whereVars <- getDeclsBoundNames decls
     boundVars <- disjointUnion argVars whereVars
     bindForScope boundVars (HsMatch loc <$> rename funName <*> renamePats pats <*> renameRhs rhs <*> mapM renameDecl decls)
@@ -188,7 +138,7 @@ renameExp (HsInfixApp e1 op e2) = HsInfixApp <$> renameExp e1 <*> renameQOp op <
 renameExp (HsApp e1 e2) = HsApp <$> renameExp e1 <*> renameExp e2
 renameExp (HsNegApp e) = HsNegApp <$> renameExp e
 renameExp (HsLambda l ps e) = do
-    names <- getPatsBoundNames ps
+    names <- getPatsContainedNames ps
     bindForScope names (HsLambda l <$> renamePats ps <*> renameExp e)
 renameExp (HsLet decls e) = uncurry HsLet <$> renameDeclGroupWith decls (renameExp e)
 renameExp (HsIf e1 e2 e3) = HsIf <$> renameExp e1 <*> renameExp e2 <*> renameExp e3

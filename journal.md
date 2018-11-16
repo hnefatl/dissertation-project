@@ -7,13 +7,15 @@ Quick notes on milestones/features/problems/bugs during implementation.
 - Mutually recursive typechecking.
 - Rewrite to use `Text` instead of `String`.
 - Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
+- Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
 
 ## Preprocessing
 
-### Variable deduplication
+### Variable Deduplication
 
 Want unique variable names so the later stages don't need to worry about shadowing. Approach is two pass and uses an
 auxiliary "overlay" trie:
+
 - Traverse the parse tree, mapping each node to a node in the trie using numbers in BFS order (1st child, 2nd child
   etc), and storing mappings of "defined variable" -> "new unique name" at each node in the trie.
 - Traverse the parse tree again, mapping each variable usage to the new defined name using the bindings visible by
@@ -27,6 +29,14 @@ the ability to fetch all prefixes so it's messy.
 
 Issue with naive approaches is that we might refer to variables we've not yet defined (this is run before dependency
 analysis) - see [Diagram](sketches/dedupeedgecase.jpg).
+
+### Dependency Analysis
+
+Given binding definitions which depend on each other, finding mutually-dependent groups is equivalent to finding the
+strongly-connected components of the dependency graph, and finding the dependency order is equivalent to doing a
+topological sort of the graph whose nodes are the SCCs.
+
+I think that the `stronglyConnComp` function from `Data.Graph` does both SCC and topological sorting.
 
 ## Type Checking
 

@@ -39,6 +39,12 @@ instance NameConvertible Syntax.HsQName VariableName where
     convertName (Qual _ name) = convertName name
     convertName (UnQual name) = convertName name
     convertName (Special _) = error "No support for special constructors"
+instance NameConvertible Syntax.HsOp VariableName where
+    convertName (HsVarOp name) = convertName name
+    convertName (HsConOp name) = convertName name
+instance NameConvertible Syntax.HsQOp VariableName where
+    convertName (HsQVarOp name) = convertName name
+    convertName (HsQConOp name) = convertName name
 
 class Monad m => NameGenerator m a where
     -- |Should generate a new unique name each time it's run
