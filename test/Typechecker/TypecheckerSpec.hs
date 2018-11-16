@@ -251,4 +251,7 @@ test = let
             [ (Id "const", Quantified (S.fromList [a,b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
             , (Id "f", Quantified (S.singleton a) $ Qualified S.empty t)
             , (Id "g", Quantified (S.singleton a) $ Qualified S.empty t) ]
+    ,
+        let s = "_ = let { x = y ; y = x y } in True"
+        in testBindingsFail s
     ]
