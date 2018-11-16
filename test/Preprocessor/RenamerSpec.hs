@@ -35,5 +35,5 @@ test = testGroup "Renamer"
     , makeTest "x = 2\n[a,2,c] = [1,x,3]" "v2 = 2\n[v0,2,v1] = [1,v2,3]"
     , makeTest "_ = let {xx=0;yy=1;zz=2} in if xx then yy else zz" "_ = let {v0=0;v1=1;v2=2} in if v0 then v1 else v2"
     , makeTest "_ = \\xx -> xx" "_ = \\v0 -> v0"
-    , makeTest "_ = let {xx=0;yy=(\\xx -> xx)} in yy" "_ = let {v0=0;v1=(\\v2 -> v2)} in v1"
+    , makeTest "_ = let { xx = 0 ; yy = (\\xx -> xx) } in yy" "_ = let { v0 = 0 ; v1 = (\\v2 -> v2) } in v1"
     ]
