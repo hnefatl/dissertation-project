@@ -10,6 +10,7 @@ import Data.List (intercalate)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
+import ExtraDefs
 import Typechecker.Types
 
 -- |A substitution is a collection of assignments of a type to a variable

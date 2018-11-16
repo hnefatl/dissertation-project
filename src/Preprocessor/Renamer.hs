@@ -3,7 +3,6 @@
 module Preprocessor.Renamer where
 
 import Language.Haskell.Syntax
-import Data.Hashable
 import Data.Foldable
 import Data.Default
 import Data.Tuple
@@ -15,16 +14,13 @@ import qualified Data.HashMap.Strict as M
 
 import ExtraDefs
 
-newtype Name = Name Id deriving (Eq, Ord, Show, Hashable)
-newtype UniqueName = UniqueName Id deriving (Eq, Ord, Show, Hashable)
-
 data RenamerState = RenamerState
       -- Used to generate unique variable names
     { variableCounter :: Int
       -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
-    , bindings :: M.HashMap Name [UniqueName] 
+    , bindings :: M.HashMap VariableName [UniqueVariableName] 
       -- A reverse mapping from unique names to their original variable name: useful for printing error messages.
-    , reverseMapping :: M.HashMap UniqueName Name }
+    , reverseMapping :: M.HashMap UniqueVariableName VariableName }
     deriving (Show)
 instance Default RenamerState where
     def = RenamerState
@@ -34,11 +30,11 @@ instance Default RenamerState where
 
 newtype Renamer a = Renamer (ExceptT String (State RenamerState) a)
     deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState)
-instance NameGenerator Renamer UniqueName where
+instance NameGenerator Renamer UniqueVariableName where
     freshName = do
         counter <- gets variableCounter
         modify (\s -> s { variableCounter = counter + 1 })
-        return (UniqueName $ Id $ "v" ++ show counter)
+        return (UniqueVariableName $ "v" ++ show counter)
 
 runRenamer :: (MonadError String m) => Renamer a -> (m a, RenamerState)
 runRenamer (Renamer inner) = (liftEither x, s)
@@ -53,13 +49,13 @@ disjointUnion s1 s2 = if S.null inter then return (S.union s1 s2) else throwErro
 disjointUnions :: (MonadError String m, Foldable f, Ord a, Show a) => f (S.Set a) -> m (S.Set a)
 disjointUnions = foldlM disjointUnion S.empty
 
-getUniqueScopedName :: Name -> Renamer UniqueName
+getUniqueScopedName :: VariableName -> Renamer UniqueVariableName
 getUniqueScopedName name = gets (M.lookup name . bindings) >>= \case
     Nothing -> throwError $ "Missing unique name for variable " ++ show name
     Just [] -> throwError $ "Variable out of scope " ++ show name
     Just (newname:_) -> return newname
 
-bindForScope :: S.Set Name -> Renamer a -> Renamer a
+bindForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindForScope names action = do
     mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshName) (S.toList names)
     -- Add new bindings to scope
@@ -83,14 +79,14 @@ bindForScope names action = do
 -- `where` clauses.
 
 -- |Return all variable names bound in this pattern (recursively)
-getPatBoundNames :: MonadError String m => HsPat -> m (S.Set Name)
-getPatBoundNames (HsPVar v) = return $ S.singleton (Name $ toId v)
+getPatBoundNames :: MonadError String m => HsPat -> m (S.Set VariableName)
+getPatBoundNames (HsPVar v) = return $ S.singleton (convertName v)
 getPatBoundNames (HsPLit _) = return S.empty
 getPatBoundNames HsPWildCard = return S.empty
 getPatBoundNames (HsPNeg p) = getPatBoundNames p
 getPatBoundNames (HsPParen p) = getPatBoundNames p
 getPatBoundNames (HsPIrrPat p) = getPatBoundNames p
-getPatBoundNames (HsPAsPat v p) = disjointUnion (S.singleton $ Name $ toId v) =<< getPatBoundNames p
+getPatBoundNames (HsPAsPat v p) = disjointUnion (S.singleton $ convertName v) =<< getPatBoundNames p
 getPatBoundNames (HsPInfixApp p1 _ p2) = do
     ns1 <- getPatBoundNames p1
     ns2 <- getPatBoundNames p2
@@ -101,23 +97,23 @@ getPatBoundNames (HsPList ps) = disjointUnions =<< mapM getPatBoundNames ps
 getPatBoundNames (HsPRec _ _) = throwError "Pattern records not supported"
 
 -- |Get all variable names bound in this list of patterns
-getPatsBoundNames :: MonadError String m => [HsPat] -> m (S.Set Name)
+getPatsBoundNames :: MonadError String m => [HsPat] -> m (S.Set VariableName)
 getPatsBoundNames ps = disjointUnions =<< mapM getPatBoundNames ps
 
 -- |Get all variable names top-level bound by this declaration, **not recursively**. Eg. for the pattern binding:
 -- > x = y
 -- >   where y = 5
 -- we return `x` but not `y`, as `x` is visible to horizontally defined bindings, whereas y is not.
-getDeclBoundNames :: MonadError String m => HsDecl -> m (S.Set Name)
+getDeclBoundNames :: MonadError String m => HsDecl -> m (S.Set VariableName)
 getDeclBoundNames (HsPatBind _ pat _ _) = getPatBoundNames pat
 getDeclBoundNames (HsFunBind matches) = do
-    let names = map (\(HsMatch _ name _ _ _) -> toId name) matches
+    let names = map (\(HsMatch _ name _ _ _) -> convertName name) matches
         funName = head names
         allNamesMatch = all (== funName) names
-    if allNamesMatch then return $ S.singleton (Name funName) else throwError "Mismatched function names"
+    if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
 getDeclBoundNames _ = throwError "Declaration not supported"
 
-getDeclsBoundNames :: MonadError String m => [HsDecl] -> m (S.Set Name)
+getDeclsBoundNames :: MonadError String m => [HsDecl] -> m (S.Set VariableName)
 getDeclsBoundNames ds = disjointUnions =<< mapM getDeclBoundNames ds
 
 
@@ -128,8 +124,8 @@ renameModule :: Rename HsModule
 renameModule (HsModule a b c d e) = HsModule a b c d <$> renameDeclGroup e
 
 rename :: Rename HsName
-rename (HsIdent name) = getUniqueScopedName (Name $ Id name) >>= \(UniqueName (Id name')) -> return (HsIdent name')
-rename (HsSymbol name) = getUniqueScopedName (Name $ Id name) >>= \(UniqueName (Id name')) -> return (HsSymbol name')
+rename n@(HsIdent _) = getUniqueScopedName (convertName n) >>= \(UniqueVariableName name') -> pure (HsIdent name')
+rename n@(HsSymbol _) = getUniqueScopedName (convertName n) >>= \(UniqueVariableName name') -> pure (HsSymbol name')
 renameQ :: Rename HsQName
 renameQ (Qual m n) = Qual m <$> rename n
 renameQ (UnQual n) = UnQual <$> rename n

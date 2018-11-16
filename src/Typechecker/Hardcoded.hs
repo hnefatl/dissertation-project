@@ -7,32 +7,34 @@ import ExtraDefs
 import Typechecker.Types
 import Typechecker.Typeclasses
 
-builtinConstructors :: M.Map Id QuantifiedType
+builtinConstructors :: M.Map VariableName QuantifiedType
 builtinConstructors = M.fromList
-    [ (Id "True", Quantified S.empty $ Qualified S.empty typeBool),
-      (Id "False", Quantified S.empty $ Qualified S.empty typeBool)
+    [ (VariableName "True", Quantified S.empty $ Qualified S.empty typeBool),
+      (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool)
     ]
 
-builtinFunctions :: M.Map Id QuantifiedType
+builtinFunctions :: M.Map VariableName QuantifiedType
 builtinFunctions = M.fromList
     [
         let t = makeFun [ta, ta] ta
-        in (Id "+", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance (Id "Num") ta)) t)
+        in (VariableName "+", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance classNum ta)) t)
     ,
         let t = makeFun [ta, ta] ta
-        in (Id "-", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance (Id "Num") ta)) t)
+        in (VariableName "-", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance classNum ta)) t)
     ,
         let t = makeFun [ta, ta] typeBool
-        in (Id "==", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance (Id "Eq") ta) t)
+        in (VariableName "==", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance classEq ta) t)
     ,
-        (Id "&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        (VariableName "&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-        (Id "||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        (VariableName "||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
     ,
-        (Id "not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
+        (VariableName "not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
     ]
-    where a = TypeVariable (Id "a") KindStar
+    where a = TypeVariable (TypeVariableName "a") KindStar
           ta = TypeVar a
+          classEq = TypeConstantName "Eq"
+          classNum = TypeConstantName "Num"
 
 builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
@@ -66,9 +68,9 @@ builtinClasses = M.fromList
             ])
     ]
     where
-        a = TypeVar (TypeVariable (Id "a") KindStar)
-        b = TypeVar (TypeVariable (Id "b") KindStar)
-        classShow = Id "Show"
-        classEq = Id "Eq"
-        classNum = Id "Num"
-        classFractional = Id "Fractional"
+        a = TypeVar (TypeVariable (TypeVariableName "a") KindStar)
+        b = TypeVar (TypeVariable (TypeVariableName "b") KindStar)
+        classShow = TypeConstantName "Show"
+        classEq = TypeConstantName "Eq"
+        classNum = TypeConstantName "Num"
+        classFractional = TypeConstantName "Fractional"

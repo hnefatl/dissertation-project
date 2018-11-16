@@ -2,13 +2,13 @@
 
 module Typechecker.Typechecker where
 
+import ExtraDefs
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Typeclasses
 import Typechecker.Simplifier
-import Preprocessor.Renamer (getDeclsBoundNames, Name(..))
-import ExtraDefs
+import Preprocessor.Renamer (getDeclsBoundNames)
 
 import Text.Printf
 import Control.Applicative
@@ -52,11 +52,11 @@ instance Default InferrerState where
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
     deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String)
-instance NameGenerator TypeInferrer Id where
+instance NameGenerator TypeInferrer TypeVariableName where
     freshName = do
         counter <- gets variableCounter
         modify (\s -> s { variableCounter = counter + 1 })
-        return (Id $ "t" ++ show counter)
+        return (TypeVariableName $ "t" ++ show counter)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
 runTypeInferrer :: MonadError String m => TypeInferrer a -> (m a, InferrerState)
@@ -231,19 +231,19 @@ inferLiteral (HsChar _) = nameSimpleType typeChar
 inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVariable
-    addTypeConstraint v (Id "Num")
+    addTypeConstraint v (TypeConstantName "Num")
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVariable
-    addTypeConstraint v (Id "Fractional")
+    addTypeConstraint v (TypeConstantName "Fractional")
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
 -- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
 -- into lets? Pg. 26 of thih.pdf
 inferExpression :: Syntax.HsExp -> TypeInferrer TypeVariableName
-inferExpression (HsVar name) = getVariableTypeVariable (toId name)
-inferExpression (HsCon name) = getVariableTypeVariable (toId name)
+inferExpression (HsVar name) = getVariableTypeVariable (convertName name)
+inferExpression (HsCon name) = getVariableTypeVariable (convertName name)
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
 inferExpression (HsLambda _ pats e) = do
@@ -304,12 +304,12 @@ inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 
 inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
-inferPattern (HsPVar name) = getVariableTypeVariableOrAdd (toId name)
+inferPattern (HsPVar name) = getVariableTypeVariableOrAdd (convertName name)
 inferPattern (HsPLit lit) = inferLiteral lit
 inferPattern HsPWildCard = freshTypeVariable
 inferPattern (HsPAsPat name pat) = do
     t <- nameToType =<< inferPattern pat
-    v <- getVariableTypeVariableOrAdd (toId name)
+    v <- getVariableTypeVariableOrAdd (convertName name)
     vt <- nameToType v
     unify t vt
     return v
@@ -368,11 +368,11 @@ inferDecl _ = throwError "Declaration not yet supported"
 inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
 inferDeclGroup ds = do
     names <- getDeclsBoundNames ds
-    typeVarMapping <- M.fromList <$> mapM (\(Name n) -> (n,) <$> freshName) (S.toList names)
+    typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshName) (S.toList names)
     writeLog $ printf "Adding %s to environment for declaration group" (show typeVarMapping)
     addVariableTypes typeVarMapping
     mapM_ inferDecl ds
-    mapM_ (\(Name name) -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
+    mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
 
 -- TODO(kc506): Dependency analysis, split into typechecking groups and process individually
 -- TODO(kc506): Take advantage of explicit type hints

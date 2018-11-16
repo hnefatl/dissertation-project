@@ -6,8 +6,6 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 - Mutually recursive typechecking.
 - Rewrite to use `Text` instead of `String`.
-- Move `UniqueName`, `Name`, `Id`, `VariableName`, `TypeVariableName` together and merge in `ExtraDefs`: newtypes are
-  very good, redundant definitions are bad.
 - Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
 
 ## Preprocessing

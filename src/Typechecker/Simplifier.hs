@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, FlexibleInstances, LambdaCase #-}
+{-# Language FlexibleContexts, FlexibleInstances, LambdaCase, ConstraintKinds #-}
 
 module Typechecker.Simplifier where
 
@@ -11,6 +11,8 @@ import Control.Monad.Except
 import qualified Data.Set as S
 import ExtraDefs
 
+type Simplifier m = (NameGenerator m TypeVariableName, MonadError String m)
+
 class HasHnf t where
     -- |Returns whether `t` is in head-normal form, as defined by the Haskell report
     -- In practice, this means that if we have environment `(Ord a, Ord b) => Ord (a, b)` and have `Ord (a, b)` in a
@@ -18,7 +20,7 @@ class HasHnf t where
     inHnf :: t -> Bool
 
     -- |Converts a `t` into hnf
-    toHnf :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> t -> m (S.Set TypePredicate)
+    toHnf :: Simplifier m => ClassEnvironment -> t -> m (S.Set TypePredicate)
 
 instance HasHnf Type where
     inHnf (TypeVar _) = True
@@ -42,7 +44,7 @@ instance HasHnf t => HasHnf [t] where
     inHnf = all inHnf
     toHnf ce ts = S.unions <$> mapM (toHnf ce) ts
 
-detectInvalidPredicate :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> TypePredicate -> m ()
+detectInvalidPredicate :: Simplifier m => ClassEnvironment -> TypePredicate -> m ()
 detectInvalidPredicate _ (IsInstance _ TypeVar{}) = return ()
 detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
     insts <- instances classname ce
@@ -52,12 +54,12 @@ detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
     let isInstance = any (\(Qualified quals t) -> S.null quals && inst == t) insts
     unless isInstance (throwError $ printf "Predicate %s doesn't hold in the environment." (show inst))
 
-detectInvalidPredicates :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m ()
+detectInvalidPredicates :: Simplifier m => ClassEnvironment -> S.Set TypePredicate -> m ()
 detectInvalidPredicates ce = mapM_ (detectInvalidPredicate ce)
 
 -- |Removes redundant predicates from the given set. A predicate is redundant if it's entailed by any of the other
 -- predicates
-removeRedundant :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+removeRedundant :: Simplifier m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
 removeRedundant ce s = foldlM removeIfEntailed S.empty s
     where removeIfEntailed acc p = do
             -- A predicate is redundant if it can be entailed by the other predicates
@@ -67,7 +69,7 @@ removeRedundant ce s = foldlM removeIfEntailed S.empty s
 
 -- |Simplify a context as specified in the Haskell report: reduce each predicate to head-normal form then remove
 -- redundant predicates.
-simplify :: (NameGenerator m Id, MonadError String m) => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
+simplify :: Simplifier m => ClassEnvironment -> S.Set TypePredicate -> m (S.Set TypePredicate)
 simplify ce s = do
     hnfs <- toHnf ce s
     mapM_ (detectInvalidPredicate ce) hnfs

@@ -14,23 +14,23 @@ import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier
 
-type ClassName = Id
+type ClassName = TypeConstantName
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
 data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show)
 
 -- |Qualified types need to match the same global unique names to the predicates as it does the head
-type ClassEnvironment = M.Map Id TypeClass
+type ClassEnvironment = M.Map ClassName TypeClass
 
 -- |Get all superclasses of a given class
-superclasses :: MonadError String m => Id -> ClassEnvironment -> m (S.Set Id)
+superclasses :: MonadError String m => ClassName -> ClassEnvironment -> m (S.Set ClassName)
 superclasses name env = case M.lookup name env of
     Just (Class supers _) -> return supers
     Nothing -> throwError ("No class " ++ show name ++ " in the environment")
 
 -- |Get all instances of a given class
-instances :: MonadError String m => Id -> ClassEnvironment -> m (S.Set ClassInstance)
+instances :: MonadError String m => ClassName -> ClassEnvironment -> m (S.Set ClassInstance)
 instances name env = case M.lookup name env of
     Just (Class _ insts) -> return insts
     Nothing -> throwError ("No class " ++ show name ++ " in the environment")
@@ -40,7 +40,7 @@ emptyClassEnv = M.empty
 
 -- |Add a typeclass with the given superclasses
 -- Check that the class hasn't already been added and that all the superclasses exist
-addClass :: MonadError String m => Id -> S.Set Id -> ClassEnvironment -> m ClassEnvironment
+addClass :: MonadError String m => ClassName -> S.Set ClassName -> ClassEnvironment -> m ClassEnvironment
 addClass name supers ce
     | name `M.member` ce = throwError ("Class " ++ show name ++ " already exists")
     | not $ null missingSupers = throwError ("Missing superclasses " ++ show missingSupers)

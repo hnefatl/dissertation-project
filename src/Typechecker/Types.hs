@@ -10,9 +10,6 @@ import Data.List (intercalate, foldl')
 
 import ExtraDefs
 
-type TypeVariableName = Id
-type VariableName = Id
-
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord)
@@ -30,11 +27,10 @@ getTvName (TypeVariable name _) = name
 
 -- |The type of a Haskell expression.
 -- A `TypeVariable` is a globally unique name for a type variable.
--- A `TypeDummy` is a locally (within the type) unique name for a type variable.
 -- A `TypeConstant` is composed of the name of the constructor being used, along with the kinds of any remaining
 -- arguments and the list of applied types
 data Type = TypeVar !TypeVariable
-          | TypeConstant !Id ![Kind] ![Type]
+          | TypeConstant !TypeConstantName ![Kind] ![Type]
     deriving (Eq, Ord)
 
 applyType :: MonadError String m => Type -> Type -> m Type
@@ -55,7 +51,7 @@ applyTypeUnsafe t1 t2 = case applyType t1 t2 of
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord)
+data TypePredicate = IsInstance !TypeConstantName !Type deriving (Eq, Ord)
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
@@ -92,24 +88,26 @@ instance Show Type where
     show (TypeVar v) = show v
 
     -- Special show cases for builtin types
-    show (TypeConstant (Id "[]") _ []) = "[]"
-    show (TypeConstant (Id "[]") _ [t]) = printf "[%s]" (show t)
-    show (TypeConstant (Id "[]") _ _) = error "compiler Error: Invalid type"
-    show (TypeConstant (Id "(,)") ks ts) = printf "(%s)" elements
+    show (TypeConstant (TypeConstantName "[]") _ []) = "[]"
+    show (TypeConstant (TypeConstantName "[]") _ [t]) = printf "[%s]" (show t)
+    show (TypeConstant (TypeConstantName "[]") _ _) = error "compiler Error: Invalid type"
+    show (TypeConstant (TypeConstantName "(,)") ks ts) = printf "(%s)" elements
         where elements = intercalate "," (map show ts ++ replicate (length ks) "")
-    show (TypeConstant (Id "->") _ ts) = case ts of
+    show (TypeConstant (TypeConstantName "->") _ ts) = case ts of
             [] -> "(->)"
             [t] -> printf "(%s ->)" (assocShow t)
             [arg, ret] -> printf "%s -> %s" (assocShow arg) (show ret)
             _ -> error "Compiler Error: Invalid type"
-        where assocShow t@(TypeConstant (Id "->") _ ts') = if length ts' >= 2 then printf "(%s)" (show t) else show t
+        where assocShow t@(TypeConstant (TypeConstantName "->") _ ts')
+                | length ts' >= 2 = printf "(%s)" (show t)
+                | otherwise = show t
               assocShow t = show t
     -- General show case
-    show (TypeConstant (Id name) _ []) = name
-    show (TypeConstant (Id name) _ ts) = printf "(%s %s)" name (unwords $ map show ts)
+    show (TypeConstant (TypeConstantName name) _ []) = name
+    show (TypeConstant (TypeConstantName name) _ ts) = printf "(%s %s)" name (unwords $ map show ts)
 instance Show TypePredicate where
-    show (IsInstance (Id name) t@TypeVar{}) = printf "%s %s" name (show t)
-    show (IsInstance (Id name) t@TypeConstant{}) = printf "%s (%s)" name (show t)
+    show (IsInstance (TypeConstantName name) t@TypeVar{}) = printf "%s %s" name (show t)
+    show (IsInstance (TypeConstantName name) t@TypeConstant{}) = printf "%s (%s)" name (show t)
 instance Show a => Show (Qualified a) where
     show (Qualified quals x) = prefix ++ show x
         where prefix = case S.size quals of
@@ -122,12 +120,12 @@ instance Show QuantifiedType where
         where quantifiers = printf "∀%s. " (intercalate ", " $ map show $ S.toList quants)
 
 
-getInstantiatingTypeMap :: (NameGenerator m Id, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
+getInstantiatingTypeMap :: (NameGenerator m TypeVariableName, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
     m <- getInstantiatingMap q
     return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
 
-getInstantiatingMap :: (NameGenerator m Id, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
+getInstantiatingMap :: (NameGenerator m TypeVariableName, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
 getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
     where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
 
@@ -142,20 +140,20 @@ makeTuple elements = foldl' applyTypeUnsafe (typeTuple $ length elements) elemen
 
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
-typeUnit = TypeConstant (Id "()") [] []
-typeBool = TypeConstant (Id "Bool") [] []
-typeInt = TypeConstant (Id "Int") [] []
-typeInteger = TypeConstant (Id "Integer") [] []
-typeFloat = TypeConstant (Id "Float") [] []
-typeDouble = TypeConstant (Id "Double") [] []
-typeChar = TypeConstant (Id "Char") [] []
+typeUnit = TypeConstant (TypeConstantName "()") [] []
+typeBool = TypeConstant (TypeConstantName "Bool") [] []
+typeInt = TypeConstant (TypeConstantName "Int") [] []
+typeInteger = TypeConstant (TypeConstantName "Integer") [] []
+typeFloat = TypeConstant (TypeConstantName "Float") [] []
+typeDouble = TypeConstant (TypeConstantName "Double") [] []
+typeChar = TypeConstant (TypeConstantName "Char") [] []
 
 typeList, typeFun :: Type
-typeList = TypeConstant (Id "[]") [KindStar] []
-typeFun = TypeConstant (Id "->") [KindStar, KindStar] []
+typeList = TypeConstant (TypeConstantName "[]") [KindStar] []
+typeFun = TypeConstant (TypeConstantName "->") [KindStar, KindStar] []
 
 typeTuple :: Int -> Type
-typeTuple n = TypeConstant (Id "(,)") (replicate n KindStar) []
+typeTuple n = TypeConstant (TypeConstantName "(,)") (replicate n KindStar) []
 
 typeString :: Type
 typeString = makeList typeChar

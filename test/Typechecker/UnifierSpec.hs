@@ -11,7 +11,7 @@ import Typechecker.Types
 
 test :: TestTree
 test = let
-        [a, b, c] = map Id ["a", "b", "c"]
+        [a, b, c] = map TypeVariableName ["a", "b", "c"]
         [ta, tb, tc] = [TypeVar (TypeVariable v KindStar) | v <- [a, b, c]]
     in testGroup "Unification"
     [
@@ -26,7 +26,7 @@ test = let
 
         in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
     ,
-        let x = IsInstance (Id "Eq") (TypeVar (TypeVariable a KindStar))
-            y = IsInstance (Id "Eq") typeBool
+        let x = IsInstance (TypeConstantName "Eq") (TypeVar (TypeVariable a KindStar))
+            y = IsInstance (TypeConstantName "Eq") typeBool
         in testCase "match (Eq a) (Eq Bool)" $ assertEqual "" (Right $ subMultiple [(a, typeBool)]) (match x y)
     ]
