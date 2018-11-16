@@ -1,7 +1,7 @@
 {-# Language FlexibleContexts #-}
 
-module Preprocessor.ContainedNames where
 -- |Utility functions for getting variable names from the parse tree
+module Preprocessor.ContainedNames where
 
 import Control.Monad.Except
 import Language.Haskell.Syntax
@@ -10,6 +10,7 @@ import Text.Printf
 import qualified Data.Set as S
 
 import ExtraDefs
+
 
 disjointUnion :: (MonadError String m, Ord a, Show a) => S.Set a -> S.Set a -> m (S.Set a)
 disjointUnion s1 s2 = if S.null inter then return (S.union s1 s2) else throwError err
@@ -77,22 +78,13 @@ getExpContainedNames (HsInfixApp e1 op e2) = do
     let opNames = S.singleton (convertName op)
     e1Names <- getExpContainedNames e1
     e2Names <- getExpContainedNames e2
-    disjointUnions [opNames, e1Names, e2Names]
-getExpContainedNames (HsApp e1 e2) = do
-    e1Names <- getExpContainedNames e1
-    e2Names <- getExpContainedNames e2
-    disjointUnion e1Names e2Names
+    return $ S.unions [opNames, e1Names, e2Names]
+getExpContainedNames (HsApp e1 e2) = S.union <$> getExpContainedNames e1 <*> getExpContainedNames e2
 getExpContainedNames (HsNegApp e) = getExpContainedNames e
-getExpContainedNames (HsLambda _ pats e) = do
-    patNames <- getPatsContainedNames pats
-    eNames <- getExpContainedNames e
-    disjointUnion patNames eNames
-getExpContainedNames (HsLet ds e) = do
-    dNames <- getDeclsContainedNames ds
-    eNames <- getExpContainedNames e
-    disjointUnion dNames eNames
-getExpContainedNames (HsIf e1 e2 e3) = disjointUnions =<< mapM getExpContainedNames [e1, e2, e3]
-getExpContainedNames (HsTuple es) = disjointUnions =<< mapM getExpContainedNames es
-getExpContainedNames (HsList es) = disjointUnions =<< mapM getExpContainedNames es
+getExpContainedNames (HsLambda _ pats e) = S.union <$> getPatsContainedNames pats <*> getExpContainedNames e
+getExpContainedNames (HsLet ds e) = S.union <$> getDeclsContainedNames ds <*> getExpContainedNames e
+getExpContainedNames (HsIf e1 e2 e3) = S.unions <$> mapM getExpContainedNames [e1, e2, e3]
+getExpContainedNames (HsTuple es) = S.unions <$> mapM getExpContainedNames es
+getExpContainedNames (HsList es) = S.unions <$> mapM getExpContainedNames es
 getExpContainedNames (HsParen e) = getExpContainedNames e
 getExpContainedNames e = throwError $ "Unsupported expression " ++ show e
