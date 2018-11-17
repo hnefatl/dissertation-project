@@ -6,7 +6,7 @@ import Language.Haskell.Syntax
 import Data.Foldable
 import Data.Default
 import Data.Tuple
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Control.Monad.Except
 import qualified Data.Set as S
 import qualified Data.HashMap.Strict as M
@@ -30,13 +30,12 @@ instance Default RenamerState where
             , reverseMapping = M.empty }
 
 newtype Renamer a = Renamer (ExceptT String (StateT RenamerState NameGenerator) a)
-    deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState)
-instance MonadNameGenerator UniqueVariableName Renamer where
-    freshName = freshName
+    deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState, MonadNameGenerator UniqueVariableName)
 
-runRenamer :: (MonadNameGenerator UniqueVariableName m, MonadError String m) => Renamer a -> NameGeneratorCounter -> (m a, RenamerState, NameGeneratorCounter)
-runRenamer (Renamer inner) i = (liftEither x, s, i')
-    where ((x, s), i') = runNameGenerator (runStateT (runExceptT inner) def) i
+runRenamer :: MonadError String me => Renamer a -> NameGenerator (me a, RenamerState)
+runRenamer (Renamer inner) = do
+    (x, s) <- runStateT (runExceptT inner) def
+    return (liftEither x, s)
 
 type Rename a = a -> Renamer a
 

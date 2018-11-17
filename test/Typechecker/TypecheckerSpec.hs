@@ -8,7 +8,9 @@ import Test.Tasty.HUnit
 import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
+import ExtraDefs
 import Names
+import NameGenerator
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Typechecker
@@ -32,7 +34,7 @@ parse s = case parseModule s of
 
 inferModule' :: String -> (Either String (M.Map VariableName QuantifiedType), InferrerState)
 inferModule' s = (runExcept out, state)
-    where (out, state) = runTypeInferrer $ catchError infer handler
+    where (out, state) = evalNameGenerator (runTypeInferrer $ catchError infer handler) 0
           handler err = get >>= \st -> throwError $ unlines [err, unpack $ pShow st]
           infer = do
             -- Add builtins
