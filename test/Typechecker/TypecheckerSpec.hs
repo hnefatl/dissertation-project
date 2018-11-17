@@ -256,4 +256,10 @@ test = let
     ,
         let s = "_ = let { x = y ; y = x y } in True"
         in testBindingsFail s
+    ,
+        let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
+        in testBindings s
+            [ ("id", Quantified (S.singleton a) $ Qualified S.empty ta)
+            , ("g", Quantified (S.singleton b) $ Qualified S.empty tb)
+            , ("h", Quantified (S.singleton b) $ Qualified S.empty tb) ]
     ]
