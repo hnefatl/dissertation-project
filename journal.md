@@ -36,7 +36,17 @@ Given binding definitions which depend on each other, finding mutually-dependent
 strongly-connected components of the dependency graph, and finding the dependency order is equivalent to doing a
 topological sort of the graph whose nodes are the SCCs.
 
-I think that the `stronglyConnComp` function from `Data.Graph` does both SCC and topological sorting.
+`stronglyConnComp` function from `Data.Graph` does both SCC and topological sorting.
+
+Special case when analysing a declaration that doesn't bind any variables, like `_ = x + 1`. Such a declaration can
+depend on others but no other declarations can depend on it. Can't just add `"_"` as a node as there can be duplicates
+which would overwrite each other. Instead, generate a fresh variable name and pretend the declaration binds that
+variable.
+
+Works, effective, but then need to make sure that the variable counter is carried over from the renaming stage to the
+dependency analysis stage: otherwise we can generate a variable that's not unique. In practice, this led to the
+`NameGenerator` monad transformer, to ensure we carry the same counter around throughout the compiler, and don't lose it
+on the way from renaming to dependency analysis during typechecking.
 
 ## Type Checking
 
