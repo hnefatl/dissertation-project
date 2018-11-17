@@ -8,7 +8,8 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (intercalate, foldl')
 
-import ExtraDefs
+import Names
+import NameGenerator
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
@@ -120,12 +121,12 @@ instance Show QuantifiedType where
         where quantifiers = printf "∀%s. " (intercalate ", " $ map show $ S.toList quants)
 
 
-getInstantiatingTypeMap :: (NameGenerator m TypeVariableName, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
+getInstantiatingTypeMap :: (MonadNameGenerator TypeVariableName m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
     m <- getInstantiatingMap q
     return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
 
-getInstantiatingMap :: (NameGenerator m TypeVariableName, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
+getInstantiatingMap :: (MonadNameGenerator TypeVariableName m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
 getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
     where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
 

@@ -3,7 +3,7 @@ module Typechecker.UnifierSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import ExtraDefs
+import Names
 import Typechecker.Unifier
 import Typechecker.Substitution
 import Typechecker.Types

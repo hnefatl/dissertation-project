@@ -11,7 +11,8 @@ import Control.Monad.Except
 import qualified Data.Set as S
 import qualified Data.HashMap.Strict as M
 
-import ExtraDefs
+import Names
+import NameGenerator
 import Preprocessor.ContainedNames
 
 data RenamerState = RenamerState
@@ -28,17 +29,14 @@ instance Default RenamerState where
             , bindings = M.empty
             , reverseMapping = M.empty }
 
-newtype Renamer a = Renamer (ExceptT String (State RenamerState) a)
+newtype Renamer a = Renamer (ExceptT String (StateT RenamerState NameGenerator) a)
     deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState)
-instance NameGenerator Renamer UniqueVariableName where
-    freshName = do
-        counter <- gets variableCounter
-        modify (\s -> s { variableCounter = counter + 1 })
-        return (UniqueVariableName $ "v" ++ show counter)
+instance MonadNameGenerator UniqueVariableName Renamer where
+    freshName = freshName
 
-runRenamer :: (MonadError String m) => Renamer a -> (m a, RenamerState)
-runRenamer (Renamer inner) = (liftEither x, s)
-    where (x, s) = runState (runExceptT inner) def
+runRenamer :: (MonadNameGenerator UniqueVariableName m, MonadError String m) => Renamer a -> NameGeneratorCounter -> (m a, RenamerState, NameGeneratorCounter)
+runRenamer (Renamer inner) i = (liftEither x, s, i')
+    where ((x, s), i') = runNameGenerator (runStateT (runExceptT inner) def) i
 
 type Rename a = a -> Renamer a
 

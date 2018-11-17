@@ -10,12 +10,13 @@ import Data.Text.Lazy (unpack)
 import Text.Pretty.Simple
 
 import ExtraDefs
+import NameGenerator
 import Preprocessor.Renamer
 
 makeTest :: String -> String -> TestTree
 makeTest input expected = testCase (deline input) $ case (,) <$> parseModule input <*> parseModule expected of
     ParseOk (input', HsModule _ _ _ _ expectedDecls) ->
-        let (renamedInput, state) = runRenamer (renameModule input')
+        let (renamedInput, state, _) = runNameGenerator (runRenamer (renameModule input') 0) 0
         in case renamedInput of
             Right (HsModule _ _ _ _ renamedDecls) -> assertEqual (unpack $ pShow state) renamedDecls expectedDecls
             Left err -> assertFailure err

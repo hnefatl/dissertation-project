@@ -9,7 +9,7 @@ import Data.Foldable
 import Text.Printf
 import qualified Data.Set as S
 
-import ExtraDefs
+import Names
 
 
 disjointUnion :: (MonadError String m, Ord a, Show a) => S.Set a -> S.Set a -> m (S.Set a)
@@ -64,7 +64,7 @@ getDeclContainedNames (HsPatBind _ _ rhs _) = getRhsContainedNames rhs
 getDeclContainedNames (HsFunBind _) = throwError "Variables in a HsMatch not supported"
 getDeclContainedNames _ = throwError "Not supported"
 getDeclsContainedNames :: MonadError String m => [HsDecl] -> m (S.Set VariableName)
-getDeclsContainedNames ds = disjointUnions =<< mapM getDeclContainedNames ds
+getDeclsContainedNames ds = S.unions <$> mapM getDeclContainedNames ds
 
 getRhsContainedNames :: MonadError String m => HsRhs -> m (S.Set VariableName)
 getRhsContainedNames (HsUnGuardedRhs e) = getExpContainedNames e

@@ -2,16 +2,17 @@
 
 module Typechecker.Simplifier where
 
-import Typechecker.Types
-import Typechecker.Typeclasses
-
 import Text.Printf
 import Data.Foldable
 import Control.Monad.Except
 import qualified Data.Set as S
-import ExtraDefs
 
-type Simplifier m = (NameGenerator m TypeVariableName, MonadError String m)
+import Names
+import NameGenerator
+import Typechecker.Types
+import Typechecker.Typeclasses
+
+type Simplifier m = (MonadNameGenerator TypeVariableName m, MonadError String m)
 
 class HasHnf t where
     -- |Returns whether `t` is in head-normal form, as defined by the Haskell report

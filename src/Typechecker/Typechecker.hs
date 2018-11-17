@@ -2,14 +2,6 @@
 
 module Typechecker.Typechecker where
 
-import ExtraDefs
-import Typechecker.Types
-import Typechecker.Unifier
-import Typechecker.Substitution
-import Typechecker.Typeclasses
-import Typechecker.Simplifier
-import Preprocessor.ContainedNames (getDeclsBoundNames)
-
 import Text.Printf
 import Control.Applicative
 import Control.Monad.Except
@@ -19,8 +11,18 @@ import Data.Foldable
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Map as M
-
 import Language.Haskell.Syntax as Syntax
+
+import Names
+import NameGenerator
+import Typechecker.Types
+import Typechecker.Unifier
+import Typechecker.Substitution
+import Typechecker.Typeclasses
+import Typechecker.Simplifier
+import Preprocessor.ContainedNames (getDeclsBoundNames)
+import Preprocessor.Dependency
+
 
 -- |Maps globally unique names of functions/variables/data constructors to a type variable representing their type.
 type TypeMap = M.Map VariableName TypeVariableName
@@ -50,29 +52,18 @@ instance Default InferrerState where
             , logs = Seq.empty }
 
 -- |A TypeInferrer handles mutable state and error reporting
-newtype TypeInferrer a = TypeInferrer (ExceptT String (State InferrerState) a)
-    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String)
-instance NameGenerator TypeInferrer TypeVariableName where
-    freshName = do
-        counter <- gets variableCounter
-        modify (\s -> s { variableCounter = counter + 1 })
-        return (TypeVariableName $ "t" ++ show counter)
+newtype TypeInferrer a = TypeInferrer (ExceptT String (StateT InferrerState NameGenerator) a)
+    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String, MonadNameGenerator VariableName, MonadNameGenerator TypeVariableName)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
-runTypeInferrer :: MonadError String m => TypeInferrer a -> (m a, InferrerState)
-runTypeInferrer (TypeInferrer inner) = (liftEither x, s)
-    where (x, s) = runState (runExceptT inner) def
+runTypeInferrer :: (MonadNameGenerator TypeVariableName m, MonadError String m) => TypeInferrer a -> NameGeneratorCounter -> (m a, InferrerState, NameGeneratorCounter)
+runTypeInferrer (TypeInferrer inner) i = (liftEither x, s, i')
+    where ((x, s), i') = runNameGenerator (runStateT (runExceptT inner) def) i
 
--- |Run type inference, and return the (possibly failed) result
-evalTypeInferrer :: MonadError String m => TypeInferrer a -> m a
-evalTypeInferrer = fst . runTypeInferrer
-
--- |Run type inference, and return the (possibly failed) state
-execTypeInferrer :: MonadError String m => TypeInferrer a -> m InferrerState
-execTypeInferrer (TypeInferrer inner) = case e of
-    Left err -> throwError err
-    Right _ -> return s
-    where (e, s) = runState (runExceptT inner) def
+evalTypeInferrer :: (MonadNameGenerator TypeVariableName m, MonadError String m) => TypeInferrer a -> NameGeneratorCounter -> m a
+evalTypeInferrer x i = x'
+    where (x', _, _) = runTypeInferrer x i
+    
 
 writeLog :: String -> TypeInferrer ()
 writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
@@ -364,15 +355,21 @@ inferDecl (HsPatBind _ pat rhs _) = do
     unify patType rhsType
 inferDecl (HsFunBind _) = throwError "Functions not yet supported"
 inferDecl _ = throwError "Declaration not yet supported"
-
-inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
-inferDeclGroup ds = do
+inferDecls :: [Syntax.HsDecl] -> TypeInferrer ()
+inferDecls ds = do
     names <- getDeclsBoundNames ds
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshName) (S.toList names)
     writeLog $ printf "Adding %s to environment for declaration group" (show typeVarMapping)
     addVariableTypes typeVarMapping
     mapM_ inferDecl ds
     mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
+
+inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
+inferDeclGroup ds = do
+    dependencyGroups <- dependencyOrder ds
+    boundNames <- mapM getDeclsBoundNames dependencyGroups
+    writeLog $ "Split binding group into: " ++ show boundNames
+    mapM_ inferDecls dependencyGroups
 
 -- TODO(kc506): Dependency analysis, split into typechecking groups and process individually
 -- TODO(kc506): Take advantage of explicit type hints

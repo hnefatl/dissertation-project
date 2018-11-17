@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as M
 import Control.Monad.Except
 
 import ExtraDefs
+import Names
 import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier

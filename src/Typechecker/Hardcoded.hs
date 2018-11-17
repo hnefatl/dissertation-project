@@ -3,7 +3,7 @@ module Typechecker.Hardcoded where
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-import ExtraDefs
+import Names
 import Typechecker.Types
 import Typechecker.Typeclasses
 

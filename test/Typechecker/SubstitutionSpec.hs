@@ -3,7 +3,7 @@ module Typechecker.SubstitutionSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import ExtraDefs
+import Names
 import Typechecker.Substitution
 import Typechecker.Types
 

@@ -1,5 +1,4 @@
-{-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
-{-# Language ScopedTypeVariables, DeriveFunctor, GeneralizedNewtypeDeriving #-}
+{-# Language FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 
 module Typechecker.Unifier where
 
@@ -7,11 +6,9 @@ import Text.Printf
 import Data.Foldable
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.State.Strict
 import Data.Either
 import qualified Data.Set as S
 
-import ExtraDefs
 import Typechecker.Substitution
 import Typechecker.Types
 
@@ -76,14 +73,3 @@ unifyVar var@(TypeVariable name _) t
     | name `S.member` getTypeVars t = throwError $ printf "Fails occurs check: %s with %s" (show var) (show t)
     | getKind var /= getKind t = throwError "Kind mismatch"
     | otherwise = return (subSingle name t)
-
-
--- Utilities for testing for alpha equivalence - one-off unification where the substitution doesn't escape, so we can
--- use variable names that are unique only to this call.
-newtype IsolatedTypeInstantiator a = ITI (State Int a)
-    deriving (Functor, Applicative, Monad, MonadState Int)
-instance MonadError String IsolatedTypeInstantiator where
-    throwError = error
-    catchError = undefined
-instance NameGenerator IsolatedTypeInstantiator String where
-    freshName = state (\s -> ("v" ++ show s, s + 1))

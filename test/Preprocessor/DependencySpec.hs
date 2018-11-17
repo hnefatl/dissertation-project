@@ -13,18 +13,21 @@ import Text.Pretty.Simple
 import qualified Data.Set as S
 
 import ExtraDefs
+import Names
+import NameGenerator
 import Preprocessor.Dependency
 import Preprocessor.ContainedNames
 
 makeTest :: String -> [[String]] -> TestTree
 makeTest input cases = testCase (deline input) $ case parseModule input of
     ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
-    ParseOk (HsModule _ _ _ _ decls) -> case runExcept (dependencyOrder decls) of
+    ParseOk (HsModule _ _ _ _ decls) -> case runExcept $ evalNameGeneratorT (dependencyOrder decls) 0 of
         Left err -> assertFailure err
         Right declOrder
-            | length declOrder /= length cases -> assertFailure $ printf "Lengths: %s vs %s" (pShow cases) (pShow decls)
+            | length declOrder /= length cases ->
+                assertFailure $ printf "Lengths: %s vs %s" (pShow cases) (pShow declOrder)
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
-                case runExcept $ getDeclsBoundNames actualGroup of
+                case runExcept (getDeclsBoundNames actualGroup) of
                     Left err -> assertFailure err
                     Right boundNames -> assertEqual "" boundNames (S.fromList $ map VariableName expectedGroup)
 
@@ -43,4 +46,5 @@ test = testGroup "Dependency Analysis"
     , makeTest "x@(a,_,b) = (1,2,3)\nc = a\nd = b\ne = (c, d)" [["x", "a", "b"], ["c"], ["d"], ["e"]]
     , makeTest "x = if a then b else c\na = b\nb = c\nc = True" [["c"], ["b"], ["a"], ["x"]]
     , makeTest "x = if a then b else c\na = b\nb = a\nc = True" [["c"], ["a", "b"], ["x"]]
+    , makeTest "_ = 1" [[]]
     ]
