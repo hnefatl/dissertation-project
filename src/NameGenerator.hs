@@ -3,6 +3,7 @@
 module NameGenerator where
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 
@@ -34,6 +35,8 @@ instance Monad m => MonadNameGenerator TypeVariableName (NameGeneratorT m) where
 
 instance MonadNameGenerator n m => MonadNameGenerator n (ExceptT e m) where
     freshName = lift freshName
+instance MonadNameGenerator n m => MonadNameGenerator n (ReaderT e m) where
+    freshName = lift freshName
 instance MonadNameGenerator n m => MonadNameGenerator n (StateT e m) where
     freshName = lift freshName
 instance MonadNameGenerator n m => MonadNameGenerator n (IdentityT m) where
@@ -44,3 +47,6 @@ instance MonadError e m => MonadError e (NameGeneratorT m) where
     catchError (NameGeneratorT x) f = NameGeneratorT $ catchError x $ (\(NameGeneratorT y) -> y) . f
 instance MonadState s m => MonadState s (NameGeneratorT m) where
     state = lift . state
+instance MonadReader s m => MonadReader s (NameGeneratorT m) where
+    ask = lift ask
+    local f (NameGeneratorT x) = NameGeneratorT $ local f x
