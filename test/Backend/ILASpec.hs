@@ -20,7 +20,7 @@ parse s = case parseModule s of
     ParseFailed loc msg -> throwError (msg ++ ": " ++ show loc)
 
 makeTest :: String -> [Binding] -> TestTree
-makeTest input expected = testCase (deline input) $ do
+makeTest input expected = testCase (deline input) $
     case runExcept foo of
         Left err -> assertFailure err
         Right binds -> assertEqual "" binds expected
