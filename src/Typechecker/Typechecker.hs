@@ -15,6 +15,7 @@ import Language.Haskell.Syntax as Syntax
 
 import Names
 import NameGenerator
+import Typechecker.Hardcoded
 import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Substitution
@@ -371,11 +372,18 @@ inferDeclGroup ds = do
     writeLog $ "Split binding group into: " ++ show boundNames
     mapM_ inferDecls dependencyGroups
 
--- TODO(kc506): Dependency analysis, split into typechecking groups and process individually
 -- TODO(kc506): Take advantage of explicit type hints
-inferModule :: Syntax.HsModule -> TypeInferrer ()
-inferModule (HsModule _ _ _ _ decls) = inferDeclGroup decls
+inferModule :: Syntax.HsModule -> TypeInferrer (M.Map VariableName QuantifiedType)
+inferModule (HsModule _ _ _ _ decls) = do
+    inferDeclGroup decls
+    getVariableTypes
 
+-- TODO(kc506): Delete once we don't need builtins
+inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (M.Map VariableName QuantifiedType)
+inferModuleWithBuiltins m = do
+    addClasses builtinClasses
+    forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
+    inferModule m
 
 getVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getVariableTypes = do

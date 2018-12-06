@@ -15,9 +15,7 @@ import Typechecker.Types
 import Typechecker.Unifier
 import Typechecker.Typechecker
 import Typechecker.Substitution
-import Typechecker.Hardcoded
 
-import Data.Foldable
 import Data.Either
 import Data.Text.Lazy (unpack)
 import Text.Printf
@@ -37,13 +35,8 @@ inferModule' s = (runExcept out, state)
     where (out, state) = evalNameGenerator (runTypeInferrer $ catchError infer handler) 0
           handler err = get >>= \st -> throwError $ unlines [err, unpack $ pShow st]
           infer = do
-            -- Add builtins
-            addClasses builtinClasses
-            forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-            -- Parse and run type inference
             m <- parse s
-            inferModule m
-            getVariableTypes
+            inferModuleWithBuiltins m
 
 testBindings :: String -> [(String, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do

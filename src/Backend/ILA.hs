@@ -8,11 +8,12 @@ import Control.Monad.Except
 import Language.Haskell.Syntax
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.List (foldl')
+import Data.List (foldl', intercalate)
+import Text.Printf
 
 import Names
 import NameGenerator
-import Typechecker.Types (Type, QualifiedType)
+import Typechecker.Types (Type, QuantifiedType)
 import Preprocessor.ContainedNames
 
 -- |A literal value
@@ -27,10 +28,16 @@ data Literal = LiteralInt Integer
 -- If there's a literal or nested data constructor then it needs to be bound to a variable
 -- and checked subsequently, as the alternatives can only contain variable names.
 data Alt = Alt AltConstructor [VariableName] Expr
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance Show Alt where
+    show (Alt con vs e) = printf "%s %s -> %s" (show con) (intercalate " " $ map show vs) (show e)
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon ConstructorName | LitCon Literal | Default
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance Show AltConstructor where
+    show (DataCon n) = show n
+    show (LitCon l) = show l
+    show Default = "__default"
 
 data Expr = Var VariableName -- Variable/function/data constructor
           | Lit Literal
@@ -39,21 +46,35 @@ data Expr = Var VariableName -- Variable/function/data constructor
           | Let VariableName Expr Expr
           | Case Expr [VariableName] [Alt] -- case e of x { a1 ; a2 ; ... }. x is bound to the value of e.
           | Type Type
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance Show Expr where
+    show (Var n) = show n
+    show (Lit l) = show l
+    show (App e1 e2) = printf "(%s) (%s)" (show e1) (show e2) 
+    show (Lam v b) = printf "λ%s -> %s" (show v) (show b)
+    show (Let v e1 e2) = printf "let %s = %s in %s" (show v) (show e1) (show e2)
+    show (Case s bs as) = printf "case %s of %s { %s }" (show s) (show bs) (intercalate " ; " $ map show as)
+    show (Type t) = "Type " ++ show t
 
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding = NonRec VariableName Expr | Rec (M.Map VariableName Expr)
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance Show Binding where
+    show (NonRec v e) = printf "NonRec: %s = %s" (show v) (show e)
+    show (Rec m) = unlines (headline:bodylines)
+        where (v1, e1):bs = M.toList m
+              headline =    printf "Rec: %s = %s" (show v1) (show e1)
+              bodylines = [ printf "     %s = %s" (show v) (show e) | (v, e) <- bs ]
 
 
-newtype Converter a = Converter (ReaderT (M.Map VariableName QualifiedType) (ExceptT String NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadReader (M.Map VariableName QualifiedType), MonadError String, MonadNameGenerator VariableName)
+newtype Converter a = Converter (ReaderT (M.Map VariableName QuantifiedType) (ExceptT String NameGenerator) a)
+    deriving (Functor, Applicative, Monad, MonadReader (M.Map VariableName QuantifiedType), MonadError String, MonadNameGenerator VariableName)
 
-runConverter :: MonadError String m => Converter a -> M.Map VariableName QualifiedType -> NameGenerator (m a)
+runConverter :: MonadError String m => Converter a -> M.Map VariableName QuantifiedType -> NameGenerator (m a)
 runConverter (Converter inner) s = liftEither <$> runExceptT (runReaderT inner s)
 
-getType :: VariableName -> Converter QualifiedType
+getType :: VariableName -> Converter QuantifiedType
 getType name = reader (M.lookup name) >>= \case
     Nothing -> throwError $ "Variable " ++ show name ++ " not in type environment"
     Just t -> return t
@@ -82,7 +103,7 @@ declToIla (HsPatBind _ pat rhs _) = do
             let body = Var (tempNames !! index) -- Just retrieve the specific output variable
             return $ NonRec name (Case (Var resultName) [] [Alt (DataCon $ ConstructorName "(,)") tempNames body])
     extractors <- mapM extractorMap (zip boundNames [0..])
-    return (NonRec resultName resultExpr:extractors)
+    return $ Rec (M.singleton resultName resultExpr):extractors
 declToIla (HsFunBind matches) = undefined
 declToIla _ = error "Unsupported declaration"
 
