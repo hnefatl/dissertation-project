@@ -100,7 +100,7 @@ makeTuple :: [Expr] -> Expr
 makeTuple = foldl' App (Var $ VariableName "(,)")
 
 makeList :: [Expr] -> Expr
-makeList = foldl' App (Var $ VariableName "[]")
+makeList = foldr (\x y -> App (App (Var $ VariableName ":") x) y) (Var $ VariableName "[]")
 
 makeError :: Expr
 makeError = Var $ VariableName "error"

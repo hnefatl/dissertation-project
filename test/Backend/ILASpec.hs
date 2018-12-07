@@ -37,27 +37,38 @@ test :: TestTree
 test = testGroup "Backend"
     [
         let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [5 :: Int ..]
-            x = VariableName "x"
             mainBind = Rec $ M.fromList [(t1, Case (makeTuple [true, false]) [t2] [Alt Default [] $ makeTuple [Var t2]])]
-            auxBind = NonRec x (Case (Var t1) [] [Alt (DataCon tupleCon) [t3] (Var t3), Alt Default [] makeError])
+            auxBind = NonRec x (Case (Var t1) [] [Alt tupleCon [t3] (Var t3), errAlt])
         in
             makeTest "x = (True, False)" [mainBind, auxBind]
         ,
         let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("v" ++) . show) [8 :: Int ..]
-            x = VariableName "x"
-            y = VariableName "y"
             mainBind = Rec $ M.fromList [
                 ( t1
                 , Case (makeTuple [true, false]) []
-                    [ Alt (DataCon tupleCon) [t4, t5] $
+                    [ Alt tupleCon [t4, t5] $
                         Case (Var t5) [t3] [Alt Default [] (Case (Var t4) [t2] [Alt Default [] $ makeTuple [Var t2, Var t3]])]
-                    , Alt Default [] makeError] ) ]
+                    , errAlt] ) ]
             auxBinds =
-                [ NonRec x (Case (Var t1) [] [Alt (DataCon tupleCon) [t6, t7] (Var t6), Alt Default [] makeError])
-                , NonRec y (Case (Var t1) [] [Alt (DataCon tupleCon) [t8, t9] (Var t9), Alt Default [] makeError]) ]
+                [ NonRec x (Case (Var t1) [] [Alt tupleCon [t6, t7] (Var t6), errAlt])
+                , NonRec y (Case (Var t1) [] [Alt tupleCon [t8, t9] (Var t9), errAlt]) ]
         in
             makeTest "(x, y) = (True, False)" $ mainBind:auxBinds
+        ,
+        let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("v" ++) . show) [8 :: Int ..]
+            mainBind = Rec $ M.fromList [
+                (t1
+                , Case (makeList [false]) [t9] [Alt consCon [t2, t3] $ Case (Var t3) [] [Alt consCon [t4, t5] $ Case (Var t5) [] [Alt nilCon [] $ Case (Var t2) [] [Alt trueCon [] $ makeTuple [Var t9], errAlt], errAlt], errAlt], errAlt] ) ]
+            auxBind = NonRec x (Case (Var t1) [] [Alt tupleCon [t6, t7] (Var t6), errAlt])
+        in
+            makeTest "x@[True, _] = [False]" [mainBind, auxBind]
     ]
-    where true = Var $ VariableName "True"
+    where x = VariableName "x"
+          y = VariableName "y"
+          true = Var $ VariableName "True"
           false = Var $ VariableName "False"
-          tupleCon = VariableName "(,)"
+          trueCon = DataCon $ VariableName "True"
+          tupleCon = DataCon $ VariableName "(,)"
+          consCon = DataCon $ VariableName ":"
+          nilCon = DataCon $ VariableName "[]"
+          errAlt = Alt Default [] makeError
