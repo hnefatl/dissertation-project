@@ -1,4 +1,4 @@
-{-# Language BangPatterns, MultiParamTypeClasses, GeneralizedNewtypeDeriving, FlexibleInstances, UndecidableInstances #-}
+{-# Language BangPatterns, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
 
 module ExtraDefs where
 

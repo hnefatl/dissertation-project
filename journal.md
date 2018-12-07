@@ -6,7 +6,6 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 - Mutually recursive typechecking.
 - Rewrite to use `Text` instead of `String`.
-- Initial static analysis pass to extract datatypes/class hierarchies etc. Topological sort/dependency analysis?
 - Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
 
 ## Preprocessing
@@ -76,3 +75,10 @@ Lots of example edge cases to demonstrate this is actually **hard**.
   - If `a` is a type variable then simply substitute `a` for `t` in all of `t`'s constraints and add them to `a`'s
     constraints.
   - If `a` is a type constant then unify the head of each constraint with `a` and recurse on sub-type variables.
+
+## Backend
+
+### ILA
+
+Basically GHC's core but without the fancy stuff needed for GADTs. Compiling pattern matching down is complicated, need
+deeply nested case statements.

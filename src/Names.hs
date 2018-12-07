@@ -7,15 +7,12 @@ import Data.Hashable
 
 newtype VariableName = VariableName String deriving (Eq, Ord, Hashable)
 newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
-newtype ConstructorName = ConstructorName String deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName String deriving (Eq, Ord, Hashable)
 newtype TypeConstantName = TypeConstantName String deriving (Eq, Ord, Hashable)
 instance Show VariableName where
     show (VariableName s) = s
 instance Show UniqueVariableName where
     show (UniqueVariableName s) = s
-instance Show ConstructorName where
-    show (ConstructorName s) = s
 instance Show TypeVariableName where
     show (TypeVariableName s) = s
 instance Show TypeConstantName where
@@ -28,13 +25,6 @@ instance NameConvertible Syntax.HsName TypeVariableName where
     convertName (HsIdent name) = TypeVariableName name
     convertName (HsSymbol name) = TypeVariableName name
 instance NameConvertible Syntax.HsQName TypeVariableName where
-    convertName (Qual _ name) = convertName name
-    convertName (UnQual name) = convertName name
-    convertName (Special _) = error "No support for special constructors"
-instance NameConvertible Syntax.HsName ConstructorName where
-    convertName (HsIdent name) = ConstructorName name
-    convertName (HsSymbol name) = ConstructorName name
-instance NameConvertible Syntax.HsQName ConstructorName where
     convertName (Qual _ name) = convertName name
     convertName (UnQual name) = convertName name
     convertName (Special _) = error "No support for special constructors"

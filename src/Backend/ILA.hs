@@ -1,4 +1,4 @@
-{-# Language GeneralizedNewtypeDeriving, LambdaCase, FlexibleContexts #-}
+{-# Language GeneralizedNewtypeDeriving, LambdaCase, FlexibleContexts, TupleSections #-}
 
 module Backend.ILA where
 
@@ -6,7 +6,7 @@ import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Monad.Except
 import Language.Haskell.Syntax
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (foldl', intercalate)
 import Text.Printf
@@ -30,9 +30,9 @@ data Literal = LiteralInt Integer
 data Alt = Alt AltConstructor [VariableName] Expr
     deriving (Eq, Ord)
 instance Show Alt where
-    show (Alt con vs e) = printf "%s %s -> %s" (show con) (intercalate " " $ map show vs) (show e)
+    show (Alt con vs e) = printf "%s %s -> %s" (show con) (unwords $ map show vs) (show e)
 -- |A constructor that can be used in an alternative statement
-data AltConstructor = DataCon ConstructorName | LitCon Literal | Default
+data AltConstructor = DataCon VariableName | LitCon Literal | Default
     deriving (Eq, Ord)
 instance Show AltConstructor where
     show (DataCon n) = show n
@@ -67,15 +67,32 @@ instance Show Binding where
               headline =    printf "Rec: %s = %s" (show v1) (show e1)
               bodylines = [ printf "     %s = %s" (show v) (show e) | (v, e) <- bs ]
 
+data ConverterState = ConverterState
+    { types :: M.Map VariableName QuantifiedType
+    , renamings :: M.Map VariableName VariableName }
 
-newtype Converter a = Converter (ReaderT (M.Map VariableName QuantifiedType) (ExceptT String NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadReader (M.Map VariableName QuantifiedType), MonadError String, MonadNameGenerator VariableName)
+newtype Converter a = Converter (ReaderT ConverterState (ExceptT String NameGenerator) a)
+    deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError String, MonadNameGenerator VariableName)
 
 runConverter :: MonadError String m => Converter a -> M.Map VariableName QuantifiedType -> NameGenerator (m a)
-runConverter (Converter inner) s = liftEither <$> runExceptT (runReaderT inner s)
+runConverter (Converter inner) ts = liftEither <$> runExceptT (runReaderT inner initState)
+    where initState = ConverterState { types = ts, renamings = M.empty }
+
+addRenaming :: VariableName -> VariableName -> ConverterState -> ConverterState
+addRenaming x = addRenamings . M.singleton x
+addRenamings :: M.Map VariableName VariableName -> ConverterState -> ConverterState
+addRenamings rens state = state { renamings = M.union rens (renamings state) }
+
+getRenamed :: VariableName -> Converter VariableName
+getRenamed name = reader (M.lookup name . renamings) >>= \case
+    Nothing -> throwError $ "Variable " ++ show name ++ " not in renamings."
+    Just renamed -> return renamed
+
+getRenamedOrDefault :: VariableName -> Converter VariableName
+getRenamedOrDefault name = reader (M.findWithDefault name name . renamings)
 
 getType :: VariableName -> Converter QuantifiedType
-getType name = reader (M.lookup name) >>= \case
+getType name = reader (M.lookup name . types) >>= \case
     Nothing -> throwError $ "Variable " ++ show name ++ " not in type environment"
     Just t -> return t
 
@@ -84,6 +101,9 @@ makeTuple = foldl' App (Var $ VariableName "(,)")
 
 makeList :: [Expr] -> Expr
 makeList = foldl' App (Var $ VariableName "[]")
+
+makeError :: Expr
+makeError = Var $ VariableName "error"
 
 toIla :: HsModule -> Converter [Binding]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
@@ -94,14 +114,16 @@ declToIla (HsPatBind _ pat rhs _) = do
     rhsExpr <- rhsToIla rhs
     boundNames <- S.toAscList <$> getPatContainedNames pat
     let boundNameLength = length boundNames
+    -- Generate renamings for each bound variable, so we don't get variable name conflicts
+    renamings <- M.fromList <$> forM boundNames (\n -> (n,) <$> freshName)
     -- Generate an expression that matches the patterns then returns a tuple of every variable
-    let resultTuple = makeTuple (map Var boundNames)
-    resultExpr <- patToIla pat rhsExpr resultTuple
+    let resultTuple = makeTuple (map (Var . (M.!) renamings) boundNames)
+    resultExpr <- local (addRenamings renamings) (patToIla pat rhsExpr resultTuple)
     -- For each bound name, generate a binding that extracts the variable from the tuple
     let extractorMap (name, index) = do
             tempNames <- replicateM boundNameLength freshName
             let body = Var (tempNames !! index) -- Just retrieve the specific output variable
-            return $ NonRec name (Case (Var resultName) [] [Alt (DataCon $ ConstructorName "(,)") tempNames body])
+            return $ NonRec name (Case (Var resultName) [] [Alt (DataCon $ VariableName "(,)") tempNames body, Alt Default [] makeError])
     extractors <- mapM extractorMap (zip boundNames [0..])
     return $ Rec (M.singleton resultName resultExpr):extractors
 declToIla (HsFunBind matches) = undefined
@@ -112,7 +134,7 @@ rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss _) = error "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
-expToIla (HsVar v) = return $ Var (convertName v)
+expToIla (HsVar v) = Var <$> getRenamed (convertName v)
 expToIla (HsCon c) = return $ Var (convertName c)
 expToIla (HsLit l) = Lit <$> litToIla l
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
@@ -130,7 +152,7 @@ expToIla (HsIf cond e1 e2) = do
     condExp <- expToIla cond
     e1Exp <- expToIla e1
     e2Exp <- expToIla e2
-    let alts = [Alt (DataCon $ ConstructorName "True") [] e1Exp, Alt (DataCon $ ConstructorName "False") [] e2Exp]
+    let alts = [Alt (DataCon $ VariableName "True") [] e1Exp, Alt (DataCon $ VariableName "False") [] e2Exp]
     return $ Case condExp [] alts
 expToIla (HsCase e alts) = error "Urgh case not yet supported"
 expToIla (HsTuple exps) = makeTuple <$> mapM expToIla exps
@@ -151,14 +173,18 @@ litToIla _ = error "Unboxed primitives not supported"
 -- defaults to the body.
 -- We convert a constructor application by recursively converting the sub-pattern-matches then chaining them with
 -- matching this data constructor.
+-- The result is a massive mess of case statements. They are composable though, which is useful for building larger
+-- expressions, and we can prune redundant/overly complicated substructures in an optimisation pass if necessary.
 patToIla :: HsPat -> Expr -> Expr -> Converter Expr
-patToIla (HsPVar n) head body = return $ Case head [convertName n] [Alt Default [] body]
+patToIla (HsPVar n) head body = do
+    renamedVar <- getRenamed $ convertName n
+    return $ Case head [renamedVar] [Alt Default [] body]
 patToIla (HsPLit l) head body = error "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) head body = do
     argNames <- replicateM (length args) freshName
     let argNamePairs = zipWith (\p n -> (p, Var n)) args argNames
     body' <- foldM (flip $ uncurry patToIla) body argNamePairs
-    return $ Case head [] [Alt (DataCon $ convertName con) argNames body', Alt Default [] undefined]
+    return $ Case head [] [Alt (DataCon $ convertName con) argNames body', Alt Default [] makeError]
 patToIla (HsPTuple pats) head body = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) head body
 patToIla (HsPList pats) head body = patToIla (HsPApp (UnQual $ HsIdent "[]") pats) head body
 patToIla (HsPParen pat) head body = patToIla pat head body
@@ -166,6 +192,6 @@ patToIla (HsPAsPat name pat) head body = do
     expr <- patToIla pat head body
     case expr of
         Case head' captures alts' -> return $ Case head' (convertName name:captures) alts'
-        _ -> error "@ pattern binding non-case expression"
+        _ -> error "@ pattern binding non-case translation"
 patToIla HsPWildCard head body = return $ Case head [] [Alt Default [] body]
 patToIla _ _ _ = error "Unsupported pattern"
