@@ -105,6 +105,12 @@ makeList = foldr (\x y -> App (App (Var $ VariableName ":") x) y) (Var $ Variabl
 makeError :: Expr
 makeError = Var $ VariableName "error"
 
+getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
+getPatRenamings pat = do
+    boundNames <- S.toAscList <$> getPatContainedNames pat
+    renamings <- M.fromList <$> forM boundNames (\n -> (n,) <$> freshName)
+    return (boundNames, renamings)
+
 toIla :: HsModule -> Converter [Binding]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
 
@@ -112,10 +118,8 @@ declToIla :: HsDecl -> Converter [Binding]
 declToIla (HsPatBind _ pat rhs _) = do
     resultName <- freshName
     rhsExpr <- rhsToIla rhs
-    boundNames <- S.toAscList <$> getPatContainedNames pat
+    (boundNames, renamings) <- getPatRenamings pat
     let boundNameLength = length boundNames
-    -- Generate renamings for each bound variable, so we don't get variable name conflicts
-    renamings <- M.fromList <$> forM boundNames (\n -> (n,) <$> freshName)
     -- Generate an expression that matches the patterns then returns a tuple of every variable
     let resultTuple = makeTuple $ map (Var . (M.!) renamings) boundNames
     resultExpr <- local (addRenamings renamings) (patToIla pat rhsExpr resultTuple)
@@ -139,13 +143,15 @@ expToIla (HsCon c) = return $ Var (convertName c)
 expToIla (HsLit l) = Lit <$> litToIla l
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla (HsInfixApp _ _ _) = error "Infix applications not supported"
-expToIla (HsLambda _ [p] e) = do
-    argName <- freshName
-    body <- patToIla p (Var argName) =<< expToIla e
-    return (Lam argName body)
+expToIla (HsLambda l [] e) = throwError "Lambda without arguments"
 expToIla (HsLambda l (p:pats) e) = do
     argName <- freshName
-    body <- patToIla p (Var argName) =<< expToIla (HsLambda l pats e)
+    (_, renamings) <- getPatRenamings p
+    body <- local (addRenamings renamings) $ do
+        nextBody <- case pats of
+            [] -> expToIla e
+            pats' -> expToIla (HsLambda l pats' e)
+        patToIla p (Var argName) nextBody
     return (Lam argName body)
 expToIla (HsLet decls e) = error "Let not yet supported"
 expToIla (HsIf cond e1 e2) = do
@@ -186,8 +192,8 @@ patToIla (HsPApp con args) head body = do
     body' <- foldM (flip $ uncurry patToIla) body argNamePairs
     return $ Case head [] [Alt (DataCon $ convertName con) argNames body', Alt Default [] makeError]
 patToIla (HsPTuple pats) head body = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) head body
-patToIla (HsPList []) head body = do
-    return $ Case head [] [Alt (DataCon $ VariableName "[]") [] body, Alt Default [] makeError]
+patToIla (HsPList []) head body = return $ Case head [] [Alt nilCon [] body, Alt Default [] makeError]
+    where nilCon = DataCon $ VariableName "[]"
 patToIla (HsPList (p:ps)) head body = do
     headName <- freshName
     tailName <- freshName
