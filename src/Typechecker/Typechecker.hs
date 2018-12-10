@@ -305,7 +305,20 @@ inferPattern (HsPAsPat name pat) = do
     unify t vt
     return v
 inferPattern (HsPParen pat) = inferPattern pat
-inferPattern (HsPApp _ _) = throwError "Currently not supported"
+inferPattern (HsPApp con pats) = do
+    t <- instantiate =<< getVariableQuantifiedType (convertName con)
+    conType <- applyCurrentSubstitution =<< nameToType t
+    ts <- mapM nameToType =<< inferPatterns pats
+    v <- freshTypeVariable
+    vt <- nameToType v
+    unify (makeFun ts vt) conType
+    -- Check the data constructor's been fully applied
+    resultingType <- applyCurrentSubstitution conType
+    writeLog $ show resultingType
+    case resultingType of
+        TypeConstant _ [] _ -> return v
+        TypeVar (TypeVariable _ KindStar) -> return v
+        _ -> throwError "Partial application of data constructor in pattern"
 inferPattern (HsPTuple pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVariable
