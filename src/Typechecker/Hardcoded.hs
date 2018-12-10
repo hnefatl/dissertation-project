@@ -10,8 +10,14 @@ import Typechecker.Typeclasses
 builtinConstructors :: M.Map VariableName QuantifiedType
 builtinConstructors = M.fromList
     [ (VariableName "True", Quantified S.empty $ Qualified S.empty typeBool),
-      (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool)
+      (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool),
+      (VariableName "Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeType),
+      (VariableName "Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeType)
     ]
+    where a = TypeVariable (TypeVariableName "a") KindStar
+          ta = TypeVar a
+          maybeType = TypeConstant (TypeConstantName "Maybe") [] [ta]
+          
 
 builtinFunctions :: M.Map VariableName QuantifiedType
 builtinFunctions = M.fromList
