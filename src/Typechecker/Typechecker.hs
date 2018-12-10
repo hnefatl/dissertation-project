@@ -313,9 +313,8 @@ inferPattern (HsPApp con pats) = do
     vt <- nameToType v
     unify (makeFun ts vt) conType
     -- Check the data constructor's been fully applied
-    resultingType <- applyCurrentSubstitution conType
-    writeLog $ show resultingType
-    case resultingType of
+    applyCurrentSubstitution vt >>= \case
+        TypeConstant (TypeConstantName "->") _ _ -> throwError "Partial application of data constructor in pattern"
         TypeConstant _ [] _ -> return v
         TypeVar (TypeVariable _ KindStar) -> return v
         _ -> throwError "Partial application of data constructor in pattern"

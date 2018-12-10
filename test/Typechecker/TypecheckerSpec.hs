@@ -277,5 +277,10 @@ test = let
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
-        testBindings "f = \\Just -> True" [("f", Quantified S.empty $ Qualified S.empty $ makeFun [typeBool] typeBool)]
+        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
+        in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
+            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        testBindingsFail "f = \\Just -> True"
     ]
