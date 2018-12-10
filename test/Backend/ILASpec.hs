@@ -55,11 +55,11 @@ test = testGroup "Backend"
         in
             makeTest "(x, y) = (True, False)" $ mainBind:auxBinds
         ,
-        let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("v" ++) . show) [8 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [11 :: Int ..]
             mainBind = Rec $ M.fromList [
                 (t1
-                , Case (makeList [false]) [t9] [Alt consCon [t2, t3] $ Case (Var t3) [] [Alt consCon [t4, t5] $ Case (Var t5) [] [Alt nilCon [] $ Case (Var t2) [] [Alt trueCon [] $ makeTuple [Var t9], errAlt], errAlt], errAlt], errAlt] ) ]
-            auxBind = NonRec x (Case (Var t1) [] [Alt tupleCon [t6, t7] (Var t6), errAlt])
+                , Case (makeList [false]) [t2] [Alt consCon [t3, t4] $ Case (Var t4) [] [Alt consCon [t5, t6] $ Case (Var t6) [] [Alt nilCon [] $ Case (Var t5) [] [Alt Default [] $ Case (Var t3) [] [Alt trueCon [] $ makeTuple [Var t2], errAlt]], errAlt], errAlt], errAlt] ) ]
+            auxBind = NonRec x (Case (Var t1) [] [Alt tupleCon [t7] (Var t7), errAlt])
         in
             makeTest "x@[True, _] = [False]" [mainBind, auxBind]
     ]

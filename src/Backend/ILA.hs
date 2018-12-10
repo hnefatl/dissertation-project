@@ -117,7 +117,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     -- Generate renamings for each bound variable, so we don't get variable name conflicts
     renamings <- M.fromList <$> forM boundNames (\n -> (n,) <$> freshName)
     -- Generate an expression that matches the patterns then returns a tuple of every variable
-    let resultTuple = makeTuple (map (Var . (M.!) renamings) boundNames)
+    let resultTuple = makeTuple $ map (Var . (M.!) renamings) boundNames
     resultExpr <- local (addRenamings renamings) (patToIla pat rhsExpr resultTuple)
     -- For each bound name, generate a binding that extracts the variable from the tuple
     let extractorMap (name, index) = do
@@ -186,12 +186,20 @@ patToIla (HsPApp con args) head body = do
     body' <- foldM (flip $ uncurry patToIla) body argNamePairs
     return $ Case head [] [Alt (DataCon $ convertName con) argNames body', Alt Default [] makeError]
 patToIla (HsPTuple pats) head body = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) head body
-patToIla (HsPList pats) head body = patToIla (HsPApp (UnQual $ HsIdent "[]") pats) head body
+patToIla (HsPList []) head body = do
+    return $ Case head [] [Alt (DataCon $ VariableName "[]") [] body, Alt Default [] makeError]
+patToIla (HsPList (p:ps)) head body = do
+    headName <- freshName
+    tailName <- freshName
+    headExpr <- patToIla p (Var headName) body
+    tailExpr <- patToIla (HsPList ps) (Var tailName) headExpr
+    return $ Case head [] [Alt (DataCon $ VariableName ":") [headName, tailName] tailExpr, Alt Default [] makeError]
 patToIla (HsPParen pat) head body = patToIla pat head body
 patToIla (HsPAsPat name pat) head body = do
     expr <- patToIla pat head body
+    asArgName <- getRenamed (convertName name)
     case expr of
-        Case head' captures alts' -> return $ Case head' (convertName name:captures) alts'
+        Case head' captures alts' -> return $ Case head' (asArgName:captures) alts'
         _ -> error "@ pattern binding non-case translation"
 patToIla HsPWildCard head body = return $ Case head [] [Alt Default [] body]
 patToIla _ _ _ = error "Unsupported pattern"
