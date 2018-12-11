@@ -108,22 +108,25 @@ makeError = Var $ VariableName "error"
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
     boundNames <- S.toAscList <$> getPatContainedNames pat
-    renamings <- M.fromList <$> forM boundNames (\n -> (n,) <$> freshName)
-    return (boundNames, renamings)
+    renames <- M.fromList <$> mapM (\n -> (n,) <$> freshName) boundNames
+    return (boundNames, renames)
 
+-- TODO(kc506): Enforce that case expressions can only have variable names as their heads, then it's easy to restrict
+-- them to be thunks rather than whole subcomputations?
 toIla :: HsModule -> Converter [Binding]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
 
 declToIla :: HsDecl -> Converter [Binding]
 declToIla (HsPatBind _ pat rhs _) = do
-    resultName <- freshName
-    rhsExpr <- rhsToIla rhs
-    (boundNames, renamings) <- getPatRenamings pat
+    (boundNames, renames) <- getPatRenamings pat
     let boundNameLength = length boundNames
     -- Generate an expression that matches the patterns then returns a tuple of every variable
-    let resultTuple = makeTuple $ map (Var . (M.!) renamings) boundNames
-    resultExpr <- local (addRenamings renamings) (patToIla pat rhsExpr resultTuple)
+    let resultTuple = makeTuple $ map (Var . (M.!) renames) boundNames
+    resultExpr <- local (addRenamings renames) $ do
+        rhsExpr <- rhsToIla rhs
+        patToIla pat rhsExpr resultTuple
     -- For each bound name, generate a binding that extracts the variable from the tuple
+    resultName <- freshName
     let extractorMap (name, index) = do
             tempNames <- replicateM boundNameLength freshName
             let body = Var (tempNames !! index) -- Just retrieve the specific output variable
@@ -138,7 +141,7 @@ rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss _) = error "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
-expToIla (HsVar v) = Var <$> getRenamed (convertName v)
+expToIla (HsVar v) = Var <$> getRenamedOrDefault (convertName v)
 expToIla (HsCon c) = return $ Var (convertName c)
 expToIla (HsLit l) = Lit <$> litToIla l
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
@@ -146,8 +149,8 @@ expToIla (HsInfixApp _ _ _) = error "Infix applications not supported"
 expToIla (HsLambda l [] e) = throwError "Lambda without arguments"
 expToIla (HsLambda l (p:pats) e) = do
     argName <- freshName
-    (_, renamings) <- getPatRenamings p
-    body <- local (addRenamings renamings) $ do
+    (_, renames) <- getPatRenamings p
+    body <- local (addRenamings renames) $ do
         nextBody <- case pats of
             [] -> expToIla e
             pats' -> expToIla (HsLambda l pats' e)
