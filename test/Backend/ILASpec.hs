@@ -35,7 +35,7 @@ makeTest input expected = testCase (deline input) $
 
 
 test :: TestTree
-test = testGroup "Backend"
+test = testGroup "ILA"
     [
         let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [5 :: Int ..]
             mainBind = Rec $ M.fromList [
