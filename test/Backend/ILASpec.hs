@@ -59,7 +59,7 @@ test = testGroup "ILA"
         ,
         let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [11 :: Int ..]
             mainBind = Rec $ M.fromList [
-                (t6
+                ( t6
                 , Case (makeList [false]) [t1]
                     [ Alt consCon [t2, t3] $ Case (Var t3) []
                         [ Alt consCon [t4, t5] $ Case (Var t5) []

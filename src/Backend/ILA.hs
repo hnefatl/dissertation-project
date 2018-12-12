@@ -1,5 +1,6 @@
 {-# Language GeneralizedNewtypeDeriving, LambdaCase, FlexibleContexts, TupleSections #-}
 
+-- |Intermediate Language A - basically GHC's Core but without support for complicated language features like GADTs.
 module Backend.ILA where
 
 import Prelude hiding (head)
