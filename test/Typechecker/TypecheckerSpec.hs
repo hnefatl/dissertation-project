@@ -207,11 +207,11 @@ test = let
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
     -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
-    --    let s = "a = let f = \\x -> x\n" ++
-    --            "        g = \\y z -> z\n" ++
-    --            "    in g (f 5) (f True)"
-    --    in testBindings s [(Id "a", Quantified S.empty (Qualified S.empty typeBool))]
-    --,
+        let s = "a = let f = \\x -> x\n" ++
+                "        g = \\y z -> z\n" ++
+                "    in g (f 5) (f True)"
+        in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
+    ,
         -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
         -- Contrast to the above where f is bound in a let-expression so is quantified
         let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
@@ -283,4 +283,11 @@ test = let
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindingsFail "f = \\Just -> True"
+    ,
+        testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
+            , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
     ]

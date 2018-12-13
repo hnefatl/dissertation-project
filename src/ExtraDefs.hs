@@ -5,6 +5,7 @@ module ExtraDefs where
 import Data.List
 import Data.Foldable
 import qualified Data.Set as S
+import qualified Data.Map as M
 
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
@@ -28,3 +29,7 @@ deline = intercalate " \\n " . lines
 
 dedupe :: Ord a => [a] -> [a]
 dedupe = S.toList . S.fromList
+
+
+reverseLookup :: Ord v => v -> M.Map k v -> Maybe k
+reverseLookup x = fmap fst . find ((x ==) . snd) . M.toList

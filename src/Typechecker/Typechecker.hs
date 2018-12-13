@@ -8,11 +8,13 @@ import Control.Monad.Except
 import Control.Monad.State.Strict
 import Data.Default
 import Data.Foldable
+import Data.List (intercalate)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Language.Haskell.Syntax as Syntax
 
+import ExtraDefs
 import Names
 import NameGenerator
 import Typechecker.Types
@@ -130,16 +132,16 @@ getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ 
     addVariableType name tv
     return tv
 
--- |Instantiate a quantified type into a type, replacing all universally quantified variables with new
+-- |Instantiate a quantified type into a simple type, replacing all universally quantified variables with new
 -- type variables and adding the new type constraints to the environment
 instantiate :: QuantifiedType -> TypeInferrer TypeVariableName
 instantiate qt@(Quantified _ ql@(Qualified quals t)) = do
     v <- freshTypeVariable
-    writeLog $ "Instantiating " ++ show v ++ " with " ++ show qt
     -- Create a "default" mapping from each type variable in the type to itself
     let identityMap = M.fromList $ map (\x -> (x, TypeVar $ TypeVariable x KindStar)) $ S.toList $ getTypeVars ql
     -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
     sub <- Substitution <$> (M.union <$> getInstantiatingTypeMap qt <*> pure identityMap)
+    writeLog $ printf "Instantiating %s with %s using %s" (show v) (show qt) (show sub)
     addTypePredicates $ S.map (applySub sub) quals
     vt <- nameToType v
     unify vt (applySub sub t)
@@ -202,19 +204,32 @@ getTypePredicates name = do
     constraints <- getConstraints name
     S.fromList <$> mapM (\classname -> IsInstance classname <$> nameToType name) (S.toList constraints)
 
-getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
-getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
-
-getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
-getQuantifiedType name = do
+getQualifiedType :: TypeVariableName -> TypeInferrer QualifiedType
+getQualifiedType name = do
     ce <- getClassEnvironment
     t <- applyCurrentSubstitution =<< nameToType name
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
-    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList typeVars)
-    let qt = Quantified quantifiers $ Qualified predicates t
+    return $ Qualified predicates t
+
+getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
+getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
+getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
+getQuantifiedType name = do
+    qualT <- getQualifiedType name
+    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qualT)
+    qt <- Quantified quantifiers <$> getQualifiedType name
     writeLog $ printf "%s has quantified type %s" (show name) (show qt)
     return qt
+
+-- |If the given type variable name refers to a quantified type, instantiate it and return the new type variable name.
+-- If the name refers to a non-quantified type, just return the same name
+instantiateIfNeeded :: TypeVariableName -> TypeInferrer TypeVariableName
+instantiateIfNeeded name = gets (reverseLookup name . variableTypes) >>= \case
+        Just varName -> gets (M.lookup varName . bindings) >>= \case
+            Just qt -> instantiate qt
+            Nothing -> return name
+        Nothing -> return name
 
 
 inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
@@ -230,11 +245,9 @@ inferLiteral (HsFrac _) = do
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
--- TODO(kc506): Change from using the raw syntax expressions to using an intermediate form with eg. lambdas converted
--- into lets? Pg. 26 of thih.pdf
 inferExpression :: Syntax.HsExp -> TypeInferrer TypeVariableName
 inferExpression (HsVar name) = getVariableTypeVariable (convertName name)
-inferExpression (HsCon name) = getVariableTypeVariable (convertName name)
+inferExpression (HsCon name) = inferExpression (HsVar name)
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
 inferExpression (HsLambda _ pats e) = do
@@ -247,11 +260,11 @@ inferExpression (HsLambda _ pats e) = do
     return retVar
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
-    funVar <- inferExpression f
-    argVar <- inferExpression e
+    funType <- nameToType =<< instantiateIfNeeded =<< inferExpression f
+    argType <- nameToType =<< instantiateIfNeeded =<< inferExpression e
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVariable
-    [retType, funType, argType] <- mapM nameToType [retVar, funVar, argVar]
+    retType <- nameToType retVar
     -- Unify `function` with `argument -> returntype` to match up the types.
     unify (makeFun [argType] retType) funType
     return retVar
@@ -379,11 +392,11 @@ inferDecls ds = do
 inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
 inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
-    boundNames <- mapM getDeclsBoundNames dependencyGroups
-    writeLog $ "Split binding group into: " ++ show boundNames
-    mapM_ inferDecls dependencyGroups
+    forM_ dependencyGroups $ \group -> do
+        boundNames <- S.toList <$> getDeclsBoundNames group
+        writeLog $ printf "Processing binding group {%s}" (intercalate "," $ map show boundNames)
+        inferDecls group
 
--- TODO(kc506): Dependency analysis, split into typechecking groups and process individually
 -- TODO(kc506): Take advantage of explicit type hints
 inferModule :: Syntax.HsModule -> TypeInferrer ()
 inferModule (HsModule _ _ _ _ decls) = inferDeclGroup decls
@@ -393,11 +406,7 @@ getVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getVariableTypes = do
     writeLog "Getting variable types"
     binds <- gets bindings
-    locals <- gets variableTypes
-    -- Quantify each variable that's not used in a binding, then strip the quantifiers, as only bound variables get
-    -- quantifiers.
-    let stripQuantifiers varName = do
-            Quantified _ qual <- getVariableQuantifiedType varName
-            return (varName, Quantified S.empty qual)
-    locals' <- M.fromList <$> mapM stripQuantifiers (M.keys locals)
-    return $ M.union binds locals'
+    -- Get the qualified types of each unbound but present variable (and give it an empty quantifier set)
+    unboundVariables <- M.toList <$> gets variableTypes
+    unbound <- forM unboundVariables $ \(v, t) -> (v,) . Quantified S.empty <$> getQualifiedType t
+    return $ M.union binds (M.fromList unbound)
