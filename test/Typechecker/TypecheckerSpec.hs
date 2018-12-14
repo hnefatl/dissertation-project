@@ -66,8 +66,8 @@ unpackEither = either assertFailure return
 
 test :: TestTree
 test = let
-        [a, b] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b"]
-        [ta, tb] = map TypeVar [a, b]
+        [a, b, c] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c"]
+        [ta, tb, tc] = map TypeVar [a, b, c]
         [num, fractional] = map TypeConstantName ["Num", "Fractional"]
     in
         testGroup "Typechecking"
@@ -256,40 +256,40 @@ test = let
     ,
         let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
         in testBindings s
-            [ ("id", Quantified (S.singleton a) $ Qualified S.empty ta)
-            , ("g", Quantified (S.singleton b) $ Qualified S.empty tb)
-            , ("h", Quantified (S.singleton b) $ Qualified S.empty tb) ]
-    --,
-    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-    --    in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
-    --,
-    --    let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-    --    in testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty t) ]
-    --,
-    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-    --    in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
-    --,
-    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-    --    in testBindings "f = \\(Just x) -> x\ny = f (Just 5)"
-    --        [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
-    --        , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    --,
-    --    let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-    --    in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
-    --        [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
-    --        , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
-    --,
-    --    testBindingsFail "f = \\Just -> True"
-    --,
-    --    testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
-    --        [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-    --        , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
-    --        , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
-    --,
-    --    testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
-    --        [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-    --        , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
-    --        , ("w", Quantified S.empty $ Qualified (S.singleton $ IsInstance num ta) ta) ]
+            [ ("id", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+            , ("g", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc)
+            , ("h", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc) ]
+    ,
+        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+        in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
+    ,
+        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
+        in testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty t) ]
+    ,
+        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+        in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
+    ,
+        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+        in testBindings "f = \\(Just x) -> x\ny = f (Just 5)"
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
+            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    ,
+        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
+        in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
+            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
+            , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        testBindingsFail "f = \\Just -> True"
+    ,
+        testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
+            , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
+            , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     ----,
     ----    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
     ]
