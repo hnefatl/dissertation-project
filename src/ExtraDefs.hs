@@ -1,4 +1,4 @@
-{-# Language BangPatterns, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances #-}
+{-# Language BangPatterns, MultiParamTypeClasses, FlexibleInstances, UndecidableInstances, TupleSections #-}
 
 module ExtraDefs where
 
@@ -25,6 +25,9 @@ unlessM :: Monad m => m Bool -> m () -> m ()
 unlessM p action = do
     trigger <- p
     unless trigger action
+
+findM :: Monad m => (a -> m Bool) -> [a] -> m (Maybe a)
+findM p xs = fmap fst . find snd <$>  mapM (\x -> (x,) <$> p x) xs
 
 -- |foldlM strict in the accumulator
 foldlM' :: (Foldable f, Monad m) => (a -> b -> m a) -> a -> f b -> m a

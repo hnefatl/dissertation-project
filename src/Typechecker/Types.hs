@@ -162,24 +162,17 @@ typeString = makeList typeChar
 
 
 
-instance AlphaEq TypeVariableName TypeVariable where
+instance AlphaEq TypeVariable where
     alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = (k1 == k2 &&) <$> alphaEq' n1 n2
-instance AlphaEq TypeVariableName Type where
+instance AlphaEq Type where
     alphaEq' (TypeVar t1) (TypeVar t2) = alphaEq' t1 t2
     alphaEq' (TypeConstant n1 ks1 ts1) (TypeConstant n2 ks2 ts2) = do
         tsOkay <- and <$> zipWithM alphaEq' ts1 ts2
         return $ n1 == n2 && ks1 == ks2 && tsOkay
     alphaEq' _ _ = return False
-instance AlphaEq TypeVariableName TypePredicate where
+instance AlphaEq TypePredicate where
     alphaEq' (IsInstance c1 t1) (IsInstance c2 t2) = (c1 == c2 &&) <$> alphaEq' t1 t2
-instance AlphaEq TypeVariableName a => AlphaEq TypeVariableName (Qualified a) where
-    alphaEq' (Qualified quals1 t1) (Qualified quals2 t2) = do
-        tsOkay <- alphaEq' t1 t2
-        -- If the qualifier sets are equal up to alpha equivalence, it doesn't matter what order we compare pairwise
-        qualsOkay <- and <$> zipWithM alphaEq' (S.toList quals1) (S.toList quals2)
-        return $ tsOkay && qualsOkay
-instance AlphaEq TypeVariableName QuantifiedType where
-    alphaEq' (Quantified quants1 t1) (Quantified quants2 t2) = do
-        tsOkay <- alphaEq' t1 t2
-        quantsOkay <- and <$> zipWithM alphaEq' (S.toList quants1) (S.toList quants2)
-        return $ tsOkay && quantsOkay
+instance AlphaEq a => AlphaEq (Qualified a) where
+    alphaEq' (Qualified quals1 t1) (Qualified quals2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quals1 quals2
+instance AlphaEq QuantifiedType where
+    alphaEq' (Quantified quants1 t1) (Quantified quants2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quants1 quants2
