@@ -185,108 +185,111 @@ test = let
             [ ("x", Quantified (S.singleton b) $ Qualified S.empty (makeFun [makeFun [typeBool] tb] tb))
             , ("f", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] ta))]
     ,
-        let s = "x = (\\f -> f True) (\\y -> not (not y))"
+        let s = "x = (\\f -> f True) (\\y -> y)"
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "y = let f = \\x -> x in f 5"
-            tf = makeFun [ta] ta
-        in testBindings s
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
-            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    ,
-        let s = "y = let f = \\x -> x in f 5 + f 6"
-            tf = makeFun [ta] ta
-        in testBindings s
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
-            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    ,
-        -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
-        let s = "a = let f = \\x -> x\n" ++
-                "        g = \\y z -> z\n" ++
-                "    in g (f 5) (f True)"
-        in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
-    ,
-        -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
-        -- Contrast to the above where f is bound in a let-expression so is quantified
-        let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
-        in testBindingsFail s
-    ,
-        let s = "x = (\\(y, z) -> y + z) (1, 2)"
-        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = (\\[y, z] -> y && z) [True, False]"
-        in testBindings s
-            [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
-            , ("y", Quantified S.empty $ Qualified S.empty typeBool)
-            , ("z", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        let s = "x = if True then 1 else 2"
-        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
-    ,
-        let s = "x = if True then 1.2 else 2"
-        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
-    ,
-        let s = "x = if True then True else False"
-        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
-    ,
-        let s = "x = if 1 then True else False"
-        in testBindingsFail s
-    ,
-        let s = "x = if False then 1 else True"
-        in testBindingsFail s
-    ,
-        let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
-            helper t = makeFun [t] typeBool
-        in testBindings s
-            [ ("even", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (helper ta))
-            , ("odd", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) (helper tb)) ]
-    ,
-        let s = "_ = let const = \\a b -> a in let { f = \\x -> const (g True) (g x) ; g = \\y -> const (f True) (f y) } in True"
-            t = makeFun [typeBool] ta
-        in testBindings s
-            [ ("const", Quantified (S.fromList [a,b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-            , ("f", Quantified (S.singleton a) $ Qualified S.empty t)
-            , ("g", Quantified (S.singleton a) $ Qualified S.empty t) ]
-    ,
-        let s = "_ = let { x = y ; y = x y } in True"
-        in testBindingsFail s
-    ,
-        let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
-        in testBindings s
-            [ ("id", Quantified (S.singleton a) $ Qualified S.empty ta)
-            , ("g", Quantified (S.singleton b) $ Qualified S.empty tb)
-            , ("h", Quantified (S.singleton b) $ Qualified S.empty tb) ]
-    ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
-    ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-        in testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty t) ]
-    ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
-    ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "f = \\(Just x) -> x\ny = f (Just 5)"
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
-            , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
-    ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-        in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
-            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
-            , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        testBindingsFail "f = \\Just -> True"
-    ,
-        testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
-            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-            , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
-            , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
-    ,
-        testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
-            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-            , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
-            , ("w", Quantified S.empty $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     --,
-    --    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
+    --    let s = "x = (\\f -> f True) (\\y -> not (not y))"
+    --    in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "y = let f = \\x -> x in f 5"
+    --        tf = makeFun [ta] ta
+    --    in testBindings s
+    --        [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
+    --        , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    --,
+    --    let s = "y = let f = \\x -> x in f 5 + f 6"
+    --        tf = makeFun [ta] ta
+    --    in testBindings s
+    --        [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
+    --        , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    --,
+    --    -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
+    --    let s = "a = let f = \\x -> x\n" ++
+    --            "        g = \\y z -> z\n" ++
+    --            "    in g (f 5) (f True)"
+    --    in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
+    --,
+    --    -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
+    --    -- Contrast to the above where f is bound in a let-expression so is quantified
+    --    let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
+    --    in testBindingsFail s
+    --,
+    --    let s = "x = (\\(y, z) -> y + z) (1, 2)"
+    --    in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = (\\[y, z] -> y && z) [True, False]"
+    --    in testBindings s
+    --        [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , ("y", Quantified S.empty $ Qualified S.empty typeBool)
+    --        , ("z", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    let s = "x = if True then 1 else 2"
+    --    in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --,
+    --    let s = "x = if True then 1.2 else 2"
+    --    in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]
+    --,
+    --    let s = "x = if True then True else False"
+    --    in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    --,
+    --    let s = "x = if 1 then True else False"
+    --    in testBindingsFail s
+    --,
+    --    let s = "x = if False then 1 else True"
+    --    in testBindingsFail s
+    --,
+    --    let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
+    --        helper t = makeFun [t] typeBool
+    --    in testBindings s
+    --        [ ("even", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (helper ta))
+    --        , ("odd", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) (helper tb)) ]
+    --,
+    --    let s = "_ = let const = \\a b -> a in let { f = \\x -> const (g True) (g x) ; g = \\y -> const (f True) (f y) } in True"
+    --        t = makeFun [typeBool] ta
+    --    in testBindings s
+    --        [ ("const", Quantified (S.fromList [a,b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+    --        , ("f", Quantified (S.singleton a) $ Qualified S.empty t)
+    --        , ("g", Quantified (S.singleton a) $ Qualified S.empty t) ]
+    --,
+    --    let s = "_ = let { x = y ; y = x y } in True"
+    --    in testBindingsFail s
+    --,
+    --    let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
+    --    in testBindings s
+    --        [ ("id", Quantified (S.singleton a) $ Qualified S.empty ta)
+    --        , ("g", Quantified (S.singleton b) $ Qualified S.empty tb)
+    --        , ("h", Quantified (S.singleton b) $ Qualified S.empty tb) ]
+    --,
+    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+    --    in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
+    --,
+    --    let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
+    --    in testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty t) ]
+    --,
+    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+    --    in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
+    --,
+    --    let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
+    --    in testBindings "f = \\(Just x) -> x\ny = f (Just 5)"
+    --        [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
+    --        , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
+    --,
+    --    let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
+    --    in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
+    --        [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
+    --        , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    testBindingsFail "f = \\Just -> True"
+    --,
+    --    testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
+    --        [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+    --        , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
+    --        , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
+    --,
+    --    testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
+    --        [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+    --        , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
+    --        , ("w", Quantified S.empty $ Qualified (S.singleton $ IsInstance num ta) ta) ]
+    ----,
+    ----    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
     ]
