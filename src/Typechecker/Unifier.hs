@@ -3,8 +3,6 @@
 module Typechecker.Unifier where
 
 import Text.Printf
-import Data.Foldable
-import Control.Monad
 import Control.Monad.Except
 import Data.Either
 import qualified Data.Set as S
@@ -56,8 +54,18 @@ instance Unifiable t => Unifiable (Qualified t) where
         let (q1', q2') = (applySub s q1, applySub s q2)
         if q1' /= q2' then throwError $ printf "Qualifiers don't agree: %s vs %s" (show q1') (show q2') else return s
 instance Unifiable t => Unifiable [t] where
-    mgu xs ys = foldl' subCompose subEmpty <$> zipWithM mgu xs ys
-    match xs ys = foldlM subMerge subEmpty =<< zipWithM match xs ys
+    mgu xl yl = mgu' xl yl subEmpty
+        where
+            mgu' (x:xs) (y:ys) sub1 = do
+                sub2 <- mgu (applySub sub1 x) (applySub sub1 y)
+                mgu' xs ys (subCompose sub1 sub2)
+            mgu' _ _ sub = return sub
+    match xl yl = match' xl yl subEmpty
+        where
+            match' (x:xs) (y:ys) sub1 = do
+                sub2 <- mgu (applySub sub1 x) (applySub sub1 y)
+                match' xs ys =<< subMerge sub1 sub2
+            match' _ _ sub = return sub
 instance Unifiable t => Unifiable (Maybe t) where
     mgu (Just x) (Just y) = mgu x y
     mgu _ _ = throwError "Mismatching Maybe types"

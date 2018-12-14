@@ -89,12 +89,12 @@ subComposes = foldl' subCompose subEmpty
 -- |Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
 subMerge :: MonadError String m => Substitution -> Substitution -> m Substitution
-subMerge (Substitution subs1) (Substitution subs2) =
+subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
     if agree then return $ Substitution (M.union subs1 subs2) else throwError "Conflicting substitutions"
     where agree = all subsGiveSameResult (M.keys $ M.intersection subs1 subs2)
           -- Check that both substitutions give the same type when applied to the same type variables
           -- Ensures that eg. `[b/a, Int/b]` and `c/a, Int/c]` are merged
-          subsGiveSameResult var = M.lookup var subs1 == M.lookup var subs2
+          subsGiveSameResult var = fmap (applySub s2) (M.lookup var subs1) == fmap (applySub s1) (M.lookup var subs2)
 
 subMerges :: MonadError String m => [Substitution] -> m Substitution
 subMerges = foldM subMerge subEmpty
