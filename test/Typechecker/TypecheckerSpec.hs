@@ -13,9 +13,7 @@ import ExtraDefs
 import Names
 import NameGenerator
 import Typechecker.Types
-import Typechecker.Unifier
 import Typechecker.Typechecker
-import Typechecker.Substitution
 import Typechecker.Hardcoded
 
 import Data.Foldable
@@ -53,13 +51,7 @@ testBindings s cases = testCase (deline s) $ do
     let check (name, qt1) = either (assertFailure . printf "%s: %s" (show name)) return $ runExcept $ addDebugInfo $
             case M.lookup (VariableName name) ts of
                 Nothing -> throwError "Variable not in environment"
-                Just qt2 -> do
-                    unless (alphaEq qt1 qt2) $ throwError $ printf "Got %s, expected %s" (show qt2) (show qt1)
-                    --sub <- mgu t1 t2
-                    --let (t1', t2') = pairmap (applySub sub) (t1, t2)
-                    --    (q1', q2') = pairmap (getSubstitutedTypeVariables sub . S.map getTvName) (q1, q2)
-                    --unless (q1' == q2') (throwError $ printf "Quantifiers not equal: expected %s, got %s" (show q1') (show q2'))
-                    --unless (t1' == t2') (throwError $ printf "Qualified types not equal: expected %s, got %s" (show t1') (show t2'))
+                Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ printf "Got %s, expected %s" (show qt2) (show qt1)
         addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
     mapM_ check cases
 
@@ -81,8 +73,8 @@ test = let
         testGroup "Typechecking"
     [
         -- Simple literal type checks
-        let s = "x = 5"
-        in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
+    --    let s = "x = 5"
+    --    in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     --,
     --    let s = "x = 1.2"
     --    in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) ta)]

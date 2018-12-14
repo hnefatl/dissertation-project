@@ -16,6 +16,9 @@ class Ord k => AlphaEq k a | a -> k where
 alphaEq :: AlphaEq k a => a -> a -> Bool
 alphaEq x y = evalState (inner $ alphaEq' x y) M.empty
 
+runAlphaEq :: AlphaEq k a => a -> a -> (Bool, M.Map k k)
+runAlphaEq x y = runState (inner $ alphaEq' x y) M.empty
+
 instance AlphaEq TypeVariableName TypeVariableName where
     alphaEq' tv1 tv2
         | tv1 == tv2 = return True
@@ -24,7 +27,7 @@ instance AlphaEq TypeVariableName TypeVariableName where
             (Nothing, Nothing) -> do
                 modify (M.union $ M.fromList [(tv1, tv2), (tv2, tv1)])
                 return True
-            -- Both have been renamed before, check if they've been renamed to the same thing
-            (Just x, Just y) -> return $ x == y
+            -- Both have been renamed before, check if they've been renamed to each other
+            (Just x, Just y) -> return $ x == tv2 && y == tv1
             -- One's been renamed but the other hasn't: they can't be renamed to the same thing
             (_, _) -> return False

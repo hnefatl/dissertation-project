@@ -160,6 +160,8 @@ typeTuple n = TypeConstant (TypeConstantName "(,)") (replicate n KindStar) []
 typeString :: Type
 typeString = makeList typeChar
 
+
+
 instance AlphaEq TypeVariableName TypeVariable where
     alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = (k1 == k2 &&) <$> alphaEq' n1 n2
 instance AlphaEq TypeVariableName Type where

@@ -1,5 +1,6 @@
 import Test.Tasty
 
+import AlphaEqSpec
 import Preprocessor.RenamerSpec
 import Preprocessor.DependencySpec
 import Typechecker.SubstitutionSpec
@@ -9,7 +10,8 @@ import Typechecker.TypeclassesSpec
 
 tests :: TestTree
 tests = testGroup "Tests"
-    [ Preprocessor.RenamerSpec.test
+    [ AlphaEqSpec.test
+    , Preprocessor.RenamerSpec.test
     , Preprocessor.DependencySpec.test
     , Typechecker.SubstitutionSpec.test
     , Typechecker.UnifierSpec.test
