@@ -14,8 +14,6 @@ import Names
 import NameGenerator
 import Typechecker.Types
 import Typechecker.Typechecker
-import Typechecker.Substitution
-import Typechecker.Hardcoded
 
 import Data.Either
 import Data.Text.Lazy (unpack)

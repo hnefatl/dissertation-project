@@ -6,6 +6,7 @@ import Preprocessor.DependencySpec
 import Typechecker.SubstitutionSpec
 import Typechecker.UnifierSpec
 import Typechecker.TypeclassesSpec
+import Typechecker.TypecheckerSpec
 import Backend.ILASpec
 
 tests :: TestTree
@@ -20,7 +21,8 @@ tests = testGroup "Tests"
         testGroup "Typechecker"
             [ Typechecker.SubstitutionSpec.test
             , Typechecker.UnifierSpec.test
-            , Typechecker.TypeclassesSpec.test ]
+            , Typechecker.TypeclassesSpec.test
+            , Typechecker.TypecheckerSpec.test ]
     ,
         testGroup "Backend"
             [ Backend.ILASpec.test ]
