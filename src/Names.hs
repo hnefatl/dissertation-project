@@ -5,6 +5,8 @@ module Names where
 import Language.Haskell.Syntax as Syntax
 import Data.Hashable
 
+import AlphaEq
+
 newtype VariableName = VariableName String deriving (Eq, Ord, Hashable)
 newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName String deriving (Eq, Ord, Hashable)
@@ -41,3 +43,6 @@ instance NameConvertible Syntax.HsOp VariableName where
 instance NameConvertible Syntax.HsQOp VariableName where
     convertName (HsQVarOp name) = convertName name
     convertName (HsQConOp name) = convertName name
+
+instance AlphaEq TypeVariableName where
+    alphaEq' (TypeVariableName s1) (TypeVariableName s2) = alphaEq' s1 s2

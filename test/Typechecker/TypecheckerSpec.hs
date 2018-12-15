@@ -8,13 +8,14 @@ import Test.Tasty.HUnit
 import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
+import AlphaEq
 import ExtraDefs
 import Names
 import NameGenerator
 import Typechecker.Types
-import Typechecker.Unifier
 import Typechecker.Typechecker
 import Typechecker.Substitution
+import Typechecker.Hardcoded
 
 import Data.Either
 import Data.Text.Lazy (unpack)
@@ -42,15 +43,10 @@ testBindings :: String -> [(String, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
     let (etypes, state) = inferModule' s
     ts <- unpackEither etypes
-    let check (name, Quantified q1 t1) = either (assertFailure . printf "%s: %s" (show name)) return $ runExcept $ addDebugInfo $
+    let check (name, qt1) = either (assertFailure . printf "%s: %s" (show name)) return $ runExcept $ addDebugInfo $
             case M.lookup (VariableName name) ts of
                 Nothing -> throwError "Variable not in environment"
-                Just (Quantified q2 t2) -> do
-                    sub <- mgu t1 t2
-                    let (t1', t2') = pairmap (applySub sub) (t1, t2)
-                        (q1', q2') = pairmap (getSubstitutedTypeVariables sub . S.map getTvName) (q1, q2)
-                    unless (q1' == q2') (throwError $ printf "Quantifiers not equal: %s vs %s" (show q1') (show q2'))
-                    unless (t1' == t2') (throwError $ printf "Qualified types not equal: %s vs %s" (show t1') (show t2'))
+                Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ printf "Got %s, expected %s" (show qt2) (show qt1)
         addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
     mapM_ check cases
 
@@ -65,8 +61,8 @@ unpackEither = either assertFailure return
 
 test :: TestTree
 test = let
-        [a, b] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b"]
-        [ta, tb] = map TypeVar [a, b]
+        [a, b, c] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c"]
+        [ta, tb, tc] = map TypeVar [a, b, c]
         [num, fractional] = map TypeConstantName ["Num", "Fractional"]
     in
         testGroup "Typechecking"
@@ -184,6 +180,9 @@ test = let
             [ ("x", Quantified (S.singleton b) $ Qualified S.empty (makeFun [makeFun [typeBool] tb] tb))
             , ("f", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] ta))]
     ,
+        let s = "x = (\\f -> f True) (\\y -> y)"
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
+    ,
         let s = "x = (\\f -> f True) (\\y -> not (not y))"
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
     ,
@@ -199,12 +198,12 @@ test = let
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
-    -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
-    --    let s = "a = let f = \\x -> x\n" ++
-    --            "        g = \\y z -> z\n" ++
-    --            "    in g (f 5) (f True)"
-    --    in testBindings s [(Id "a", Quantified S.empty (Qualified S.empty typeBool))]
-    --,
+        -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
+        let s = "a = let f = \\x -> x\n" ++
+                "        g = \\y z -> z\n" ++
+                "    in g (f 5) (f True)"
+        in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
+    ,
         -- Should fail because f is non-quantified as it's a parameter so can only be applied to one type.
         -- Contrast to the above where f is bound in a let-expression so is quantified
         let s = "x = let const = \\x y -> y in (\\f -> const (f 5) (f True)) (\\x -> x)"
@@ -252,9 +251,9 @@ test = let
     ,
         let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
         in testBindings s
-            [ ("id", Quantified (S.singleton a) $ Qualified S.empty ta)
-            , ("g", Quantified (S.singleton b) $ Qualified S.empty tb)
-            , ("h", Quantified (S.singleton b) $ Qualified S.empty tb) ]
+            [ ("id", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+            , ("g", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc)
+            , ("h", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc) ]
     ,
         let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
         in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
@@ -276,4 +275,16 @@ test = let
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindingsFail "f = \\Just -> True"
+    ,
+        testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
+            , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
+    ,
+        testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
+            , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
+    ----,
+    ----    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
     ]

@@ -37,14 +37,14 @@ makeTest input expected = testCase (deline input) $
 test :: TestTree
 test = testGroup "ILA"
     [
-        let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [5 :: Int ..]
+        let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [4 :: Int ..]
             mainBind = Rec $ M.fromList [
                 ( t2
                 , Case (makeTuple [true, false]) [t1] [ Alt Default [] $ makeTuple [Var t1] ] )]
             auxBind = NonRec x (Case (Var t2) [] [Alt tupleCon [t3] (Var t3), errAlt])
         in makeTest "x = (True, False)" [mainBind, auxBind]
         ,
-        let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("v" ++) . show) [8 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("v" ++) . show) [6 :: Int ..]
             mainBind = Rec $ M.fromList [
                 ( t5
                 , Case (makeTuple [true, false]) []
@@ -57,7 +57,7 @@ test = testGroup "ILA"
                 , NonRec y (Case (Var t5) [] [Alt tupleCon [t8, t9] (Var t9), errAlt]) ]
         in makeTest "(x, y) = (True, False)" $ mainBind:auxBinds
         ,
-        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [11 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [10 :: Int ..]
             mainBind = Rec $ M.fromList [
                 ( t6
                 , Case (makeList [false]) [t1]
@@ -75,14 +75,14 @@ test = testGroup "ILA"
             auxBind = NonRec x (Case (Var t6) [] [Alt tupleCon [t7] (Var t7), errAlt])
         in makeTest "x@[True, _] = [False]" [mainBind, auxBind]
         ,
-        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [7 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("v" ++) . show) [4 :: Int ..]
             lambdaBody =
                 Lam t2 $ Case (Var t2) [t3] [ Alt Default [] $ Lam t4 $ Case (Var t4) [t5] [ Alt Default [] $ Var t3] ]
             mainBind = Rec $ M.fromList [ (t6 , Case lambdaBody [t1] [ Alt Default [] $ makeTuple [Var t1] ]) ]
             auxBind = NonRec f (Case (Var t6) [] [Alt tupleCon [t7] (Var t7), errAlt])
         in makeTest "f = \\x y -> x" [mainBind, auxBind]
         ,
-        let t1:t2:t3:t4:t5:t6:_ = map (VariableName . ("v" ++) . show) [9 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:_ = map (VariableName . ("v" ++) . show) [7 :: Int ..]
             head = Case (Var x) [] [Alt trueCon [] true, Alt falseCon [] false]
             mainBinds =
                 [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple [Var t1] ]) ]
@@ -92,7 +92,7 @@ test = testGroup "ILA"
                 , NonRec y $ Case (Var t5) [] [Alt tupleCon [t6] (Var t6), errAlt] ]
         in makeTest "x = True\ny = if x then True else False" (mainBinds ++ auxBinds)
         ,
-        let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [3 :: Int ..]
+        let t1:t2:t3:_ = map (VariableName . ("v" ++) . show) [2 :: Int ..]
             mainBind = Rec $ M.fromList [ (t2, Case true [t1] [Alt Default [] $ makeTuple [Var t1]]) ]
             auxBind = NonRec x $ Case (Var t2) [] [Alt tupleCon [t3] (Var t3), errAlt]
         in makeTest "((x)) = (((True)))" [mainBind, auxBind]

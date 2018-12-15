@@ -1,4 +1,4 @@
-{-# Language BangPatterns, MultiParamTypeClasses, GeneralizedNewtypeDeriving, FlexibleInstances, UndecidableInstances #-}
+{-# Language MultiParamTypeClasses, GeneralizedNewtypeDeriving, FlexibleInstances, UndecidableInstances #-}
 
 module NameGenerator where
 
