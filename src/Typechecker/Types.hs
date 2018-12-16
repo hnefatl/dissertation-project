@@ -122,14 +122,14 @@ instance Show QuantifiedType where
         where quantifiers = printf "∀%s. " (intercalate ", " $ map show $ S.toList quants)
 
 
-getInstantiatingTypeMap :: (MonadNameGenerator TypeVariableName m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
+getInstantiatingTypeMap :: (MonadNameGenerator m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
     m <- getInstantiatingMap q
     return $ M.map (\name -> TypeVar (TypeVariable name KindStar)) m
 
-getInstantiatingMap :: (MonadNameGenerator TypeVariableName m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
+getInstantiatingMap :: (MonadNameGenerator m, MonadError String m) => QuantifiedType -> m (M.Map TypeVariableName TypeVariableName)
 getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
-    where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
+    where pairWithNewName (TypeVariable old _) = (old,) <$> freshTypeVarName
 
 mergeQuantifiedTypes :: ([Type] -> Type) -> [QuantifiedType] -> QuantifiedType
 mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions quals) (f ts)

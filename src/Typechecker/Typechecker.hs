@@ -56,7 +56,7 @@ instance Default InferrerState where
 
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT String (StateT InferrerState NameGenerator) a)
-    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String, MonadNameGenerator VariableName, MonadNameGenerator TypeVariableName)
+    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String, MonadNameGenerator)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
 runTypeInferrer :: MonadError String m => TypeInferrer a -> NameGenerator (m a, InferrerState)
@@ -73,10 +73,6 @@ writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
 getLogs :: TypeInferrer [String]
 getLogs = toList <$> gets logs
 
--- |Creates a fresh (uniquely named) type variable
-freshTypeVariable :: TypeInferrer TypeVariableName
-freshTypeVariable = freshName
-
 nameToType :: TypeVariableName -> TypeInferrer Type
 nameToType name = TypeVar <$> nameToTypeVariable name
 nameToTypeVariable :: TypeVariableName -> TypeInferrer TypeVariable
@@ -85,7 +81,7 @@ nameToTypeVariable name = TypeVariable name <$> getTypeVariableKind name
 -- |Generate a type variable name and make it refer to the given type.
 nameSimpleType :: Type -> TypeInferrer TypeVariableName
 nameSimpleType t = do
-    name <- freshTypeVariable
+    name <- freshTypeVarName
     t' <- nameToType name
     unify t' t
     return name
@@ -129,7 +125,7 @@ getVariableTypeVariable name = do
     maybe (throwError $ printf "Symbol %s not in environment" (show name)) return (x <|> y)
 getVariableTypeVariableOrAdd :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ \_ -> do
-    tv <- freshTypeVariable
+    tv <- freshTypeVarName
     addVariableType name tv
     return tv
 
@@ -137,7 +133,7 @@ getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ 
 -- type variables and adding the new type constraints to the environment
 instantiate :: QuantifiedType -> TypeInferrer TypeVariableName
 instantiate qt@(Quantified _ ql@(Qualified quals t)) = do
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     -- Create a "default" mapping from each type variable in the type to itself
     let identityMap = M.fromList $ map (\x -> (x, TypeVar $ TypeVariable x KindStar)) $ S.toList $ getTypeVars ql
     -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
@@ -237,11 +233,11 @@ inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
 inferLiteral (HsChar _) = nameSimpleType typeChar
 inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     addTypeConstraint v (TypeConstantName "Num")
     return v
 inferLiteral (HsFrac _) = do
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     addTypeConstraint v (TypeConstantName "Fractional")
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
@@ -252,7 +248,7 @@ inferExpression (HsCon name) = inferExpression (HsVar name)
 inferExpression (HsLit literal) = inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
 inferExpression (HsLambda _ pats e) = do
-    retVar <- freshTypeVariable
+    retVar <- freshTypeVarName
     retType <- nameToType retVar
     argVars <- inferPatterns pats
     argTypes <- mapM nameToType argVars
@@ -264,7 +260,7 @@ inferExpression (HsApp f e) = do
     funType <- nameToType =<< instantiateIfNeeded =<< inferExpression f
     argType <- nameToType =<< instantiateIfNeeded =<< inferExpression e
     -- Generate a fresh variable for the return type
-    retVar <- freshTypeVariable
+    retVar <- freshTypeVarName
     retType <- nameToType retVar
     -- Unify `function` with `argument -> returntype` to match up the types.
     unify (makeFun [argType] retType) funType
@@ -277,7 +273,7 @@ inferExpression (HsInfixApp lhs op rhs) = do
     inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
 inferExpression (HsTuple exps) = do
     expTypes <- mapM nameToType =<< mapM inferExpression exps
-    retVar <- freshTypeVariable
+    retVar <- freshTypeVarName
     retType <- nameToType retVar
     unify retType (makeTuple expTypes)
     return retVar
@@ -291,7 +287,7 @@ inferExpression (HsIf c e1 e2) = do
     unless (ct == expectedType) (throwError $ printf "`if` expression condition %s doesn't have type bool" (show c))
     e1t <- nameToType =<< inferExpression e1
     e2t <- nameToType =<< inferExpression e2
-    commonVar <- freshTypeVariable
+    commonVar <- freshTypeVarName
     commonType <- nameToType commonVar
     unify commonType e1t
     unify commonType e2t
@@ -299,9 +295,9 @@ inferExpression (HsIf c e1 e2) = do
 inferExpression (HsList exps) = do
     ets <- mapM nameToType =<< mapM inferExpression exps
     -- Check each element has the same type
-    commonType <- nameToType =<< freshTypeVariable
+    commonType <- nameToType =<< freshTypeVarName
     mapM_ (unify commonType) ets
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     vt <- nameToType v
     unify vt (makeList commonType)
     return v
@@ -311,7 +307,7 @@ inferExpression e = throwError ("Unsupported expression: " ++ show e)
 inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
 inferPattern (HsPVar name) = getVariableTypeVariableOrAdd (convertName name)
 inferPattern (HsPLit lit) = inferLiteral lit
-inferPattern HsPWildCard = freshTypeVariable
+inferPattern HsPWildCard = freshTypeVarName
 inferPattern (HsPAsPat name pat) = do
     t <- nameToType =<< inferPattern pat
     v <- getVariableTypeVariableOrAdd (convertName name)
@@ -323,7 +319,7 @@ inferPattern (HsPApp con pats) = do
     t <- instantiate =<< getVariableQuantifiedType (convertName con)
     conType <- applyCurrentSubstitution =<< nameToType t
     ts <- mapM nameToType =<< inferPatterns pats
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     vt <- nameToType v
     unify (makeFun ts vt) conType
     -- Check the data constructor's been fully applied
@@ -334,16 +330,16 @@ inferPattern (HsPApp con pats) = do
         _ -> throwError "Partial application of data constructor in pattern"
 inferPattern (HsPTuple pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     vt <- nameToType v
     unify vt (makeTuple pts)
     return v
 inferPattern (HsPList pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
     -- Check each element has the same type
-    commonType <- nameToType =<< freshTypeVariable
+    commonType <- nameToType =<< freshTypeVarName
     mapM_ (unify commonType) pts
-    v <- freshTypeVariable
+    v <- freshTypeVarName
     vt <- nameToType v
     unify vt (makeList commonType)
     return v
@@ -355,7 +351,7 @@ inferPatterns = mapM inferPattern
 
 inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer TypeVariableName
 inferAlternative pats e = do
-    retVar <- freshTypeVariable
+    retVar <- freshTypeVarName
     retType <- nameToType retVar
     patTypes <- mapM nameToType =<< inferPatterns pats
     exprType <- nameToType =<< inferExpression e
@@ -365,7 +361,7 @@ inferAlternative pats e = do
 inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer TypeVariableName
 inferAlternatives alts = do
     ts <- mapM nameToType =<< mapM (uncurry inferAlternative) alts
-    commonVar <- freshTypeVariable
+    commonVar <- freshTypeVarName
     commonType <- nameToType commonVar
     mapM_ (unify commonType) ts
     return commonVar
@@ -384,7 +380,7 @@ inferDecl _ = throwError "Declaration not yet supported"
 inferDecls :: [Syntax.HsDecl] -> TypeInferrer ()
 inferDecls ds = do
     names <- getDeclsBoundNames ds
-    typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshName) (S.toList names)
+    typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ printf "Adding %s to environment for declaration group" (show typeVarMapping)
     addVariableTypes typeVarMapping
     mapM_ inferDecl ds

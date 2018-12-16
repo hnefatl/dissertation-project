@@ -73,7 +73,7 @@ data ConverterState = ConverterState
     , renamings :: M.Map VariableName VariableName }
 
 newtype Converter a = Converter (ReaderT ConverterState (ExceptT String NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError String, MonadNameGenerator VariableName)
+    deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError String, MonadNameGenerator)
 
 runConverter :: MonadError String m => Converter a -> M.Map VariableName QuantifiedType -> NameGenerator (m a)
 runConverter (Converter inner) ts = liftEither <$> runExceptT (runReaderT inner initState)
@@ -109,7 +109,7 @@ makeError = Var $ VariableName "error"
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
     boundNames <- S.toAscList <$> getPatContainedNames pat
-    renames <- M.fromList <$> mapM (\n -> (n,) <$> freshName) boundNames
+    renames <- M.fromList <$> mapM (\n -> (n,) <$> freshVarName) boundNames
     return (boundNames, renames)
 
 -- TODO(kc506): Enforce that case expressions can only have variable names as their heads, then it's easy to restrict
@@ -127,9 +127,9 @@ declToIla (HsPatBind _ pat rhs _) = do
         rhsExpr <- rhsToIla rhs
         patToIla pat rhsExpr resultTuple
     -- For each bound name, generate a binding that extracts the variable from the tuple
-    resultName <- freshName
+    resultName <- freshVarName
     let extractorMap (name, index) = do
-            tempNames <- replicateM boundNameLength freshName
+            tempNames <- replicateM boundNameLength freshVarName
             let body = Var (tempNames !! index) -- Just retrieve the specific output variable
             return $ NonRec name (Case (Var resultName) [] [Alt (DataCon $ VariableName "(,)") tempNames body, Alt Default [] makeError])
     extractors <- mapM extractorMap (zip boundNames [0..])
@@ -149,7 +149,7 @@ expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla (HsInfixApp _ _ _) = error "Infix applications not supported"
 expToIla (HsLambda l [] e) = throwError "Lambda without arguments"
 expToIla (HsLambda l (p:pats) e) = do
-    argName <- freshName
+    argName <- freshVarName
     (_, renames) <- getPatRenamings p
     body <- local (addRenamings renames) $ do
         nextBody <- case pats of
@@ -191,7 +191,7 @@ patToIla (HsPVar n) head body = do
     return $ Case head [renamedVar] [Alt Default [] body]
 patToIla (HsPLit l) head body = error "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) head body = do
-    argNames <- replicateM (length args) freshName
+    argNames <- replicateM (length args) freshVarName
     let argNamePairs = zipWith (\p n -> (p, Var n)) args argNames
     body' <- foldM (flip $ uncurry patToIla) body argNamePairs
     return $ Case head [] [Alt (DataCon $ convertName con) argNames body', Alt Default [] makeError]
@@ -199,8 +199,8 @@ patToIla (HsPTuple pats) head body = patToIla (HsPApp (UnQual $ HsIdent "(,)") p
 patToIla (HsPList []) head body = return $ Case head [] [Alt nilCon [] body, Alt Default [] makeError]
     where nilCon = DataCon $ VariableName "[]"
 patToIla (HsPList (p:ps)) head body = do
-    headName <- freshName
-    tailName <- freshName
+    headName <- freshVarName
+    tailName <- freshVarName
     headExpr <- patToIla p (Var headName) body
     tailExpr <- patToIla (HsPList ps) (Var tailName) headExpr
     return $ Case head [] [Alt (DataCon $ VariableName ":") [headName, tailName] tailExpr, Alt Default [] makeError]

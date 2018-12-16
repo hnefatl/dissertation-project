@@ -16,7 +16,7 @@ import NameGenerator
 import Typechecker.Types
 
 newtype Deoverload a = Deoverload (ExceptT String (StateT DeoverloadState NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError String, MonadNameGenerator TypeVariableName)
+    deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError String, MonadNameGenerator)
 
 data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
@@ -64,7 +64,7 @@ makeDictName :: TypePredicate -> Deoverload VariableName
 makeDictName (IsInstance (TypeConstantName cl) t) = do
     TypeVariableName suffix <- case t of
         TypeVar (TypeVariable tvn _) -> return tvn
-        TypeConstant{} -> freshName
+        TypeConstant{} -> freshTypeVarName
     return $ VariableName $ "d" ++ cl ++ suffix
 
 
@@ -83,7 +83,7 @@ patternType (HsPList ps) = mergeQuantifiedTypes mkList <$> mapM patternType ps
 patternType (HsPParen p) = patternType p
 patternType (HsPAsPat _ p) = patternType p
 patternType HsPWildCard = do
-    v <- TypeVariable <$> freshName <*> pure KindStar
+    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
     return $ Quantified (S.singleton v) $ Qualified S.empty (TypeVar v)
 patternType _ = throwError "Unsupported pattern in deoverloader"
 
@@ -91,12 +91,12 @@ litType :: HsLiteral -> Deoverload QuantifiedType
 litType (HsChar _) = return $ Quantified S.empty $ Qualified S.empty typeChar
 litType (HsString _) = return$ Quantified S.empty $ Qualified S.empty typeString
 litType (HsInt _) = do
-    v <- TypeVariable <$> freshName <*> pure KindStar
+    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
     let vt = TypeVar v
         num = TypeConstantName "Num"
     return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance num vt) vt
 litType (HsFrac _) = do
-    v <- TypeVariable <$> freshName <*> pure KindStar
+    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
     let vt = TypeVar v
         fractional = TypeConstantName "Fractional"
     return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance fractional vt) vt
