@@ -88,9 +88,10 @@ instance AlphaEq HsExp where
     alphaEq' (HsVar v1) (HsVar v2) = alphaEq' (convertName v1 :: String) (convertName v2)
     alphaEq' (HsCon c1) (HsCon c2) = alphaEq' (HsVar c1) (HsVar c2)
     alphaEq' (HsLit l1) (HsLit l2) = return $ l1 == l2
-    alphaEq' (HsApp e1a e1b) (HsApp e2a e2b) = (&&) <$> alphaEq' e1a e2a <*> alphaEq' e2a e2b
+    alphaEq' (HsApp e1a e1b) (HsApp e2a e2b) = (&&) <$> alphaEq' e1a e2a <*> alphaEq' e1b e2b
     alphaEq' (HsNegApp e1) (HsNegApp e2) = alphaEq' e1 e2
     alphaEq' (HsLambda _ ps1 e1) (HsLambda _ ps2 e2) = (&&) <$> alphaEqs' ps1 ps2 <*> alphaEq' e1 e2
+    alphaEq' (HsLet ds1 e1) (HsLet ds2 e2) = (&&) <$> alphaEqs' ds1 ds2 <*> alphaEq' e1 e2
     alphaEq' (HsIf e1a e1b e1c) (HsIf e2a e2b e2c) = and <$> zipWithM alphaEq' [e1a, e1b, e1c] [e2a, e2b, e2c]
     alphaEq' (HsTuple es1) (HsTuple es2) = alphaEqs' es1 es2
     alphaEq' (HsList es1) (HsList es2) = alphaEqs' es1 es2
