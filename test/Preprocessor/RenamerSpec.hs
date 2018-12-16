@@ -3,7 +3,6 @@ module Preprocessor.RenamerSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Language.Haskell.Syntax
 import Language.Haskell.Parser
 
 import Data.Text.Lazy (unpack)
@@ -16,10 +15,10 @@ import Preprocessor.Renamer
 
 makeTest :: String -> String -> TestTree
 makeTest input expected = testCase (deline input) $ case (,) <$> parseModule input <*> parseModule expected of
-    ParseOk (input', expected) ->
+    ParseOk (input', expected') ->
         let (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
         in case renamedInput of
-            Right actual -> assertBool (unpack $ pShow state) (alphaEq expected actual)
+            Right actual -> assertBool (unpack $ pShow state) (alphaEq expected' actual)
             Left err -> assertFailure err
     ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
 
