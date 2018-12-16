@@ -21,30 +21,27 @@ newtype Deoverload a = Deoverload (ExceptT String (StateT DeoverloadState NameGe
 data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
     , types :: M.Map VariableName QuantifiedType }
+    deriving (Eq, Show)
 instance Default DeoverloadState where
     def = DeoverloadState
         { dictionaries = M.empty
         , types = M.empty }
 
-runDeoverload :: MonadError String m => Deoverload a -> NameGenerator (m a, DeoverloadState)
+runDeoverload :: Deoverload a -> NameGenerator (Except String a, DeoverloadState)
 runDeoverload (Deoverload inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalDeoverload :: MonadError String m => Deoverload a -> NameGenerator (m a)
-evalDeoverload x = fst <$> runDeoverload x
+evalDeoverload :: Deoverload a -> ExceptT String NameGenerator a
+evalDeoverload (Deoverload inner) = do
+    x <- lift $ evalStateT (runExceptT inner) def
+    liftEither x
 
+
+addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
+addTypes ts = modify (\s -> s { types = M.union ts (types s) })
 getType :: VariableName -> Deoverload (Maybe QuantifiedType)
 getType name = gets (M.lookup name . types)
-
-getDictionary :: TypePredicate -> Deoverload VariableName
-getDictionary p = gets (M.lookup p . dictionaries) >>= \case
-    Nothing -> throwError $ printf "Dictionary %s not found in environment" (show p)
-    Just v -> return v
-getDictionaryExp :: TypePredicate -> Deoverload HsExp
-getDictionaryExp p = do
-    VariableName name <- getDictionary p
-    return $ HsVar $ UnQual (HsIdent name)
 
 addDictionaries :: M.Map TypePredicate VariableName -> Deoverload ()
 addDictionaries dicts = do
@@ -59,6 +56,14 @@ addScopedDictionaries dicts action = do
     result <- action
     modify (\s -> s { dictionaries = M.difference (dictionaries s) dicts })
     return result
+getDictionary :: TypePredicate -> Deoverload VariableName
+getDictionary p = gets (M.lookup p . dictionaries) >>= \case
+    Nothing -> throwError $ printf "Dictionary %s not found in environment" (show p)
+    Just v -> return v
+getDictionaryExp :: TypePredicate -> Deoverload HsExp
+getDictionaryExp p = do
+    VariableName name <- getDictionary p
+    return $ HsVar $ UnQual (HsIdent name)
 
 makeDictName :: TypePredicate -> Deoverload VariableName
 makeDictName (IsInstance (TypeConstantName cl) t) = do
@@ -71,7 +76,7 @@ makeDictName (IsInstance (TypeConstantName cl) t) = do
 -- |Given a pattern and access to a list of bindings, find what type was assigned to the pattern
 patternType :: HsPat -> Deoverload QuantifiedType 
 patternType (HsPVar name) = getType (convertName name) >>= \case
-    Nothing -> throwError $ printf "Variable %s not found in environment" (show name)
+    Nothing -> throwError $ printf "Variable %s not found in environment" (convertName name :: String)
     Just qt -> return qt
 patternType (HsPLit l) = litType l
 patternType (HsPApp con ps) = mergeQuantifiedTypes makeDataType <$> mapM patternType ps

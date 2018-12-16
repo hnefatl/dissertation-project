@@ -5,6 +5,7 @@ import Test.Tasty.HUnit
 
 import Language.Haskell.Parser
 
+import Control.Monad.Except
 import Data.Text.Lazy (unpack)
 import Text.Pretty.Simple
 
@@ -16,10 +17,10 @@ import Preprocessor.Renamer
 makeTest :: String -> String -> TestTree
 makeTest input expected = testCase (deline input) $ case (,) <$> parseModule input <*> parseModule expected of
     ParseOk (input', expected') ->
-        let (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
-        in case renamedInput of
+        case runExcept renamedInput of
             Right actual -> assertBool (unpack $ pShow state) (alphaEq expected' actual)
             Left err -> assertFailure err
+        where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
     ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
 
 test :: TestTree

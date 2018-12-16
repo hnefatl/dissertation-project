@@ -10,6 +10,7 @@ import Language.Haskell.Syntax
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (foldl', intercalate)
+import Data.Default
 import Text.Printf
 
 import Names
@@ -71,13 +72,16 @@ instance Show Binding where
 data ConverterState = ConverterState
     { types :: M.Map VariableName QuantifiedType
     , renamings :: M.Map VariableName VariableName }
+instance Default ConverterState where
+    def = ConverterState
+        { types = M.empty
+        , renamings = M.empty }
 
 newtype Converter a = Converter (ReaderT ConverterState (ExceptT String NameGenerator) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError String, MonadNameGenerator)
 
-runConverter :: MonadError String m => Converter a -> M.Map VariableName QuantifiedType -> NameGenerator (m a)
-runConverter (Converter inner) ts = liftEither <$> runExceptT (runReaderT inner initState)
-    where initState = ConverterState { types = ts, renamings = M.empty }
+evalConverter :: Converter a -> M.Map VariableName QuantifiedType -> ExceptT String NameGenerator a
+evalConverter (Converter inner) ts = runReaderT inner def
 
 addRenaming :: VariableName -> VariableName -> ConverterState -> ConverterState
 addRenaming x = addRenamings . M.singleton x

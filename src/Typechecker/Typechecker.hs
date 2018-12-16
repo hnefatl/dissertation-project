@@ -59,14 +59,16 @@ newtype TypeInferrer a = TypeInferrer (ExceptT String (StateT InferrerState Name
     deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String, MonadNameGenerator)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
-runTypeInferrer :: MonadError String m => TypeInferrer a -> NameGenerator (m a, InferrerState)
+runTypeInferrer :: TypeInferrer a -> NameGenerator (Except String a, InferrerState)
 runTypeInferrer (TypeInferrer inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalTypeInferrer :: MonadError String m => TypeInferrer a -> NameGenerator (m a)
-evalTypeInferrer x = fst <$> runTypeInferrer x
-    
+evalTypeInferrer :: TypeInferrer a -> ExceptT String NameGenerator a
+evalTypeInferrer (TypeInferrer inner) = do
+    x <- lift $ evalStateT (runExceptT inner) def
+    liftEither x
+
 
 writeLog :: String -> TypeInferrer ()
 writeLog l = modify (\s -> s { logs = logs s Seq.|> l })

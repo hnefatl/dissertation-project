@@ -32,10 +32,15 @@ instance Default RenamerState where
 newtype Renamer a = Renamer (ExceptT String (StateT RenamerState NameGenerator) a)
     deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState, MonadNameGenerator)
 
-runRenamer :: (MonadNameGenerator n, MonadError String m) => Renamer a -> n (m a, RenamerState)
-runRenamer (Renamer inner) = liftNameGenerator $ do
+runRenamer :: Renamer a -> NameGenerator (Except String a, RenamerState)
+runRenamer (Renamer inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
+
+evalRenamer :: Renamer a -> ExceptT String NameGenerator a
+evalRenamer (Renamer inner) = do
+    x <- lift $ evalStateT (runExceptT inner) def
+    liftEither x
 
 type Rename a = a -> Renamer a
 

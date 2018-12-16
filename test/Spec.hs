@@ -7,8 +7,8 @@ import Typechecker.SubstitutionSpec
 import Typechecker.UnifierSpec
 import Typechecker.TypeclassesSpec
 import Typechecker.TypecheckerSpec
-import Backend.ILASpec
 import Backend.DeoverloadSpec
+import Backend.ILASpec
 
 tests :: TestTree
 tests = testGroup "Tests"
@@ -26,8 +26,8 @@ tests = testGroup "Tests"
             , Typechecker.TypecheckerSpec.test ]
     ,
         testGroup "Backend"
-            [ Backend.ILASpec.test
-            , Backend.DeoverloadSpec.test ]
+            [ Backend.DeoverloadSpec.test
+            , Backend.ILASpec.test ]
     ]
 
 main :: IO ()

@@ -24,14 +24,13 @@ parse s = case parseModule s of
 
 makeTest :: String -> [Binding] -> TestTree
 makeTest input expected = testCase (deline input) $
-    case runExcept foo of
+    case evalNameGenerator (runExceptT foo) 0 of
         Left err -> assertFailure err
         Right binds -> assertEqual "" (S.fromList expected) (S.fromList binds)
     where foo = do
             m <- parse input
-            let (eTypes, counter) = runNameGenerator (evalTypeInferrer $ inferModuleWithBuiltins m) 0
-            ts <- eTypes
-            evalNameGenerator (runConverter (toIla m) ts) counter
+            ts <- evalTypeInferrer (inferModuleWithBuiltins m)
+            evalConverter (toIla m) ts
 
 
 test :: TestTree
