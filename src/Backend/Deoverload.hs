@@ -102,6 +102,8 @@ litType (HsFrac _) = do
     return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance fractional vt) vt
 litType _ = throwError "Primitive types not supported in the deoverloader"
 
+-- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
+-- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
 deoverloadModule (HsModule a b c d decls) = HsModule a b c d <$> deoverloadDecls decls
 
