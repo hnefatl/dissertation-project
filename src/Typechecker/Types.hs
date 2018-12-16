@@ -131,6 +131,10 @@ getInstantiatingMap :: (MonadNameGenerator TypeVariableName m, MonadError String
 getInstantiatingMap (Quantified quants _) = M.fromList <$> mapM pairWithNewName (S.toList quants)
     where pairWithNewName (TypeVariable old _) = (old,) <$> freshName
 
+mergeQuantifiedTypes :: ([Type] -> Type) -> [QuantifiedType] -> QuantifiedType
+mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions quals) (f ts)
+    where (quants, quals, ts) = unzip3 $ map (\(Quantified quant (Qualified qual t)) -> (quant, qual, t)) qts
+
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types
 makeList :: Type -> Type

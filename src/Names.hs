@@ -30,6 +30,13 @@ instance NameConvertible Syntax.HsQName TypeVariableName where
     convertName (Qual _ name) = convertName name
     convertName (UnQual name) = convertName name
     convertName (Special _) = error "No support for special constructors"
+instance NameConvertible Syntax.HsName TypeConstantName where
+    convertName (HsIdent name) = TypeConstantName name
+    convertName (HsSymbol name) = TypeConstantName name
+instance NameConvertible Syntax.HsQName TypeConstantName where
+    convertName (Qual _ name) = convertName name
+    convertName (UnQual name) = convertName name
+    convertName (Special _) = error "No support for special constructors"
 instance NameConvertible Syntax.HsName VariableName where
     convertName (HsIdent name) = VariableName name
     convertName (HsSymbol name) = VariableName name
