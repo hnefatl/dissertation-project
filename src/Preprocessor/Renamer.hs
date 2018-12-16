@@ -30,10 +30,10 @@ instance Default RenamerState where
             , reverseMapping = M.empty }
 
 newtype Renamer a = Renamer (ExceptT String (StateT RenamerState NameGenerator) a)
-    deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState, MonadNameGenerator UniqueVariableName)
+    deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState, MonadNameGenerator)
 
-runRenamer :: MonadError String me => Renamer a -> NameGenerator (me a, RenamerState)
-runRenamer (Renamer inner) = do
+runRenamer :: (MonadNameGenerator n, MonadError String m) => Renamer a -> n (m a, RenamerState)
+runRenamer (Renamer inner) = liftNameGenerator $ do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
@@ -47,7 +47,7 @@ getUniqueScopedName name = gets (M.lookup name . bindings) >>= \case
 
 bindForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindForScope names action = do
-    mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshName) (S.toList names)
+    mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueVarName) (S.toList names)
     -- Add new bindings to scope
     modify (\s -> s { bindings = M.unionWith (++) (M.map pure mapping) (bindings s) })
     -- Add reverse mappings
