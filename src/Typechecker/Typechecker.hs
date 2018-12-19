@@ -200,16 +200,15 @@ getTypePredicates name = do
     constraints <- getConstraints name
     S.fromList <$> mapM (\classname -> IsInstance classname <$> nameToType name) (S.toList constraints)
 
+getSimpleType :: TypeVariableName -> TypeInferrer Type
+getSimpleType name = applyCurrentSubstitution =<< nameToType name
 getQualifiedType :: TypeVariableName -> TypeInferrer QualifiedType
 getQualifiedType name = do
     ce <- getClassEnvironment
-    t <- applyCurrentSubstitution =<< nameToType name
+    t <- getSimpleType name
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
     return $ Qualified predicates t
-
-getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
-getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
 getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name = do
     qualT <- getQualifiedType name
@@ -217,6 +216,8 @@ getQuantifiedType name = do
     qt <- Quantified quantifiers <$> getQualifiedType name
     writeLog $ printf "%s has quantified type %s" (show name) (show qt)
     return qt
+getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
+getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
 
 -- |If the given type variable name refers to a quantified type, instantiate it and return the new type variable name.
 -- If the name refers to a non-quantified type, just return the same name
@@ -227,6 +228,13 @@ instantiateIfNeeded name = gets (reverseLookup name . variableTypes) >>= \case
             Nothing -> return name
         Nothing -> return name
 
+nullSrcLoc :: Syntax.SrcLoc
+nullSrcLoc = SrcLoc "" 0 0
+
+makeExpTypeWrapper :: Syntax.HsExp -> TypeVariableName -> TypeInferrer (Syntax.HsExp, TypeVariableName)
+makeExpTypeWrapper e v = do
+    t <- nameToType v
+    return (HsExpTypeSig nullSrcLoc e $ qualTypeToSyn $ Qualified S.empty t, v)
 
 inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
 inferLiteral (HsChar _) = nameSimpleType typeChar
@@ -241,65 +249,74 @@ inferLiteral (HsFrac _) = do
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
-inferExpression :: Syntax.HsExp -> TypeInferrer TypeVariableName
-inferExpression (HsVar name) = getVariableTypeVariable (convertName name)
+-- |Infer the type of an expression and and return a new node in the AST that can be dropped in instead of the given
+-- one, which wraps the given node in an explicit type signature (eg. `5` is replaced with `(5 :: Num t2 => t2)`)
+inferExpression :: Syntax.HsExp -> TypeInferrer (Syntax.HsExp, TypeVariableName)
+inferExpression e@(HsVar name) = makeExpTypeWrapper e =<< getVariableTypeVariable (convertName name)
 inferExpression (HsCon name) = inferExpression (HsVar name)
-inferExpression (HsLit literal) = inferLiteral literal
+inferExpression e@(HsLit literal) = makeExpTypeWrapper e =<< inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
-inferExpression (HsLambda _ pats e) = do
+inferExpression (HsLambda l pats body) = do
     retVar <- freshTypeVarName
     retType <- nameToType retVar
     argVars <- inferPatterns pats
     argTypes <- mapM nameToType argVars
-    bodyType <- nameToType =<< inferExpression e
+    (bodyExp, bodyVar) <- inferExpression body
+    bodyType <- nameToType bodyVar
     unify (makeFun argTypes bodyType) retType
-    return retVar
+    makeExpTypeWrapper (HsLambda l pats bodyExp) retVar
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
-    funType <- nameToType =<< instantiateIfNeeded =<< inferExpression f
-    argType <- nameToType =<< instantiateIfNeeded =<< inferExpression e
+    (funExp, funVar) <- inferExpression f
+    (argExp, argVar) <- inferExpression e
+    funType <- nameToType =<< instantiateIfNeeded funVar
+    argType <- nameToType =<< instantiateIfNeeded argVar
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVarName
     retType <- nameToType retVar
     -- Unify `function` with `argument -> returntype` to match up the types.
     unify (makeFun [argType] retType) funType
-    return retVar
+    makeExpTypeWrapper (HsApp funExp argExp) retVar
 inferExpression (HsInfixApp lhs op rhs) = do
-    let opName = case op of
-            HsQVarOp name -> name
-            HsQConOp name -> name
+    let VariableName name = convertName op
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
-    inferExpression (HsApp (HsApp (HsVar opName) lhs) rhs)
+    inferExpression (HsApp (HsApp (HsVar $ UnQual $ HsIdent name) lhs) rhs)
 inferExpression (HsTuple exps) = do
-    expTypes <- mapM nameToType =<< mapM inferExpression exps
+    (argExps, argVars) <- mapAndUnzipM inferExpression exps
+    argTypes <- mapM nameToType argVars
     retVar <- freshTypeVarName
     retType <- nameToType retVar
-    unify retType (makeTuple expTypes)
-    return retVar
-inferExpression (HsLet decls e) = do
-    -- Process the declarations first (bring into scope any variables etc)
-    inferDeclGroup decls
-    inferExpression e
-inferExpression (HsIf c e1 e2) = do
-    ct <- getQuantifiedType =<< inferExpression c
-    let expectedType = Quantified S.empty (Qualified S.empty typeBool)
-    unless (ct == expectedType) (throwError $ printf "`if` expression condition %s doesn't have type bool" (show c))
-    e1t <- nameToType =<< inferExpression e1
-    e2t <- nameToType =<< inferExpression e2
-    commonVar <- freshTypeVarName
-    commonType <- nameToType commonVar
-    unify commonType e1t
-    unify commonType e2t
-    return commonVar
-inferExpression (HsList exps) = do
-    ets <- mapM nameToType =<< mapM inferExpression exps
+    unify retType (makeTuple argTypes)
+    makeExpTypeWrapper (HsTuple argExps) retVar
+inferExpression (HsList args) = do
+    (argExps, argVars) <- mapAndUnzipM inferExpression args
+    argTypes <- mapM nameToType argVars
     -- Check each element has the same type
     commonType <- nameToType =<< freshTypeVarName
-    mapM_ (unify commonType) ets
+    mapM_ (unify commonType) argTypes
     v <- freshTypeVarName
     vt <- nameToType v
     unify vt (makeList commonType)
-    return v
+    makeExpTypeWrapper (HsList argExps) v
+inferExpression (HsLet decls body) = do
+    -- Process the declarations first (bring into scope any variables etc)
+    declExps <- inferDeclGroup decls
+    (bodyExp, bodyVar) <- inferExpression body
+    makeExpTypeWrapper (HsLet declExps bodyExp) bodyVar
+inferExpression (HsIf cond e1 e2) = do
+    (condExp, condVar) <- inferExpression cond
+    condType <- getQuantifiedType condVar
+    let expected = Quantified S.empty (Qualified S.empty typeBool)
+    unless (condType == expected) $ throwError $ printf "if condition %s doesn't have type bool" $ show cond
+    (e1Exp, e1Var) <- inferExpression e1
+    e1Type <- nameToType e1Var
+    (e2Exp, e2Var) <- inferExpression e2
+    e2Type <- nameToType e2Var
+    commonVar <- freshTypeVarName
+    commonType <- nameToType commonVar
+    unify commonType e1Type
+    unify commonType e2Type
+    makeExpTypeWrapper (HsIf condExp e1Exp e2Exp) commonVar
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 
@@ -348,54 +365,66 @@ inferPatterns :: [Syntax.HsPat] -> TypeInferrer [TypeVariableName]
 inferPatterns = mapM inferPattern
 
 
-inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer TypeVariableName
+-- |Infer the type of a branch of an alternative (as used in case statements and partial defns of functions). The
+-- returned expression is the given expression wrapped in an explicit type signature
+inferAlternative :: [Syntax.HsPat] -> Syntax.HsExp -> TypeInferrer (Syntax.HsExp, TypeVariableName)
 inferAlternative pats e = do
     retVar <- freshTypeVarName
     retType <- nameToType retVar
     patTypes <- mapM nameToType =<< inferPatterns pats
-    exprType <- nameToType =<< inferExpression e
-    unify (makeFun patTypes retType) exprType
-    return retVar
+    (bodyExp, bodyVar) <- inferExpression e
+    bodyType <- nameToType bodyVar
+    unify (makeFun patTypes retType) bodyType
+    return (bodyExp, retVar)
 
-inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer TypeVariableName
+inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer ([Syntax.HsExp], TypeVariableName)
 inferAlternatives alts = do
-    ts <- mapM nameToType =<< mapM (uncurry inferAlternative) alts
+    (altExps, altVars) <- mapAndUnzipM (uncurry inferAlternative) alts
+    altTypes <- mapM nameToType altVars
     commonVar <- freshTypeVarName
     commonType <- nameToType commonVar
-    mapM_ (unify commonType) ts
-    return commonVar
+    mapM_ (unify commonType) altTypes
+    return (altExps, commonVar)
 
-inferRhs :: Syntax.HsRhs -> TypeInferrer TypeVariableName
-inferRhs (HsUnGuardedRhs e) = inferExpression e
+inferRhs :: Syntax.HsRhs -> TypeInferrer (Syntax.HsRhs, TypeVariableName)
+inferRhs (HsUnGuardedRhs e) = do
+    (newExp, var) <- inferExpression e
+    return (HsUnGuardedRhs newExp, var)
 inferRhs (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
-inferDecl :: Syntax.HsDecl -> TypeInferrer ()
-inferDecl (HsPatBind _ pat rhs _) = do
+inferDecl :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
+inferDecl (HsPatBind l pat rhs ds) = do
     patType <- nameToType =<< inferPattern pat
-    rhsType <- nameToType =<< inferRhs rhs
+    (rhsExp, rhsVar) <- inferRhs rhs
+    rhsType <- nameToType rhsVar
     unify patType rhsType
+    return $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind _) = throwError "Functions not yet supported"
 inferDecl _ = throwError "Declaration not yet supported"
-inferDecls :: [Syntax.HsDecl] -> TypeInferrer ()
+
+inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDecls ds = do
     names <- getDeclsBoundNames ds
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ printf "Adding %s to environment for declaration group" (show typeVarMapping)
     addVariableTypes typeVarMapping
-    mapM_ inferDecl ds
+    declExps <- mapM inferDecl ds
+    -- Update our name -> type mappings
     mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
+    return declExps
 
-inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer ()
+inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
-    forM_ dependencyGroups $ \group -> do
+    declExps <- forM dependencyGroups $ \group -> do
         boundNames <- S.toList <$> getDeclsBoundNames group
         writeLog $ printf "Processing binding group {%s}" (intercalate "," $ map show boundNames)
         inferDecls group
+    return $ concat declExps
 
 -- TODO(kc506): Take advantage of explicit type hints
-inferModule :: Syntax.HsModule -> TypeInferrer ()
-inferModule (HsModule _ _ _ _ decls) = inferDeclGroup decls
+inferModule :: Syntax.HsModule -> TypeInferrer Syntax.HsModule
+inferModule (HsModule a b c d decls) = HsModule a b c d <$> inferDeclGroup decls
 
 
 getVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)

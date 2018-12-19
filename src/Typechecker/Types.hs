@@ -7,6 +7,7 @@ import Text.Printf
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.List (intercalate, foldl')
+import Language.Haskell.Syntax as Syntax
 
 import AlphaEq
 import Names
@@ -160,6 +161,33 @@ typeTuple n = TypeConstant (TypeConstantName "(,)") (replicate n KindStar) []
 typeString :: Type
 typeString = makeList typeChar
 
+
+-- Utility functions for converting from our type representations to the AST representations and back
+typeToSyn :: Type -> Syntax.HsType
+typeToSyn (TypeVar (TypeVariable (TypeVariableName name) _)) = HsTyVar $ HsIdent name
+typeToSyn (TypeConstant (TypeConstantName name) _ ts) = foldl' app (HsTyCon $ UnQual $ HsIdent name) ts
+    where app x arg = HsTyApp x $ typeToSyn arg
+synToType :: Syntax.HsType -> Type
+synToType (HsTyFun arg body) = makeFun [synToType arg] $ synToType body
+synToType (HsTyTuple ts) = makeTuple $ map synToType ts
+synToType (HsTyApp t1 t2) = applyTypeUnsafe (synToType t1) (synToType t2)
+synToType (HsTyVar v) = TypeVar $ TypeVariable (convertName v) KindStar
+-- TODO(kc506): This is going to break fast when we use type constructors like `Maybe Int` as we don't know here that
+-- the kind of `Maybe` is `* -> *`. Same goes for using `applyTypeUnsafe` above. These functions should be wrapped in a
+-- `MonadError` at least to allow for `applyType`, and should be given access to information about what type constuctors
+-- we have+what their kinds are, so we can validate if the type is valid. Moved into the typechecker monad?
+synToType (HsTyCon c) = TypeConstant (convertName c) [] []
+
+typePredToSyn :: TypePredicate -> Syntax.HsAsst
+typePredToSyn (IsInstance (TypeConstantName c) t) = (UnQual $ HsIdent c, [typeToSyn t])
+synToTypePred :: Syntax.HsAsst -> TypePredicate
+synToTypePred (c, [t]) = IsInstance (convertName c) (synToType t)
+synToTypePred _ = error "Invalid constraint (unary or multiparameter). Also, change this to throwError."
+
+qualTypeToSyn :: QualifiedType -> Syntax.HsQualType
+qualTypeToSyn (Qualified quals t) = HsQualType (map typePredToSyn $ S.toAscList quals) $ typeToSyn t
+synToQualType :: Syntax.HsQualType -> QualifiedType
+synToQualType (HsQualType quals t) = Qualified (S.fromList $ map synToTypePred quals) (synToType t)
 
 
 instance AlphaEq TypeVariable where
