@@ -400,7 +400,7 @@ inferDeclGroup ds = do
 inferModule :: Syntax.HsModule -> TypeInferrer (M.Map VariableName QuantifiedType)
 inferModule (HsModule _ _ _ _ decls) = do
     inferDeclGroup decls
-    getVariableTypes
+    getBoundVariableTypes
 
 -- TODO(kc506): Delete once we don't need builtins
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (M.Map VariableName QuantifiedType)
@@ -409,10 +409,15 @@ inferModuleWithBuiltins m = do
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     inferModule m
 
-getVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
-getVariableTypes = do
-    writeLog "Getting variable types"
-    binds <- gets bindings
+-- |Get the types of all decl-bound variables, ie. {f, x} in `f = let x = 1 in \y -> x + y`
+getBoundVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
+getBoundVariableTypes = gets bindings
+-- |Get all the variable types, so {f, x, y} from `f = let x = 1 in \y -> x + y`. The types of non decl-bound variables
+-- aren't guaranteed to really make sense (although they should) (ie, not necessarily have all the constraints they
+-- should etc).
+getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
+getAllVariableTypes = do
+    binds <- getBoundVariableTypes
     -- Get the qualified types of each unbound but present variable (and give it an empty quantifier set)
     unboundVariables <- M.toList <$> gets variableTypes
     unbound <- forM unboundVariables $ \(v, t) -> (v,) . Quantified S.empty <$> getQualifiedType t

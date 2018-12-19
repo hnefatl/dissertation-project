@@ -53,3 +53,5 @@ instance MonadState s m => MonadState s (NameGeneratorT m) where
 instance MonadReader s m => MonadReader s (NameGeneratorT m) where
     ask = lift ask
     local f (NameGeneratorT x) = NameGeneratorT $ local f x
+instance MonadIO m => MonadIO (NameGeneratorT m) where
+    liftIO = lift . liftIO

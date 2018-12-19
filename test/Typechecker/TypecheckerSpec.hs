@@ -36,6 +36,7 @@ inferModule' s = (runExcept out, state)
           infer = do
             m <- parse s
             inferModuleWithBuiltins m
+            getAllVariableTypes -- Explicitly pull all the variable types, not just the bound ones
 
 testBindings :: String -> [(String, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do

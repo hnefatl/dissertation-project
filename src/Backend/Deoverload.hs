@@ -74,23 +74,23 @@ makeDictName (IsInstance (TypeConstantName cl) t) = do
 
 
 -- |Given a pattern and access to a list of bindings, find what type was assigned to the pattern
-patternType :: HsPat -> Deoverload QuantifiedType 
-patternType (HsPVar name) = getType (convertName name) >>= \case
+patType :: HsPat -> Deoverload QuantifiedType
+patType (HsPVar name) = getType (convertName name) >>= \case
     Nothing -> throwError $ printf "Variable %s not found in environment" (convertName name :: String)
     Just qt -> return qt
-patternType (HsPLit l) = litType l
-patternType (HsPApp con ps) = mergeQuantifiedTypes makeDataType <$> mapM patternType ps
+patType (HsPLit l) = litType l
+patType (HsPApp con ps) = mergeQuantifiedTypes makeDataType <$> mapM patType ps
     where makeDataType = TypeConstant (convertName con) []
-patternType (HsPTuple ps) = mergeQuantifiedTypes mkTuple <$> mapM patternType ps
+patType (HsPTuple ps) = mergeQuantifiedTypes mkTuple <$> mapM patType ps
     where mkTuple = TypeConstant (TypeConstantName "(,)") []
-patternType (HsPList ps) = mergeQuantifiedTypes mkList <$> mapM patternType ps
+patType (HsPList ps) = mergeQuantifiedTypes mkList <$> mapM patType ps
     where mkList = TypeConstant (TypeConstantName "[]") []
-patternType (HsPParen p) = patternType p
-patternType (HsPAsPat _ p) = patternType p
-patternType HsPWildCard = do
+patType (HsPParen p) = patType p
+patType (HsPAsPat _ p) = patType p
+patType HsPWildCard = do
     v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
     return $ Quantified (S.singleton v) $ Qualified S.empty (TypeVar v)
-patternType _ = throwError "Unsupported pattern in deoverloader"
+patType _ = throwError "Unsupported pattern in pattern type reconstruction in deoverloader"
 
 litType :: HsLiteral -> Deoverload QuantifiedType
 litType (HsChar _) = return $ Quantified S.empty $ Qualified S.empty typeChar
@@ -107,6 +107,34 @@ litType (HsFrac _) = do
     return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance fractional vt) vt
 litType _ = throwError "Primitive types not supported in the deoverloader"
 
+expType :: HsExp -> Deoverload QuantifiedType
+expType (HsVar name) = getType (convertName name) >>= \case
+    Nothing -> throwError $ "No type for name " ++ convertName name
+    Just qt -> return qt
+expType (HsCon name) = expType (HsVar name)
+expType (HsLit l) = litType l
+expType (HsInfixApp e1 op e2) = do
+    let f = HsVar $ case op of
+            HsQVarOp name -> name
+            HsQConOp name -> name
+    expType (HsApp (HsApp f e1) e2)
+expType (HsApp f e) = do
+    fType <- expType f
+    eType <- expType e
+    error "Work this out on a whiteboard..."
+expType (HsLambda _ ps e) = do
+    pTypes <- mapM patType ps
+    error "Work out"
+expType (HsLet _ e) = expType e -- We can ignore the bindings as their types are already available
+expType (HsIf _ e _) = expType e -- We passed typechecking, so we can just find the type of one branch
+expType (HsTuple es) = mergeQuantifiedTypes makeTuple <$> mapM expType es
+expType (HsList (e:_)) = do
+    Quantified quants (Qualified quals t) <- expType e
+    return $ Quantified quants $ Qualified quals $ makeList t
+expType (HsParen e) = expType e
+expType _ = throwError "Unsupported expression in expression type reconstruction in deoverloader"
+
+
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
@@ -118,12 +146,12 @@ deoverloadDecls = mapM deoverloadDecl
 deoverloadDecl :: HsDecl -> Deoverload HsDecl
 deoverloadDecl (HsPatBind a pat rhs ds) = do
     -- Replace each constraint with a lambda for a dictionary
-    Quantified _ (Qualified quals _) <- patternType pat
+    Quantified _ (Qualified quals _) <- patType pat
     let constraints = S.toAscList quals
     args <- mapM makeDictName constraints
     let dictArgs = M.fromList $ zip constraints args
         -- Wrap an expression in a lambda that takes the dictionary arguments
-        addArgs e = HsLambda a [ HsPVar (HsIdent arg) | VariableName arg <- args ] e
+        addArgs = HsLambda a [ HsPVar (HsIdent arg) | VariableName arg <- args ]
     rhs' <- addScopedDictionaries dictArgs (deoverloadRhs rhs)
     let resultRhs = case rhs' of
             HsUnGuardedRhs e -> HsUnGuardedRhs (addArgs e)
@@ -138,13 +166,24 @@ deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 deoverloadExp :: HsExp -> Deoverload HsExp
 deoverloadExp (HsVar name) = getType (convertName name) >>= \case
     Nothing -> return (HsVar name)
-    Just (Quantified _ (Qualified quals _)) -> foldl' HsApp (HsVar name) <$> (mapM getDictionaryExp $ S.toAscList quals)
+    Just (Quantified _ (Qualified quals _)) -> foldl' HsApp (HsVar name) <$> mapM getDictionaryExp (S.toAscList quals)
+    -- URGENT: Need to unify the simply type of the function with the argument types to get a substitution we can apply
+    -- to the rest of the type... need to turn "Num a" into "Num t4".
 deoverloadExp (HsCon name) = deoverloadExp (HsVar name)
 deoverloadExp l@(HsLit _) = return l
 deoverloadExp (HsApp f e) = HsApp <$> deoverloadExp f <*> deoverloadExp e
+deoverloadExp (HsInfixApp e1 op e2) = do
+    let fName = case op of
+            HsQVarOp name -> name
+            HsQConOp name -> name
+    -- Convert an infix application into two normal applications
+    fExp <- deoverloadExp (HsVar fName)
+    e1Exp <- deoverloadExp e1
+    e2Exp <- deoverloadExp e2
+    return $ HsApp (HsApp fExp e1Exp) e2Exp
 deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
 deoverloadExp (HsList es) = HsList <$> mapM deoverloadExp es
 deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
-deoverloadExp _ = throwError "Unsupported expression in deoverloader"
+deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " ++ show e

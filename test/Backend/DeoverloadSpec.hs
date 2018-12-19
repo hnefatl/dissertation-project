@@ -3,27 +3,35 @@ module Backend.DeoverloadSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import Language.Haskell.Parser
+
+import Control.Monad.Except
+import Data.Text.Lazy (unpack)
+import Text.Pretty.Simple
+
 import AlphaEq
 import ExtraDefs
 import NameGenerator
-import Typechecker.Types
 import Typechecker.Typechecker
 import Backend.Deoverload
 
-import Control.Monad.Except
-import Language.Haskell.Parser
-import Data.Text.Lazy (unpack)
-import Text.Printf
-import Text.Pretty.Simple
+pretty :: Show a => a -> String
+pretty = unpack . pShow
 
 makeTest :: String -> String -> TestTree
-makeTest sExpected sActual = testCase (deline sActual) $
+makeTest sActual sExpected = testCase (deline sActual) $
     case (parseModule sExpected, parseModule sActual) of
-        (ParseOk expected, ParseOk actualModule) ->
-            case runExcept x of
-                Left err -> assertFailure $ printf "Failed to deoverload: %s\n%s" err (unpack $ pShow state)
-                Right actual -> assertBool (show actual) (alphaEq expected actual)
-            where (x, state) = evalNameGenerator (runDeoverload $ deoverloadModule actualModule) 0
+        (ParseOk expected, ParseOk actualModule) -> do
+            let infer = runTypeInferrer $ inferModuleWithBuiltins actualModule
+                ((eTypes, tState), i) = runNameGenerator infer 0
+            case runExcept eTypes of
+                Left err -> assertFailure err
+                Right ts -> do
+                    let deoverload = runDeoverload $ addTypes ts >> deoverloadModule actualModule
+                        (eDeoverloaded, dState) = evalNameGenerator deoverload i
+                    case runExcept eDeoverloaded of
+                        Left err -> assertFailure $ unlines [err, pretty tState, pretty dState]
+                        Right actual -> assertBool (show actual) (alphaEq expected actual)
         (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
         (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 
