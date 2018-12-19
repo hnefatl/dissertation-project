@@ -165,7 +165,12 @@ typeString = makeList typeChar
 -- Utility functions for converting from our type representations to the AST representations and back
 typeToSyn :: Type -> Syntax.HsType
 typeToSyn (TypeVar (TypeVariable (TypeVariableName name) _)) = HsTyVar $ HsIdent name
-typeToSyn (TypeConstant (TypeConstantName name) _ ts) = foldl' app (HsTyCon $ UnQual $ HsIdent name) ts
+typeToSyn (TypeConstant (TypeConstantName conName) _ ts) = case conName of
+        "(,)" -> HsTyTuple $ map typeToSyn ts
+        "->" -> case map typeToSyn ts of
+                    [t1, t2] -> HsTyFun t1 t2
+                    _ -> error "Should be parse error"
+        name -> foldl' app (HsTyCon $ UnQual $ HsIdent name) ts
     where app x arg = HsTyApp x $ typeToSyn arg
 synToType :: Syntax.HsType -> Type
 synToType (HsTyFun arg body) = makeFun [synToType arg] $ synToType body

@@ -41,7 +41,7 @@ inferModule' s = (runExcept out, state)
             forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
             -- Parse and run type inference
             m <- parse s
-            inferModule m
+            _ <- inferModule m -- Discard the updated tree
             getVariableTypes
 
 testBindings :: String -> [(String, QuantifiedType)] -> TestTree
