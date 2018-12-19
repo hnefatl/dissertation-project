@@ -426,7 +426,6 @@ inferDeclGroup ds = do
 inferModule :: Syntax.HsModule -> TypeInferrer Syntax.HsModule
 inferModule (HsModule a b c d decls) = HsModule a b c d <$> inferDeclGroup decls
 
-
 getVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getVariableTypes = do
     writeLog "Getting variable types"
@@ -435,3 +434,25 @@ getVariableTypes = do
     unboundVariables <- M.toList <$> gets variableTypes
     unbound <- forM unboundVariables $ \(v, t) -> (v,) . Quantified S.empty <$> getQualifiedType t
     return $ M.union binds (M.fromList unbound)
+
+
+-- |After the 1st pass (`inferModule`) which produced an AST with explicit type tags for each expression, we need to
+-- perform this 2nd pass to update the type tags from a stand-in variable to the actual type of the expression.
+updateModuleTypeTags :: Syntax.HsModule -> TypeInferrer Syntax.HsModule
+updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDeclsTypeTags decls
+
+updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
+updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
+updateDeclTypeTags _ = throwError "Unsupported declaration when updating type tags"
+updateDeclsTypeTags :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
+updateDeclsTypeTags = mapM updateDeclTypeTags
+
+updateRhsTypeTags :: Syntax.HsRhs -> TypeInferrer Syntax.HsRhs
+updateRhsTypeTags (HsUnGuardedRhs e) = HsUnGuardedRhs <$> updateExpTypeTags e
+updateRhsTypeTags (HsGuardedRhss _) = throwError "Unsupported RHS when updating type tags"
+
+updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
+updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l e <$> case t of
+    HsQualType [] (HsTyVar tv) -> qualTypeToSyn <$> getQualifiedType (convertName tv)
+    qt -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+updateExpTypeTags e = return e
