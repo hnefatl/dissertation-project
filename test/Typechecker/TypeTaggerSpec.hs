@@ -7,6 +7,7 @@ import Language.Haskell.Parser
 import Control.Monad.Except
 import Data.Text.Lazy (unpack)
 import Text.Pretty.Simple
+import Text.Printf
 
 import AlphaEq
 import ExtraDefs
@@ -21,7 +22,8 @@ makeTest input expected = testCase (deline input) $ do
         (ParseOk m, ParseOk n) -> return (m, n)
     case evalNameGenerator (runExceptT $ evalTypeInferrer $ inferModuleWithBuiltins inputModule) 0 of
         Left msg -> assertFailure $ "Failed to generate tagged tree: " ++ msg
-        Right (inputModule', _) -> assertBool (unpack $ pShow inputModule') $ alphaEq inputModule' expectedModule
+        Right (inputModule', _) -> assertBool err $ alphaEq inputModule' expectedModule
+            where err = printf "Expected:\n%s\nGot:\n%s" (unpack $ pShow expectedModule) (unpack $ pShow inputModule')
 
 test :: TestTree
 test = testGroup "Type Tagger"
