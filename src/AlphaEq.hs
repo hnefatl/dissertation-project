@@ -5,11 +5,11 @@ module AlphaEq where
 import Control.Monad.State.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-
 import Language.Haskell.Syntax
 
 import ExtraDefs
 import Names
+import Typechecker.Types
 
 newtype AlphaEqM a = AlphaEqM { inner :: State (M.Map String String) a }
     deriving (Functor, Applicative, Monad, MonadState (M.Map String String))
@@ -51,11 +51,24 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
 
 
--- Have to define these instances here otherwise splitting names/alphaeq instances becomes painful (cyclic)
 instance AlphaEq TypeVariableName where
     alphaEq' (TypeVariableName s1) (TypeVariableName s2) = alphaEq' s1 s2
+instance AlphaEq TypeVariable where
+    alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = (k1 == k2 &&) <$> alphaEq' n1 n2
+instance AlphaEq Type where
+    alphaEq' (TypeVar t1) (TypeVar t2) = alphaEq' t1 t2
+    alphaEq' (TypeConstant n1 ks1 ts1) (TypeConstant n2 ks2 ts2) = do
+        tsOkay <- and <$> zipWithM alphaEq' ts1 ts2
+        return $ n1 == n2 && ks1 == ks2 && tsOkay
+    alphaEq' _ _ = return False
+instance AlphaEq TypePredicate where
+    alphaEq' (IsInstance c1 t1) (IsInstance c2 t2) = (c1 == c2 &&) <$> alphaEq' t1 t2
+instance AlphaEq a => AlphaEq (Qualified a) where
+    alphaEq' (Qualified quals1 t1) (Qualified quals2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quals1 quals2
+instance AlphaEq QuantifiedType where
+    alphaEq' (Quantified quants1 t1) (Quantified quants2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quants1 quants2
 
--- Have to define these instances here because anywhere else would produce orphan instances...
+
 instance AlphaEq HsModule where
     alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEqs' ds1 ds2
 instance AlphaEq HsDecl where
@@ -96,4 +109,33 @@ instance AlphaEq HsExp where
     alphaEq' (HsTuple es1) (HsTuple es2) = alphaEqs' es1 es2
     alphaEq' (HsList es1) (HsList es2) = alphaEqs' es1 es2
     alphaEq' (HsParen e1) (HsParen e2) = alphaEq' e1 e2
+    -- Ignore parenthese completely
+    --alphaEq' (HsParen e1) (HsParen e2) = alphaEq' e1 e2
+    --alphaEq' e1 (HsParen e2) e2 = alphaEq' e1 e2
+    alphaEq' (HsExpTypeSig _ e1 t1) (HsExpTypeSig _ e2 t2) =do
+        e <- alphaEq' e1 e2
+        t <- alphaEq' (synToQualType t1) (synToQualType t2)
+        return $ e && t
     alphaEq' _ _ = return False
+
+stripModuleParens :: HsModule -> HsModule
+stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)
+stripDeclParens :: HsDecl -> HsDecl
+stripDeclParens (HsPatBind l p r ds) = HsPatBind l p (stripRhsParens r) (stripDeclsParens ds)
+stripDeclParens _ = error "Unsupported declaration in paren strip"
+stripDeclsParens :: [HsDecl] -> [HsDecl]
+stripDeclsParens = map stripDeclParens
+stripRhsParens :: HsRhs -> HsRhs
+stripRhsParens (HsUnGuardedRhs e) = HsUnGuardedRhs (stripExpParens e)
+stripRhsParens _ = error "Unsupported RHS in paren strip"
+stripExpParens :: HsExp -> HsExp
+stripExpParens (HsParen e) = stripExpParens e
+stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
+stripExpParens (HsApp e1 e2) = HsApp (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsNegApp e) = HsNegApp (stripExpParens e)
+stripExpParens (HsLambda l ps e) = HsLambda l ps (stripExpParens e)
+stripExpParens (HsIf c e1 e2) = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsTuple es) = HsTuple (map stripExpParens es)
+stripExpParens (HsList es) = HsList (map stripExpParens es)
+stripExpParens (HsExpTypeSig l e t) = HsExpTypeSig l (stripExpParens e) t
+stripExpParens e = e

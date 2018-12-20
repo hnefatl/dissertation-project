@@ -9,7 +9,6 @@ import qualified Data.Set as S
 import Data.List (intercalate, foldl')
 import Language.Haskell.Syntax as Syntax
 
-import AlphaEq
 import Names
 import NameGenerator
 
@@ -185,6 +184,9 @@ synToType (HsTyVar v) = TypeVar $ TypeVariable (convertName v) KindStar
 -- the kind of `Maybe` is `* -> *`. Same goes for using `applyTypeUnsafe` above. These functions should be wrapped in a
 -- `MonadError` at least to allow for `applyType`, and should be given access to information about what type constuctors
 -- we have+what their kinds are, so we can validate if the type is valid. Moved into the typechecker monad?
+-- Could cause major issues with AlphaEq (expression's exptypesig node needs these conversion functions). We can add
+-- `MonadError` happily, alphaeq could do with that (for reporting actual errors, instead of just returning False).
+-- Typechecker monad? Probably not so happy.
 synToType (HsTyCon c) = TypeConstant (convertName c) [] []
 
 typePredToSyn :: TypePredicate -> Syntax.HsAsst
@@ -197,19 +199,3 @@ qualTypeToSyn :: QualifiedType -> Syntax.HsQualType
 qualTypeToSyn (Qualified quals t) = HsQualType (map typePredToSyn $ S.toAscList quals) $ typeToSyn t
 synToQualType :: Syntax.HsQualType -> QualifiedType
 synToQualType (HsQualType quals t) = Qualified (S.fromList $ map synToTypePred quals) (synToType t)
-
-
-instance AlphaEq TypeVariable where
-    alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = (k1 == k2 &&) <$> alphaEq' n1 n2
-instance AlphaEq Type where
-    alphaEq' (TypeVar t1) (TypeVar t2) = alphaEq' t1 t2
-    alphaEq' (TypeConstant n1 ks1 ts1) (TypeConstant n2 ks2 ts2) = do
-        tsOkay <- and <$> zipWithM alphaEq' ts1 ts2
-        return $ n1 == n2 && ks1 == ks2 && tsOkay
-    alphaEq' _ _ = return False
-instance AlphaEq TypePredicate where
-    alphaEq' (IsInstance c1 t1) (IsInstance c2 t2) = (c1 == c2 &&) <$> alphaEq' t1 t2
-instance AlphaEq a => AlphaEq (Qualified a) where
-    alphaEq' (Qualified quals1 t1) (Qualified quals2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quals1 quals2
-instance AlphaEq QuantifiedType where
-    alphaEq' (Quantified quants1 t1) (Quantified quants2 t2) = (&&) <$> alphaEq' t1 t2 <*> alphaEq' quants1 quants2

@@ -27,7 +27,7 @@ makeFailTest ce ps goal = testCase ("Fails: " ++ show goal) $ case result of
     where result = evalNameGenerator (runExceptT $ evalTypeInferrer $ entails ce ps goal) 0
 
 test :: TestTree
-test = testGroup "Typeclasses"
+test = testGroup "Type Classes"
     [ 
         makeTest builtinClasses S.empty (IsInstance (TypeConstantName "Eq") typeBool),
         makeTest builtinClasses S.empty (IsInstance (TypeConstantName "Eq") typeString),

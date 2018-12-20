@@ -211,7 +211,9 @@ getQualifiedType name = do
     t <- getSimpleType name
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
-    return $ Qualified predicates t
+    let qt = Qualified predicates t
+    writeLog $ printf "%s has qualified type %s" (show name) (show qt)
+    return qt
 getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name = do
     qualT <- getQualifiedType name
@@ -467,7 +469,14 @@ updateRhsTypeTags (HsUnGuardedRhs e) = HsUnGuardedRhs <$> updateExpTypeTags e
 updateRhsTypeTags (HsGuardedRhss _) = throwError "Unsupported RHS when updating type tags"
 
 updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
-updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l e <$> case t of
+updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
     HsQualType [] (HsTyVar tv) -> qualTypeToSyn <$> getQualifiedType (convertName tv)
     qt -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+updateExpTypeTags (HsInfixApp e1 op e2) = HsInfixApp <$> updateExpTypeTags e1 <*> pure op <*> updateExpTypeTags e2
+updateExpTypeTags (HsApp e1 e2) = HsApp <$> updateExpTypeTags e1 <*> updateExpTypeTags e2
+updateExpTypeTags (HsNegApp e) = HsNegApp <$> updateExpTypeTags e
+updateExpTypeTags (HsLambda l ps e) = HsLambda l ps <$> updateExpTypeTags e
+updateExpTypeTags (HsIf c e1 e2) = HsIf <$> updateExpTypeTags c <*> updateExpTypeTags e1 <*> updateExpTypeTags e2
+updateExpTypeTags (HsTuple es) = HsTuple <$> mapM updateExpTypeTags es
+updateExpTypeTags (HsList es) = HsList <$> mapM updateExpTypeTags es
 updateExpTypeTags e = return e
