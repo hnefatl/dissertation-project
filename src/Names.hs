@@ -1,11 +1,9 @@
-{-# Language MultiParamTypeClasses, GeneralizedNewtypeDeriving #-}
+{-# Language MultiParamTypeClasses, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
 
 module Names where
 
 import Language.Haskell.Syntax as Syntax
 import Data.Hashable
-
-import AlphaEq
 
 newtype VariableName = VariableName String deriving (Eq, Ord, Hashable)
 newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
@@ -23,33 +21,28 @@ instance Show TypeConstantName where
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
 
+instance NameConvertible Syntax.HsName String where
+    convertName (HsIdent name) = name
+    convertName (HsSymbol name) = name
+instance NameConvertible Syntax.HsQName String where
+    convertName (Qual _ name) = convertName name
+    convertName (UnQual name) = convertName name
+    convertName (Special _) = error "No support for special constructors"
 instance NameConvertible Syntax.HsName TypeVariableName where
-    convertName (HsIdent name) = TypeVariableName name
-    convertName (HsSymbol name) = TypeVariableName name
+    convertName name = TypeVariableName (convertName name)
 instance NameConvertible Syntax.HsQName TypeVariableName where
-    convertName (Qual _ name) = convertName name
-    convertName (UnQual name) = convertName name
-    convertName (Special _) = error "No support for special constructors"
+    convertName name = TypeVariableName (convertName name)
 instance NameConvertible Syntax.HsName TypeConstantName where
-    convertName (HsIdent name) = TypeConstantName name
-    convertName (HsSymbol name) = TypeConstantName name
+    convertName name = TypeConstantName (convertName name)
 instance NameConvertible Syntax.HsQName TypeConstantName where
-    convertName (Qual _ name) = convertName name
-    convertName (UnQual name) = convertName name
-    convertName (Special _) = error "No support for special constructors"
+    convertName name = TypeConstantName (convertName name)
 instance NameConvertible Syntax.HsName VariableName where
-    convertName (HsIdent name) = VariableName name
-    convertName (HsSymbol name) = VariableName name
+    convertName name = VariableName (convertName name)
 instance NameConvertible Syntax.HsQName VariableName where
-    convertName (Qual _ name) = convertName name
-    convertName (UnQual name) = convertName name
-    convertName (Special _) = error "No support for special constructors"
+    convertName name = VariableName (convertName name)
 instance NameConvertible Syntax.HsOp VariableName where
     convertName (HsVarOp name) = convertName name
     convertName (HsConOp name) = convertName name
 instance NameConvertible Syntax.HsQOp VariableName where
     convertName (HsQVarOp name) = convertName name
     convertName (HsQConOp name) = convertName name
-
-instance AlphaEq TypeVariableName where
-    alphaEq' (TypeVariableName s1) (TypeVariableName s2) = alphaEq' s1 s2

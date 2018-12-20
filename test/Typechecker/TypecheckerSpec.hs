@@ -14,9 +14,7 @@ import Names
 import NameGenerator
 import Typechecker.Types
 import Typechecker.Typechecker
-import Typechecker.Hardcoded
 
-import Data.Foldable
 import Data.Either
 import Data.Text.Lazy (unpack)
 import Text.Printf
@@ -36,13 +34,9 @@ inferModule' s = (runExcept out, state)
     where (out, state) = evalNameGenerator (runTypeInferrer $ catchError infer handler) 0
           handler err = get >>= \st -> throwError $ unlines [err, unpack $ pShow st]
           infer = do
-            -- Add builtins
-            addClasses builtinClasses
-            forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-            -- Parse and run type inference
             m <- parse s
-            _ <- inferModule m -- Discard the updated tree
-            getVariableTypes
+            _ <- inferModuleWithBuiltins m -- Discard the updated tree and bound types
+            getAllVariableTypes -- Explicitly pull all the variable types, not just the bound ones
 
 testBindings :: String -> [(String, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (deline s) $ do
@@ -203,7 +197,6 @@ test = let
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
-        -- Disabled until we have dependency analysis: g should be typechecked in a different group to f
         let s = "a = let f = \\x -> x\n" ++
                 "        g = \\y z -> z\n" ++
                 "    in g (f 5) (f True)"
