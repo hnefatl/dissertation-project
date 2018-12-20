@@ -4,21 +4,24 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Language.Haskell.Parser
-import Language.Haskell.Syntax
+import Control.Monad.Except
+import Data.Text.Lazy (unpack)
+import Text.Pretty.Simple
 
 import AlphaEq
 import ExtraDefs
-import Typechecker.Types
+import NameGenerator
 import Typechecker.Typechecker
 
 makeTest :: String -> String -> TestTree
-makeTest untagged tagged = testCase (deline untagged) $ do
-    (untaggedModule, taggedModule) <- case (parseModule untagged, parseModule tagged) of
-        (ParseFailed _ msg, _) -> assertFailure $ "Failed to parse untagged: " ++ msg
-        (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse tagged: " ++ msg
+makeTest input expected = testCase (deline input) $ do
+    (inputModule, expectedModule) <- case (parseModule input, parseModule expected) of
+        (ParseFailed _ msg, _) -> assertFailure $ "Failed to parse input: " ++ msg
+        (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " ++ msg
         (ParseOk m, ParseOk n) -> return (m, n)
-    undefined
-    --assertBool $ alphaEq 
+    case evalNameGenerator (runExceptT $ evalTypeInferrer $ inferModuleWithBuiltins inputModule) 0 of
+        Left msg -> assertFailure $ "Failed to generate tagged tree: " ++ msg
+        Right (inputModule', _) -> assertBool (unpack $ pShow inputModule') $ alphaEq inputModule' expectedModule
 
 test :: TestTree
 test = testGroup "Type Tagger"
