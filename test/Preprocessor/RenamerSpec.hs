@@ -27,14 +27,14 @@ test :: TestTree
 test = testGroup "Renamer"
     [ makeTest "x = 5" "v0 = 5"
     , makeTest
-        "x = 5\ny = x"
-        "v0 = 5\nv1 = v0"
+        "x = 5 ; y = x"
+        "v0 = 5 ; v1 = v0"
     , makeTest
-        "x = y\ny = x"
-        "v0 = v1\nv1 = v0"
+        "x = y ; y = x"
+        "v0 = v1 ; v1 = v0"
     , makeTest
-        "(a, b) = (x, 4)\nx = 1"
-        "(v0, v1) = (v2, 4)\nv2 = 1"
+        "(a, b) = (x, 4) ; x = 1"
+        "(v0, v1) = (v2, 4) ; v2 = 1"
     , makeTest
         "(_, a) = 4"
         "(_, v0) = 4"
@@ -42,8 +42,8 @@ test = testGroup "Renamer"
         "x@(a, b) = (1, 2)"
         "v2@(v0, v1) = (1, 2)"
     , makeTest
-        "x = 2\n[a, 2, c] = [1, x, 3]"
-        "v2 = 2\n[v0, 2, v1] = [1, v2, 3]"
+        "x = 2 ; [a, 2, c] = [1, x, 3]"
+        "v2 = 2 ; [v0, 2, v1] = [1, v2, 3]"
     , makeTest
         "_ = let { x = 0 ; y = 1 ; z = 2 } in if x then y else z"
         "_ = let { v0 = 0 ; v1 = 1 ; v2 = 2 } in if v0 then v1 else v2"

@@ -156,7 +156,7 @@ test = let
         let s = "x = 1 + 2 + 3" 
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     ,
-        let s = "x = 1 + 2\ny = x + 3"
+        let s = "x = 1 + 2 ; y = x + 3"
             q = Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta
         in testBindings s [("x", q), ("y", q)]
     ,
@@ -197,8 +197,8 @@ test = let
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
-        let s = "a = let f = \\x -> x\n" ++
-                "        g = \\y z -> z\n" ++
+        let s = "a = let f = \\x -> x ; " ++
+                "        g = \\y z -> z ; " ++
                 "    in g (f 5) (f True)"
         in testBindings s [("a", Quantified S.empty (Qualified S.empty typeBool))]
     ,
@@ -263,26 +263,26 @@ test = let
         in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
     ,
         let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "f = \\(Just x) -> x\ny = f (Just 5)"
+        in testBindings "f = \\(Just x) -> x ; y = f (Just 5)"
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
         let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-        in testBindings "f = \\(Just True) -> False\ny = f (Just False)"
+        in testBindings "f = \\(Just True) -> False ; y = f (Just False)"
             [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindingsFail "f = \\Just -> True"
     ,
-        testBindings "const = \\x y -> x\nz = const 1 2\nw = const True False"
+        testBindings "const = \\x y -> x ; z = const 1 2 ; w = const True False"
             [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
             , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
             , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
-        testBindings "const = \\x y -> x\nz = const True 1\nw = const 1 2"
+        testBindings "const = \\x y -> x ; z = const True 1 ; w = const 1 2"
             [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
             , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
             , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     ----,
-    ----    testBindingsFail "const = \\x y -> x\nz = const True (1 + 2)"
+    ----    testBindingsFail "const = \\x y -> x ; z = const True (1 + 2)"
     ]
