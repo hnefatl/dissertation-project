@@ -121,10 +121,10 @@ expType (HsInfixApp e1 op e2) = do
 expType (HsApp f e) = do
     fType <- expType f
     eType <- expType e
-    error "Work this out on a whiteboard..."
+    throwError "Work this out on a whiteboard..."
 expType (HsLambda _ ps e) = do
     pTypes <- mapM patType ps
-    error "Work out"
+    throwError "Work out"
 expType (HsLet _ e) = expType e -- We can ignore the bindings as their types are already available
 expType (HsIf _ e _) = expType e -- We passed typechecking, so we can just find the type of one branch
 expType (HsTuple es) = mergeQuantifiedTypes makeTuple <$> mapM expType es

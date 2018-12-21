@@ -53,4 +53,7 @@ test = testGroup "Type Tagger"
     , makeTest
         "x = (\\[y, z] -> y + z) [1, 2]"
         "x = ((\\[y, z] -> (((+) :: Num a => a -> a -> a) (y :: Num a => a) :: Num a => a -> a) (z :: Num a => a) :: Num a => a) :: Num a => [a] -> a) ([1 :: Num a => a, 2 :: Num a => a] :: Num a => [a]) :: Num a => a"
+    , makeTest
+        "x = True\ny = (if x then x else False, 1)"
+        "x = True :: Bool\ny = ((if x :: Bool then x :: Bool else False :: Bool) :: Bool, 1 :: Num a => a) :: Num a => (Bool, a)"
     ]
