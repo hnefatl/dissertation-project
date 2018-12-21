@@ -239,7 +239,8 @@ nullSrcLoc = SrcLoc "" 0 0
 makeExpTypeWrapper :: Syntax.HsExp -> TypeVariableName -> TypeInferrer (Syntax.HsExp, TypeVariableName)
 makeExpTypeWrapper e v = do
     t <- nameToType v
-    return (HsExpTypeSig nullSrcLoc e $ qualTypeToSyn $ Qualified S.empty t, v)
+    t' <- qualTypeToSyn (Qualified S.empty t)
+    return (HsExpTypeSig nullSrcLoc e t', v)
 
 inferLiteral :: Syntax.HsLiteral -> TypeInferrer TypeVariableName
 inferLiteral (HsChar _) = nameSimpleType typeChar
@@ -476,7 +477,7 @@ updateRhsTypeTags (HsGuardedRhss _) = throwError "Unsupported RHS when updating 
 
 updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
 updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
-    HsQualType [] (HsTyVar tv) -> qualTypeToSyn <$> getQualifiedType (convertName tv)
+    HsQualType [] (HsTyVar tv) -> qualTypeToSyn =<< getQualifiedType (convertName tv)
     qt -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
 updateExpTypeTags (HsInfixApp e1 op e2) = HsInfixApp <$> updateExpTypeTags e1 <*> pure op <*> updateExpTypeTags e2
 updateExpTypeTags (HsApp e1 e2) = HsApp <$> updateExpTypeTags e1 <*> updateExpTypeTags e2

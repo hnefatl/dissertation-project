@@ -109,14 +109,22 @@ instance AlphaEq HsExp where
     alphaEq' (HsTuple es1) (HsTuple es2) = alphaEqs' es1 es2
     alphaEq' (HsList es1) (HsList es2) = alphaEqs' es1 es2
     alphaEq' (HsParen e1) (HsParen e2) = alphaEq' e1 e2
-    -- Ignore parenthese completely
-    --alphaEq' (HsParen e1) (HsParen e2) = alphaEq' e1 e2
-    --alphaEq' e1 (HsParen e2) e2 = alphaEq' e1 e2
     alphaEq' (HsExpTypeSig _ e1 t1) (HsExpTypeSig _ e2 t2) =do
         e <- alphaEq' e1 e2
-        t <- alphaEq' (synToQualType t1) (synToQualType t2)
+        t <- alphaEq' t1 t2
         return $ e && t
     alphaEq' _ _ = return False
+instance AlphaEq HsType where
+    alphaEq' (HsTyFun t1a t1b) (HsTyFun t2a t2b) = (&&) <$> alphaEq' t1a t2a <*> alphaEq' t1b t2b
+    alphaEq' (HsTyTuple ts1) (HsTyTuple ts2) = and <$> zipWithM alphaEq' ts1 ts2
+    alphaEq' (HsTyApp t1a t1b) (HsTyApp t2a t2b) = (&&) <$> alphaEq' t1a t2a <*> alphaEq' t1b t2b
+    alphaEq' (HsTyVar v1) (HsTyVar v2) = alphaEq' (convertName v1 :: String) (convertName v2)
+    alphaEq' (HsTyCon v1) (HsTyCon v2) = return $ v1 == v2
+    alphaEq' _ _ = return False
+instance AlphaEq HsQualType where
+    alphaEq' (HsQualType c1 t1) (HsQualType c2 t2) = (&&) <$> (and <$> zipWithM alphaEq' c1 c2) <*> alphaEq' t1 t2
+instance AlphaEq HsAsst where
+    alphaEq' (name1, ts1) (name2, ts2) = (name1 == name2 &&) . and <$> zipWithM alphaEq' ts1 ts2
 
 stripModuleParens :: HsModule -> HsModule
 stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)

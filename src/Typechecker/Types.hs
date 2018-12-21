@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections #-}
+{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections, LambdaCase #-}
 
 module Typechecker.Types where
 
@@ -6,7 +6,7 @@ import Control.Monad.Except
 import Text.Printf
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List (intercalate, foldl')
+import Data.List (intercalate, foldl', unfoldr)
 import Language.Haskell.Syntax as Syntax
 
 import Names
@@ -67,7 +67,7 @@ type ClassInstance = Qualified TypePredicate
 -- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
 data QuantifiedType = Quantified !(S.Set TypeVariable) !QualifiedType deriving (Eq, Ord)
 
--- |A class for things that have a "kind": various type variable/constant/dummies, and types.
+-- |A class for things that have a "kind": type variables/constants, types, ...
 class HasKind t where
     -- |Returns the kind of the given `t`
     getKind :: t -> Kind
@@ -166,43 +166,44 @@ typeString = makeList typeChar
 
 
 -- Utility functions for converting from our type representations to the AST representations and back
-typeToSyn :: Type -> Syntax.HsType
-typeToSyn (TypeVar (TypeVariable (TypeVariableName name) _)) = HsTyVar $ HsIdent name
+typeToSyn :: MonadError String m => Type -> m Syntax.HsType
+typeToSyn (TypeVar (TypeVariable (TypeVariableName name) _)) = return $ HsTyVar $ HsIdent name
 typeToSyn (TypeConstant (TypeConstantName conName) _ ts) = case conName of
-        "(,)" -> HsTyTuple $ map typeToSyn ts
-        "->" -> case map typeToSyn ts of
-                    [t1, t2] -> HsTyFun t1 t2
-                    _ -> error "Should be parse error"
+        "(,)" -> HsTyTuple <$> mapM typeToSyn ts
+        "->" -> mapM typeToSyn ts >>= \case
+                    [t1, t2] -> return $ HsTyFun t1 t2
+                    _ -> throwError "Partial function type in syntax. Not sure if should be supported."
         name -> let base = case name of
-                        "[]" -> HsTyCon $ Special $ HsListCon
-                        ":" -> HsTyCon $ Special $ HsCons
-                        "()" -> HsTyCon $ Special $ HsUnitCon
+                        "[]" -> HsTyCon $ Special HsListCon
+                        ":" -> HsTyCon $ Special HsCons
+                        "()" -> HsTyCon $ Special HsUnitCon
                         _ -> HsTyCon $ UnQual $ HsIdent name
-                in foldl' app base ts
-    where app x arg = HsTyApp x $ typeToSyn arg
-synToType :: Syntax.HsType -> Type
-synToType (HsTyFun arg body) = makeFun [synToType arg] $ synToType body
-synToType (HsTyTuple ts) = makeTuple $ map synToType ts
-synToType (HsTyApp t1 t2) = applyTypeUnsafe (synToType t1) (synToType t2)
-synToType (HsTyVar v) = TypeVar $ TypeVariable (convertName v) KindStar
--- TODO(kc506): This is going to break fast when we use type constructors like `Maybe Int` as we don't know here that
--- the kind of `Maybe` is `* -> *`. Same goes for using `applyTypeUnsafe` above. These functions should be wrapped in a
--- `MonadError` at least to allow for `applyType`, and should be given access to information about what type constuctors
--- we have+what their kinds are, so we can validate if the type is valid. Moved into the typechecker monad? Could cause
--- major issues with AlphaEq (expression's exptypesig node needs these conversion functions). We can add `MonadError`
--- happily, alphaeq could do with that (for reporting actual errors, instead of just returning False). Typechecker
--- monad? Probably not so happy.
--- Note 2: Change type to be multiparam on arbitrary monad m with fundep to associate each type with a single monad.
--- Most functions can be done with `MonadError String`, some with `TypeInferrer`.
-synToType (HsTyCon c) = TypeConstant (convertName c) [] []
+                in foldM app base ts
+    where app x arg = HsTyApp x <$> typeToSyn arg
+synToType :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsType -> m Type
+synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
+synToType kinds (HsTyCon c) = case M.lookup name kinds of
+    Nothing -> throwError $ "Type constructor not in environment: " ++ show name
+    Just kind -> return $ TypeConstant name (unfoldr helper kind) []
+    where name = convertName c
+          helper KindStar = Nothing
+          helper (KindFun l r) = Just (l, r)
+synToType ks (HsTyFun arg body) = makeFun <$> sequence [synToType ks arg] <*> synToType ks body
+synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts
+synToType ks (HsTyApp t1 t2) = do
+    t1' <- synToType ks t1
+    t2' <- synToType ks t2
+    applyType t1' t2'
 
-typePredToSyn :: TypePredicate -> Syntax.HsAsst
-typePredToSyn (IsInstance (TypeConstantName c) t) = (UnQual $ HsIdent c, [typeToSyn t])
-synToTypePred :: Syntax.HsAsst -> TypePredicate
-synToTypePred (c, [t]) = IsInstance (convertName c) (synToType t)
-synToTypePred _ = error "Invalid constraint (unary or multiparameter). Also, change this to throwError."
+typePredToSyn :: MonadError String m => TypePredicate -> m Syntax.HsAsst
+typePredToSyn (IsInstance (TypeConstantName c) t) = do
+    t' <- typeToSyn t
+    return (UnQual $ HsIdent c, [t'])
+synToTypePred :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsAsst -> m TypePredicate
+synToTypePred ks (c, [t]) = IsInstance (convertName c) <$> synToType ks t
+synToTypePred _ _ = throwError "Invalid constraint (unary or multiparameter)."
 
-qualTypeToSyn :: QualifiedType -> Syntax.HsQualType
-qualTypeToSyn (Qualified quals t) = HsQualType (map typePredToSyn $ S.toAscList quals) $ typeToSyn t
-synToQualType :: Syntax.HsQualType -> QualifiedType
-synToQualType (HsQualType quals t) = Qualified (S.fromList $ map synToTypePred quals) (synToType t)
+qualTypeToSyn :: MonadError String m => QualifiedType -> m Syntax.HsQualType
+qualTypeToSyn (Qualified quals t) = HsQualType <$> mapM typePredToSyn (S.toAscList quals) <*> typeToSyn t
+synToQualType :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsQualType -> m QualifiedType
+synToQualType ks (HsQualType quals t) = Qualified <$> (S.fromList <$> mapM (synToTypePred ks) quals) <*> synToType ks t
