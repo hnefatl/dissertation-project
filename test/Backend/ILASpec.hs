@@ -81,7 +81,7 @@ test = testGroup "ILA"
             auxBind = NonRec f (Case (Var t6) [] [Alt tupleCon [t7] (Var t7), errAlt])
         in makeTest "f = \\x y -> x" [mainBind, auxBind]
         ,
-        let t1:t2:t3:t4:t5:t6:_ = map (VariableName . ("v" ++) . show) [7 :: Int ..]
+        let t1:t2:t3:t4:t5:t6:_ = map (VariableName . ("v" ++) . show) [8 :: Int ..]
             head = Case (Var x) [] [Alt trueCon [] true, Alt falseCon [] false]
             mainBinds =
                 [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple [Var t1] ]) ]

@@ -173,7 +173,12 @@ typeToSyn (TypeConstant (TypeConstantName conName) _ ts) = case conName of
         "->" -> case map typeToSyn ts of
                     [t1, t2] -> HsTyFun t1 t2
                     _ -> error "Should be parse error"
-        name -> foldl' app (HsTyCon $ UnQual $ HsIdent name) ts
+        name -> let base = case name of
+                        "[]" -> HsTyCon $ Special $ HsListCon
+                        ":" -> HsTyCon $ Special $ HsCons
+                        "()" -> HsTyCon $ Special $ HsUnitCon
+                        _ -> HsTyCon $ UnQual $ HsIdent name
+                in foldl' app base ts
     where app x arg = HsTyApp x $ typeToSyn arg
 synToType :: Syntax.HsType -> Type
 synToType (HsTyFun arg body) = makeFun [synToType arg] $ synToType body
@@ -183,10 +188,12 @@ synToType (HsTyVar v) = TypeVar $ TypeVariable (convertName v) KindStar
 -- TODO(kc506): This is going to break fast when we use type constructors like `Maybe Int` as we don't know here that
 -- the kind of `Maybe` is `* -> *`. Same goes for using `applyTypeUnsafe` above. These functions should be wrapped in a
 -- `MonadError` at least to allow for `applyType`, and should be given access to information about what type constuctors
--- we have+what their kinds are, so we can validate if the type is valid. Moved into the typechecker monad?
--- Could cause major issues with AlphaEq (expression's exptypesig node needs these conversion functions). We can add
--- `MonadError` happily, alphaeq could do with that (for reporting actual errors, instead of just returning False).
--- Typechecker monad? Probably not so happy.
+-- we have+what their kinds are, so we can validate if the type is valid. Moved into the typechecker monad? Could cause
+-- major issues with AlphaEq (expression's exptypesig node needs these conversion functions). We can add `MonadError`
+-- happily, alphaeq could do with that (for reporting actual errors, instead of just returning False). Typechecker
+-- monad? Probably not so happy.
+-- Note 2: Change type to be multiparam on arbitrary monad m with fundep to associate each type with a single monad.
+-- Most functions can be done with `MonadError String`, some with `TypeInferrer`.
 synToType (HsTyCon c) = TypeConstant (convertName c) [] []
 
 typePredToSyn :: TypePredicate -> Syntax.HsAsst

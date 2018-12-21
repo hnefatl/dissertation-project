@@ -27,7 +27,11 @@ instance NameConvertible Syntax.HsName String where
 instance NameConvertible Syntax.HsQName String where
     convertName (Qual _ name) = convertName name
     convertName (UnQual name) = convertName name
-    convertName (Special _) = error "No support for special constructors"
+    convertName (Special HsUnitCon) = "()"
+    convertName (Special HsListCon) = "[]"
+    convertName (Special HsCons) = ":"
+    convertName (Special HsFunCon) = "->"
+    convertName (Special (HsTupleCon _)) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
 instance NameConvertible Syntax.HsName TypeVariableName where
     convertName name = TypeVariableName (convertName name)
 instance NameConvertible Syntax.HsQName TypeVariableName where

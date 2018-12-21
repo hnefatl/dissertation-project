@@ -257,8 +257,14 @@ inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 -- |Infer the type of an expression and and return a new node in the AST that can be dropped in instead of the given
 -- one, which wraps the given node in an explicit type signature (eg. `5` is replaced with `(5 :: Num t2 => t2)`)
 inferExpression :: Syntax.HsExp -> TypeInferrer (Syntax.HsExp, TypeVariableName)
-inferExpression e@(HsVar name) = makeExpTypeWrapper e =<< getVariableTypeVariable (convertName name)
-inferExpression (HsCon name) = inferExpression (HsVar name)
+inferExpression e@(HsVar name) = do
+    v <- getVariableTypeVariable (convertName name)
+    t <- instantiateIfNeeded v
+    makeExpTypeWrapper e t
+inferExpression e@(HsCon name) = do
+    v <- getVariableTypeVariable (convertName name)
+    t <- instantiateIfNeeded v
+    makeExpTypeWrapper e t
 inferExpression e@(HsLit literal) = makeExpTypeWrapper e =<< inferLiteral literal
 inferExpression (HsParen e) = inferExpression e
 inferExpression (HsLambda l pats body) = do
@@ -274,8 +280,8 @@ inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
     (funExp, funVar) <- inferExpression f
     (argExp, argVar) <- inferExpression e
-    funType <- nameToType =<< instantiateIfNeeded funVar
-    argType <- nameToType =<< instantiateIfNeeded argVar
+    funType <- nameToType funVar
+    argType <- nameToType argVar
     -- Generate a fresh variable for the return type
     retVar <- freshTypeVarName
     retType <- nameToType retVar
