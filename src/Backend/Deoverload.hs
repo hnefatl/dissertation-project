@@ -2,6 +2,7 @@
 
 module Backend.Deoverload where
 
+import Prelude hiding (exp)
 import Language.Haskell.Syntax
 import Text.Printf
 import Data.Default
@@ -20,12 +21,14 @@ newtype Deoverload a = Deoverload (ExceptT String (StateT DeoverloadState NameGe
 
 data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
-    , types :: M.Map VariableName QuantifiedType }
+    , types :: M.Map VariableName QuantifiedType
+    , kinds :: M.Map TypeConstantName Kind }
     deriving (Eq, Show)
 instance Default DeoverloadState where
     def = DeoverloadState
         { dictionaries = M.empty
-        , types = M.empty }
+        , types = M.empty
+        , kinds = M.empty }
 
 runDeoverload :: Deoverload a -> NameGenerator (Except String a, DeoverloadState)
 runDeoverload (Deoverload inner) = do
@@ -40,8 +43,17 @@ evalDeoverload (Deoverload inner) = do
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
-getType :: VariableName -> Deoverload (Maybe QuantifiedType)
-getType name = gets (M.lookup name . types)
+getType :: VariableName -> Deoverload QuantifiedType
+getType name = gets (M.lookup name . types) >>= \case
+    Nothing -> throwError $ printf "Variable %s not found in environment." (show name)
+    Just qt -> return qt
+
+addKinds :: M.Map TypeConstantName Kind -> Deoverload ()
+addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
+getKinds :: Deoverload (M.Map TypeConstantName Kind)
+getKinds = gets kinds
+getKind :: TypeConstantName -> Deoverload (Maybe Kind)
+getKind name = M.lookup name <$> getKinds
 
 addDictionaries :: M.Map TypePredicate VariableName -> Deoverload ()
 addDictionaries dicts = do
@@ -73,68 +85,6 @@ makeDictName (IsInstance (TypeConstantName cl) t) = do
     return $ VariableName $ "d" ++ cl ++ suffix
 
 
--- |Given a pattern and access to a list of bindings, find what type was assigned to the pattern
-patType :: HsPat -> Deoverload QuantifiedType
-patType (HsPVar name) = getType (convertName name) >>= \case
-    Nothing -> throwError $ printf "Variable %s not found in environment" (convertName name :: String)
-    Just qt -> return qt
-patType (HsPLit l) = litType l
-patType (HsPApp con ps) = mergeQuantifiedTypes makeDataType <$> mapM patType ps
-    where makeDataType = TypeConstant (convertName con) []
-patType (HsPTuple ps) = mergeQuantifiedTypes mkTuple <$> mapM patType ps
-    where mkTuple = TypeConstant (TypeConstantName "(,)") []
-patType (HsPList ps) = mergeQuantifiedTypes mkList <$> mapM patType ps
-    where mkList = TypeConstant (TypeConstantName "[]") []
-patType (HsPParen p) = patType p
-patType (HsPAsPat _ p) = patType p
-patType HsPWildCard = do
-    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
-    return $ Quantified (S.singleton v) $ Qualified S.empty (TypeVar v)
-patType _ = throwError "Unsupported pattern in pattern type reconstruction in deoverloader"
-
-litType :: HsLiteral -> Deoverload QuantifiedType
-litType (HsChar _) = return $ Quantified S.empty $ Qualified S.empty typeChar
-litType (HsString _) = return$ Quantified S.empty $ Qualified S.empty typeString
-litType (HsInt _) = do
-    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
-    let vt = TypeVar v
-        num = TypeConstantName "Num"
-    return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance num vt) vt
-litType (HsFrac _) = do
-    v <- TypeVariable <$> freshTypeVarName <*> pure KindStar
-    let vt = TypeVar v
-        fractional = TypeConstantName "Fractional"
-    return $ Quantified (S.singleton v) $ Qualified (S.singleton $ IsInstance fractional vt) vt
-litType _ = throwError "Primitive types not supported in the deoverloader"
-
-expType :: HsExp -> Deoverload QuantifiedType
-expType (HsVar name) = getType (convertName name) >>= \case
-    Nothing -> throwError $ "No type for name " ++ convertName name
-    Just qt -> return qt
-expType (HsCon name) = expType (HsVar name)
-expType (HsLit l) = litType l
-expType (HsInfixApp e1 op e2) = do
-    let f = HsVar $ case op of
-            HsQVarOp name -> name
-            HsQConOp name -> name
-    expType (HsApp (HsApp f e1) e2)
-expType (HsApp f e) = do
-    fType <- expType f
-    eType <- expType e
-    throwError "Work this out on a whiteboard..."
-expType (HsLambda _ ps e) = do
-    pTypes <- mapM patType ps
-    throwError "Work out"
-expType (HsLet _ e) = expType e -- We can ignore the bindings as their types are already available
-expType (HsIf _ e _) = expType e -- We passed typechecking, so we can just find the type of one branch
-expType (HsTuple es) = mergeQuantifiedTypes makeTuple <$> mapM expType es
-expType (HsList (e:_)) = do
-    Quantified quants (Qualified quals t) <- expType e
-    return $ Quantified quants $ Qualified quals $ makeList t
-expType (HsParen e) = expType e
-expType _ = throwError "Unsupported expression in expression type reconstruction in deoverloader"
-
-
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
@@ -144,46 +94,72 @@ deoverloadDecls :: [HsDecl] -> Deoverload [HsDecl]
 deoverloadDecls = mapM deoverloadDecl
 
 deoverloadDecl :: HsDecl -> Deoverload HsDecl
-deoverloadDecl (HsPatBind a pat rhs ds) = do
-    -- Replace each constraint with a lambda for a dictionary
-    Quantified _ (Qualified quals _) <- patType pat
-    let constraints = S.toAscList quals
-    args <- mapM makeDictName constraints
-    let dictArgs = M.fromList $ zip constraints args
-        -- Wrap an expression in a lambda that takes the dictionary arguments
-        addArgs = HsLambda a [ HsPVar (HsIdent arg) | VariableName arg <- args ]
-    rhs' <- addScopedDictionaries dictArgs (deoverloadRhs rhs)
-    let resultRhs = case rhs' of
-            HsUnGuardedRhs e -> HsUnGuardedRhs (addArgs e)
-            HsGuardedRhss _ -> error "Guarded rhss not supported in deoverloader"
-    return $ HsPatBind a pat resultRhs ds
+deoverloadDecl (HsPatBind loc pat rhs ds) = HsPatBind loc pat <$> deoverloadRhs rhs <*> pure ds
 deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
-deoverloadRhs (HsUnGuardedRhs e) = HsUnGuardedRhs <$> deoverloadExp e
+deoverloadRhs (HsUnGuardedRhs expr) = case expr of
+    HsExpTypeSig loc e t@(HsQualType _ simpleType) -> do
+        -- Replace each constraint with a lambda for a dictionary
+        ks <- getKinds
+        Qualified quals _ <- synToQualType ks t
+        let constraints = S.toAscList quals
+        args <- mapM makeDictName constraints
+        let dictArgs = M.fromList $ zip constraints args
+            funArgs = [ HsPVar $ HsIdent arg | VariableName arg <- args ]
+        e' <- addScopedDictionaries dictArgs (deoverloadExp e)
+        -- Wrap the expression in a lambda that takes the dictionary arguments
+        let outerType = deoverloadType t
+            innerType = HsQualType [] simpleType
+            -- The original expression now has the unconstrained simple type
+            innerExp = HsExpTypeSig loc e' innerType
+            -- The wrapping expression is a lambda taking dictionaries around the inner expression and has modified type
+            outerExp = HsExpTypeSig loc (HsLambda loc funArgs innerExp) outerType
+        return $ HsUnGuardedRhs $ if null args then innerExp else outerExp
+    _ -> throwError $ "Found rhs without top-level type annotation: forgot to run type tagger?\n" ++ show expr
 deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 
+deoverloadName :: HsExp -> Deoverload HsExp
+deoverloadName (HsExpTypeSig l e t@(HsQualType quals _)) = do
+    ks <- getKinds
+    let t' = deoverloadType t
+        e' = HsExpTypeSig l e t'
+    preds <- mapM (synToTypePred ks) quals
+    -- Apply the variable to any dictionaries it needs
+    addDictArgs e' =<< mapM getDictionaryExp preds
+deoverloadName _ = throwError "Argument to deoverloadName needs to be wrapped in a type signature"
+
 deoverloadExp :: HsExp -> Deoverload HsExp
-deoverloadExp (HsVar name) = getType (convertName name) >>= \case
-    Nothing -> return (HsVar name)
-    Just (Quantified _ (Qualified quals _)) -> foldl' HsApp (HsVar name) <$> mapM getDictionaryExp (S.toAscList quals)
-    -- URGENT: Need to unify the simply type of the function with the argument types to get a substitution we can apply
-    -- to the rest of the type... need to turn "Num a" into "Num t4".
-deoverloadExp (HsCon name) = deoverloadExp (HsVar name)
-deoverloadExp l@(HsLit _) = return l
-deoverloadExp (HsApp f e) = HsApp <$> deoverloadExp f <*> deoverloadExp e
-deoverloadExp (HsInfixApp e1 op e2) = do
-    let fName = case op of
-            HsQVarOp name -> name
-            HsQConOp name -> name
-    -- Convert an infix application into two normal applications
-    fExp <- deoverloadExp (HsVar fName)
-    e1Exp <- deoverloadExp e1
-    e2Exp <- deoverloadExp e2
-    return $ HsApp (HsApp fExp e1Exp) e2Exp
+deoverloadExp e@(HsExpTypeSig _ (HsVar _) _) = deoverloadName e
+deoverloadExp e@(HsExpTypeSig _ (HsCon _) _) = deoverloadName e
+deoverloadExp e@(HsExpTypeSig _ (HsLit _) _) = return e
+deoverloadExp (HsExpTypeSig l (HsApp f e) _) = do
+    fExp@(HsExpTypeSig _ _ t) <- deoverloadExp f
+    eExp <- deoverloadExp e
+    case t of
+        HsQualType [] (HsTyFun _ retType) -> return $ HsExpTypeSig l (HsApp fExp eExp) (HsQualType [] retType)
+        _ -> throwError $ "Got non-function type in application: " ++ show t
+deoverloadExp HsInfixApp{} = throwError "Infix applications should've been replaced by the type inferrer"
 deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
 deoverloadExp (HsList es) = HsList <$> mapM deoverloadExp es
 deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
+deoverloadExp (HsExpTypeSig l e t) = HsExpTypeSig l <$> deoverloadExp e <*> pure t
 deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " ++ show e
+
+-- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> a -> b -> ()` to represent the dicts.
+deoverloadType :: HsQualType -> HsQualType
+deoverloadType (HsQualType constraints t) = HsQualType [] $ foldr HsTyFun t (map deoverloadAsst constraints)
+deoverloadAsst :: HsAsst -> HsType
+deoverloadAsst (name, args) = foldl' HsTyApp (HsTyCon name) args
+
+-- |Given eg. `(+) :: Num a -> a -> a -> a` and `[dNuma]`, produce a type-annotated tree for the following:
+-- `((+) :: Num a -> a -> a -> a) (dNuma :: Num a) :: a -> a -> a`
+-- Has to take a deoverloaded type, hence the `HsType`.
+addDictArgs :: MonadError String m => HsExp -> [HsExp] -> m HsExp
+addDictArgs e@HsExpTypeSig{} [] = return e
+addDictArgs e@(HsExpTypeSig loc _ (HsQualType [] (HsTyFun argType retType))) (arg:args) = addDictArgs a args
+    where r = HsExpTypeSig loc arg (HsQualType [] argType)
+          a = HsExpTypeSig loc (HsApp e r) (HsQualType [] retType)
+addDictArgs e _ = throwError $ "Invalid expression in deoverloader: " ++ show e

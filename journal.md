@@ -5,8 +5,9 @@ Quick notes on milestones/features/problems/bugs during implementation.
 ## TODO
 
 - Mutually recursive typechecking.
-- Rewrite to use `Text` instead of `String`.
+- Rewrite to use `Text` instead of `String` (can make some nicer instance declarations after that, String's a List).
 - Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
+- Ambiguity check.
 
 ## Preprocessing
 

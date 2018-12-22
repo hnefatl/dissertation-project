@@ -138,11 +138,12 @@ stripRhsParens (HsUnGuardedRhs e) = HsUnGuardedRhs (stripExpParens e)
 stripRhsParens _ = error "Unsupported RHS in paren strip"
 stripExpParens :: HsExp -> HsExp
 stripExpParens (HsParen e) = stripExpParens e
-stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
 stripExpParens (HsApp e1 e2) = HsApp (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
 stripExpParens (HsNegApp e) = HsNegApp (stripExpParens e)
 stripExpParens (HsLambda l ps e) = HsLambda l ps (stripExpParens e)
 stripExpParens (HsIf c e1 e2) = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsLet ds e) = HsLet ds (stripExpParens e)
 stripExpParens (HsTuple es) = HsTuple (map stripExpParens es)
 stripExpParens (HsList es) = HsList (map stripExpParens es)
 stripExpParens (HsExpTypeSig l e t) = HsExpTypeSig l (stripExpParens e) t
