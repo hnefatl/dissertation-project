@@ -37,10 +37,12 @@ getSubstitutedTypeVariables (Substitution sub) tvs = S.unions $ map getTvs (S.to
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable Type where
     applySub (Substitution subs) t@(TypeVar (TypeVariable name _)) = M.findWithDefault t name subs
-    applySub subs (TypeConstant name ks ts) = TypeConstant name ks (applySub subs ts)
+    applySub _ t@(TypeCon _) = t
+    applySub sub (TypeApp t1 t2 kind) = TypeApp (applySub sub t1) (applySub sub t2) kind
     
     getTypeVars (TypeVar (TypeVariable name _)) = S.singleton name
-    getTypeVars (TypeConstant _ _ ts) = getTypeVars ts
+    getTypeVars (TypeCon _) = S.empty
+    getTypeVars (TypeApp t1 t2 _) = S.union (getTypeVars t1) (getTypeVars t2)
 instance Substitutable TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
     getTypeVars (IsInstance _ t) = getTypeVars t

@@ -49,5 +49,5 @@ test = testGroup "AlphaEq"
     where
         [a, b, c, d] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c", "d"]
         [ta, tb, tc, td] = map TypeVar [a, b, c, d]
-        num = IsInstance (TypeConstantName "Num")
-        fractional = IsInstance (TypeConstantName "Fractional")
+        num = IsInstance (TypeVariableName "Num")
+        fractional = IsInstance (TypeVariableName "Fractional")

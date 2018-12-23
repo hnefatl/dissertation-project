@@ -55,11 +55,15 @@ instance AlphaEq TypeVariableName where
     alphaEq' (TypeVariableName s1) (TypeVariableName s2) = alphaEq' s1 s2
 instance AlphaEq TypeVariable where
     alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = (k1 == k2 &&) <$> alphaEq' n1 n2
+instance AlphaEq TypeConstant where
+    alphaEq' (TypeConstant n1 k1) (TypeConstant n2 k2) = return $ n1 == n2 && k1 == k2
 instance AlphaEq Type where
     alphaEq' (TypeVar t1) (TypeVar t2) = alphaEq' t1 t2
-    alphaEq' (TypeConstant n1 ks1 ts1) (TypeConstant n2 ks2 ts2) = do
-        tsOkay <- and <$> zipWithM alphaEq' ts1 ts2
-        return $ n1 == n2 && ks1 == ks2 && tsOkay
+    alphaEq' (TypeCon c1) (TypeCon c2) = alphaEq' c1 c2
+    alphaEq' (TypeApp t1a t1b k1) (TypeApp t2a t2b k2) = do
+        ta <- alphaEq' t1a t2a
+        tb <- alphaEq' t1b t2b
+        return $ ta && tb && k1 == k2
     alphaEq' _ _ = return False
 instance AlphaEq TypePredicate where
     alphaEq' (IsInstance c1 t1) (IsInstance c2 t2) = (c1 == c2 &&) <$> alphaEq' t1 t2

@@ -22,14 +22,8 @@ class HasHnf t where
     -- |Converts a `t` into hnf
     toHnf :: Simplifier m => ClassEnvironment -> t -> m (S.Set TypePredicate)
 
-instance HasHnf Type where
-    inHnf (TypeVar _) = True
-    inHnf (TypeConstant _ [] ts) = inHnf ts
-    inHnf TypeConstant{} = False
-
-    toHnf _ _ = throwError "Can't convert a type to HNF"
 instance HasHnf TypePredicate where
-    inHnf (IsInstance _ x) = inHnf x
+    inHnf (IsInstance _ t) = getKind t == KindStar
 
     -- |If the predicate is already in head normal form, return it. Otherwise, get the predicates that can be used to
     -- infer it from the environment.
@@ -45,8 +39,8 @@ instance HasHnf t => HasHnf [t] where
     toHnf ce ts = S.unions <$> mapM (toHnf ce) ts
 
 detectInvalidPredicate :: Simplifier m => ClassEnvironment -> TypePredicate -> m ()
-detectInvalidPredicate _ (IsInstance _ TypeVar{}) = return ()
-detectInvalidPredicate ce inst@(IsInstance classname TypeConstant{}) = do
+detectInvalidPredicate _ (IsInstance _ TypeVar{}) = return () -- We can't tell if a type variable is/isn't an instance
+detectInvalidPredicate ce inst@(IsInstance classname _) = do
     insts <- instances classname ce
     -- isInstance is true if the given predicate is an "immediate" instance of the class (has no qualifiers, like `Eq
     -- Int`) and it has the same head as the given predicate. We can use `==` instead of eg. `hasMgu` because these

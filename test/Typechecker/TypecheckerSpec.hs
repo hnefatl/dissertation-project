@@ -62,10 +62,16 @@ test :: TestTree
 test = let
         [a, b, c] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c"]
         [ta, tb, tc] = map TypeVar [a, b, c]
-        [num, fractional] = map TypeConstantName ["Num", "Fractional"]
+        [num, fractional] = map TypeVariableName ["Num", "Fractional"]
+        makeMaybe = applyTypeUnsafe (TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar))
     in
         testGroup "Typechecking"
     [
+        -- Utility checks
+        let args = [makeMaybe ta, typeBool, typeString, tb]
+            output = unmakeFun (makeFun args tc)
+        in testCase "unmakeFun . makeFun" $ assertEqual (show output) (args, tc) output
+    ,
         -- Simple literal type checks
         let s = "x = 5"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
@@ -253,23 +259,19 @@ test = let
             , ("g", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc)
             , ("h", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc) ]
     ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty t) ]
+        testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty $ makeMaybe ta) ]
     ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-        in testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty t) ]
+        testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty $ makeMaybe typeBool) ]
     ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "f = \\(Just x) -> x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta) ]
+        testBindings "f = \\(Just x) -> x"
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [makeMaybe ta] ta) ]
     ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [ta]
-        in testBindings "f = \\(Just x) -> x ; y = f (Just 5)"
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [t] ta)
+        testBindings "f = \\(Just x) -> x ; y = f (Just 5)"
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [makeMaybe ta] ta)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
-        let t = TypeConstant (TypeConstantName "Maybe") [] [typeBool]
-        in testBindings "f = \\(Just True) -> False ; y = f (Just False)"
-            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [t] typeBool)
+        testBindings "f = \\(Just True) -> False ; y = f (Just False)"
+            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [makeMaybe typeBool] typeBool)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindingsFail "f = \\Just -> True"

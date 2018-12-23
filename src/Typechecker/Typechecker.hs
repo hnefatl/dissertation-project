@@ -111,6 +111,9 @@ getConstraints name = gets (M.findWithDefault S.empty name . typePredicates)
 addClasses :: ClassEnvironment -> TypeInferrer ()
 addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironment s) })
 
+addKinds :: M.Map TypeVariableName Kind -> TypeInferrer ()
+addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
+
 addVariableType :: VariableName -> TypeVariableName -> TypeInferrer ()
 addVariableType name t = addVariableTypes (M.singleton name t)
 addVariableTypes :: TypeMap -> TypeInferrer ()
@@ -154,7 +157,8 @@ mergeTypeConstraints :: M.Map TypeVariableName (S.Set ClassName) -> TypeInferrer
 mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union ps (typePredicates s) })
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
-addTypePredicate (IsInstance _ TypeConstant{}) = throwError "Not implemented"
+addTypePredicate (IsInstance classname (TypeCon (TypeConstant name _))) = addTypeConstraint name classname
+addTypePredicate (IsInstance _ TypeApp{}) = throwError "Not implemented, but should be"
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
 addTypePredicates = mapM_ addTypePredicate
 
@@ -171,7 +175,8 @@ insertQuantifiedType name t = do
 updateTypeConstraints :: Substitution -> TypeInferrer ()
 updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
     where helper old (TypeVar (TypeVariable new _)) = addTypeConstraints new =<< getConstraints old
-          helper old TypeConstant{} = do
+          --helper old (TypeCon (TypeConstant new _)) = addTypeConstraints new =<< getConstraints old
+          helper old _ = do
             -- TODO(kc506): If we have eg. `Functor (Maybe a)` and `[Maybe a/t0]` we should be able to infer `Functor
             -- t0`
             constraints <- S.toList <$> getConstraints old
@@ -247,11 +252,11 @@ inferLiteral (HsChar _) = nameSimpleType typeChar
 inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVarName
-    addTypeConstraint v (TypeConstantName "Num")
+    addTypeConstraint v (TypeVariableName "Num")
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVarName
-    addTypeConstraint v (TypeConstantName "Fractional")
+    addTypeConstraint v (TypeVariableName "Fractional")
     return v
 inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
 
@@ -346,16 +351,14 @@ inferPattern (HsPParen pat) = inferPattern pat
 inferPattern (HsPApp con pats) = do
     t <- instantiate =<< getVariableQuantifiedType (convertName con)
     conType <- applyCurrentSubstitution =<< nameToType t
+    -- Check the data constructor's been fully applied
+    let (args, _) = unmakeFun conType
+    unless (length args == length pats) $ throwError "Partial application of data constructor in pattern"
     ts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVarName
     vt <- nameToType v
     unify (makeFun ts vt) conType
-    -- Check the data constructor's been fully applied
-    applyCurrentSubstitution vt >>= \case
-        TypeConstant (TypeConstantName "->") _ _ -> throwError "Partial application of data constructor in pattern"
-        TypeConstant _ [] _ -> return v
-        TypeVar (TypeVariable _ KindStar) -> return v
-        _ -> throwError "Partial application of data constructor in pattern"
+    return v
 inferPattern (HsPTuple pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVarName
@@ -442,6 +445,7 @@ inferModule (HsModule a b c d decls) = (,) <$> (HsModule a b c d <$> inferDeclGr
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
     addClasses builtinClasses
+    addKinds builtinKinds
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     inferModule m
 

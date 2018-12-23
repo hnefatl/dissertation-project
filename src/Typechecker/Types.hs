@@ -1,4 +1,4 @@
-{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections, LambdaCase #-}
+{-# Language FlexibleContexts, ScopedTypeVariables, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses, TupleSections #-}
 
 module Typechecker.Types where
 
@@ -6,7 +6,7 @@ import Control.Monad.Except
 import Text.Printf
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List (intercalate, foldl', unfoldr)
+import Data.List (intercalate, foldl')
 import Language.Haskell.Syntax as Syntax
 
 import Names
@@ -16,32 +16,24 @@ import NameGenerator
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord)
 
--- |The number of type arguments that a kind represents: this is one less than the number of nodes on the right-most
--- branch of a "Kind tree".
-getKindArgCount :: Integral i => Kind -> i
-getKindArgCount KindStar = 0
-getKindArgCount (KindFun _ k) = 1 + getKindArgCount k
-
 data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord)
-
-getTvName :: TypeVariable -> TypeVariableName
-getTvName (TypeVariable name _) = name
+data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord)
 
 -- |The type of a Haskell expression.
--- A `TypeVariable` is a globally unique name for a type variable.
--- A `TypeConstant` is composed of the name of the constructor being used, along with the kinds of any remaining
--- arguments and the list of applied types
+-- A TypeVar is a type variable, a TypeCon is a type constant, and a TypeApp is the application of one type to another
+-- and the resulting Kind.
 data Type = TypeVar !TypeVariable
-          | TypeConstant !TypeConstantName ![Kind] ![Type]
+          | TypeCon !TypeConstant
+          | TypeApp !Type !Type !Kind
     deriving (Eq, Ord)
 
+-- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
 applyType :: MonadError String m => Type -> Type -> m Type
-applyType (TypeConstant name (k:ks) ts) t
-    | k == getKind t = return $ TypeConstant name ks (ts ++ [t])
-    | otherwise = throwError $ printf "Got type of kind %s, expected kind %s" (show $ getKind t) (show k)
-applyType (TypeConstant _ [] _) _ = throwError "Application of type of kind *"
--- TODO(kc506): This is valid (although maybe only with compiler extensions): `Monad m => a -> m a`
-applyType t1 t2 = throwError $ printf "Can't apply type to a type variable - possible missing compiler feature: %s %s" (show t1) (show t2)
+applyType t1 t2 = case getKind t1 of
+    KindStar -> throwError $ "Application to type of kind *: " ++ show t1 ++ " applied to " ++ show t2
+    KindFun argKind resKind
+        | argKind == getKind t2 -> return $ TypeApp t1 t2 resKind
+        | otherwise -> throwError $ "Kind mismatch: " ++ show t1 ++ " applied to " ++ show t2
 
 -- |"Unsafe" version of `applyType` which uses `error` instead of `throwError`: useful for compiler tests etc where
 -- it's convenient to avoid boilerplate and we shouldn't have invalid types being used
@@ -53,7 +45,7 @@ applyTypeUnsafe t1 t2 = case applyType t1 t2 of
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !TypeConstantName !Type deriving (Eq, Ord)
+data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord)
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
@@ -73,10 +65,12 @@ class HasKind t where
     getKind :: t -> Kind
 instance HasKind TypeVariable where
     getKind (TypeVariable _ k) = k
+instance HasKind TypeConstant where
+    getKind (TypeConstant _ k) = k
 instance HasKind Type where
     getKind (TypeVar v) = getKind v
-    -- The kind of an application is those kinds remaining in the application followed by a KindStar.
-    getKind (TypeConstant _ kinds _) = foldr KindFun KindStar kinds
+    getKind (TypeCon c) = getKind c
+    getKind (TypeApp _ _ k) = k
 
 instance Show Kind where
     show = assocShow False
@@ -86,30 +80,18 @@ instance Show Kind where
         assocShow True k = "(" ++ assocShow False k ++ ")"
 instance Show TypeVariable where
     show (TypeVariable name _) = show name
+instance Show TypeConstant where
+    show (TypeConstant name _) = show name
 instance Show Type where
     show (TypeVar v) = show v
+    show (TypeCon c) = show c
+    show (TypeApp t1 t2 _) = case t1 of
+        TypeCon (TypeConstant (TypeVariableName "[]") _) -> printf "[%s]" (show t2)
+        _ -> show t1 ++ " " ++ show t2
 
-    -- Special show cases for builtin types
-    show (TypeConstant (TypeConstantName "[]") _ []) = "[]"
-    show (TypeConstant (TypeConstantName "[]") _ [t]) = printf "[%s]" (show t)
-    show (TypeConstant (TypeConstantName "[]") _ _) = error "compiler Error: Invalid type"
-    show (TypeConstant (TypeConstantName "(,)") ks ts) = printf "(%s)" elements
-        where elements = intercalate "," (map show ts ++ replicate (length ks) "")
-    show (TypeConstant (TypeConstantName "->") _ ts) = case ts of
-            [] -> "(->)"
-            [t] -> printf "(%s ->)" (assocShow t)
-            [arg, ret] -> printf "%s -> %s" (assocShow arg) (show ret)
-            _ -> error "Compiler Error: Invalid type"
-        where assocShow t@(TypeConstant (TypeConstantName "->") _ ts')
-                | length ts' >= 2 = printf "(%s)" (show t)
-                | otherwise = show t
-              assocShow t = show t
-    -- General show case
-    show (TypeConstant (TypeConstantName name) _ []) = name
-    show (TypeConstant (TypeConstantName name) _ ts) = printf "(%s %s)" name (unwords $ map show ts)
 instance Show TypePredicate where
-    show (IsInstance (TypeConstantName name) t@TypeVar{}) = printf "%s %s" name (show t)
-    show (IsInstance (TypeConstantName name) t@TypeConstant{}) = printf "%s (%s)" name (show t)
+    show (IsInstance (TypeVariableName name) t@TypeApp{}) = printf "%s (%s)" name (show t)
+    show (IsInstance (TypeVariableName name) t) = printf "%s %s" name (show t)
 instance Show a => Show (Qualified a) where
     show (Qualified quals x) = prefix ++ show x
         where prefix = case S.size quals of
@@ -144,22 +126,29 @@ makeFun args ret = foldr (applyTypeUnsafe . applyTypeUnsafe typeFun) ret args
 makeTuple :: [Type] -> Type
 makeTuple elements = foldl' applyTypeUnsafe (typeTuple $ length elements) elements
 
+-- |Given a type representing a function, unpack it to return the arguments and return type
+unmakeFun :: Type -> ([Type], Type)
+unmakeFun t@(TypeApp (TypeApp f e1 _) e2 _)
+    | f == typeFun = let (args, t') = unmakeFun e2 in (e1:args, t')
+    | otherwise = ([], t)
+unmakeFun t = ([], t)
+
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
-typeUnit = TypeConstant (TypeConstantName "()") [] []
-typeBool = TypeConstant (TypeConstantName "Bool") [] []
-typeInt = TypeConstant (TypeConstantName "Int") [] []
-typeInteger = TypeConstant (TypeConstantName "Integer") [] []
-typeFloat = TypeConstant (TypeConstantName "Float") [] []
-typeDouble = TypeConstant (TypeConstantName "Double") [] []
-typeChar = TypeConstant (TypeConstantName "Char") [] []
+typeUnit = TypeCon $ TypeConstant (TypeVariableName "()") KindStar
+typeBool = TypeCon $ TypeConstant (TypeVariableName "Bool") KindStar
+typeInt = TypeCon $ TypeConstant (TypeVariableName "Int") KindStar
+typeInteger = TypeCon $ TypeConstant (TypeVariableName "Integer") KindStar
+typeFloat = TypeCon $ TypeConstant (TypeVariableName "Float") KindStar
+typeDouble = TypeCon $ TypeConstant (TypeVariableName "Double") KindStar
+typeChar = TypeCon $ TypeConstant (TypeVariableName "Char") KindStar
 
 typeList, typeFun :: Type
-typeList = TypeConstant (TypeConstantName "[]") [KindStar] []
-typeFun = TypeConstant (TypeConstantName "->") [KindStar, KindStar] []
+typeList = TypeCon $ TypeConstant (TypeVariableName "[]") (KindFun KindStar KindStar)
+typeFun = TypeCon $ TypeConstant (TypeVariableName "->") (KindFun KindStar $ KindFun KindStar KindStar)
 
 typeTuple :: Int -> Type
-typeTuple n = TypeConstant (TypeConstantName "(,)") (replicate n KindStar) []
+typeTuple n = TypeCon $ TypeConstant (TypeVariableName "(,)") (foldr KindFun KindStar $ replicate n KindStar)
 
 typeString :: Type
 typeString = makeList typeChar
@@ -168,26 +157,27 @@ typeString = makeList typeChar
 -- Utility functions for converting from our type representations to the AST representations and back
 typeToSyn :: MonadError String m => Type -> m Syntax.HsType
 typeToSyn (TypeVar (TypeVariable (TypeVariableName name) _)) = return $ HsTyVar $ HsIdent name
-typeToSyn (TypeConstant (TypeConstantName conName) _ ts) = case conName of
-        "(,)" -> HsTyTuple <$> mapM typeToSyn ts
-        "->" -> mapM typeToSyn ts >>= \case
-                    [t1, t2] -> return $ HsTyFun t1 t2
-                    _ -> throwError "Partial function type in syntax. Not sure if should be supported."
-        name -> let base = case name of
-                        "[]" -> HsTyCon $ Special HsListCon
-                        ":" -> HsTyCon $ Special HsCons
-                        "()" -> HsTyCon $ Special HsUnitCon
-                        _ -> HsTyCon $ UnQual $ HsIdent name
-                in foldM app base ts
-    where app x arg = HsTyApp x <$> typeToSyn arg
-synToType :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsType -> m Type
+typeToSyn (TypeCon (TypeConstant (TypeVariableName name) _)) = return $ case name of
+    "[]" -> HsTyCon $ Special HsListCon
+    ":" -> HsTyCon $ Special HsCons
+    "()" -> HsTyCon $ Special HsUnitCon
+    "->" -> HsTyCon $ Special HsFunCon
+    "(,)" -> HsTyCon $ Special $ HsTupleCon 0 -- TODO(kc506): Count commas, output specific type?
+    _ -> HsTyCon $ UnQual $ HsIdent name
+typeToSyn (TypeApp t1 t2 _) = do
+    t1' <- typeToSyn t1
+    t2' <- typeToSyn t2
+    return $ case t1' of
+        HsTyApp (HsTyCon (Special HsFunCon)) t3 -> HsTyFun t3 t2'
+        HsTyTuple ts -> HsTyTuple (ts ++ [t2'])
+        HsTyCon (Special (HsTupleCon _)) -> HsTyTuple [t2']
+        _ -> HsTyApp t1' t2'
+synToType :: MonadError String m => M.Map TypeVariableName Kind -> Syntax.HsType -> m Type
 synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
-synToType kinds (HsTyCon c) = case M.lookup name kinds of
-    Nothing -> throwError $ "Type constructor not in environment: " ++ show name
-    Just kind -> return $ TypeConstant name (unfoldr helper kind) []
+synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
+    Nothing -> throwError $ "Type constructor not in kind mapping: " ++ show name
+    Just kind -> return $ TypeCon $ TypeConstant (TypeVariableName name) kind
     where name = convertName c
-          helper KindStar = Nothing
-          helper (KindFun l r) = Just (l, r)
 synToType ks (HsTyFun arg body) = makeFun <$> sequence [synToType ks arg] <*> synToType ks body
 synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts
 synToType ks (HsTyApp t1 t2) = do
@@ -196,14 +186,14 @@ synToType ks (HsTyApp t1 t2) = do
     applyType t1' t2'
 
 typePredToSyn :: MonadError String m => TypePredicate -> m Syntax.HsAsst
-typePredToSyn (IsInstance (TypeConstantName c) t) = do
+typePredToSyn (IsInstance (TypeVariableName c) t) = do
     t' <- typeToSyn t
     return (UnQual $ HsIdent c, [t'])
-synToTypePred :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsAsst -> m TypePredicate
+synToTypePred :: MonadError String m => M.Map TypeVariableName Kind -> Syntax.HsAsst -> m TypePredicate
 synToTypePred ks (c, [t]) = IsInstance (convertName c) <$> synToType ks t
 synToTypePred _ _ = throwError "Invalid constraint (unary or multiparameter)."
 
 qualTypeToSyn :: MonadError String m => QualifiedType -> m Syntax.HsQualType
 qualTypeToSyn (Qualified quals t) = HsQualType <$> mapM typePredToSyn (S.toAscList quals) <*> typeToSyn t
-synToQualType :: MonadError String m => M.Map TypeConstantName Kind -> Syntax.HsQualType -> m QualifiedType
+synToQualType :: MonadError String m => M.Map TypeVariableName Kind -> Syntax.HsQualType -> m QualifiedType
 synToQualType ks (HsQualType quals t) = Qualified <$> (S.fromList <$> mapM (synToTypePred ks) quals) <*> synToType ks t

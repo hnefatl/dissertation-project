@@ -9,14 +9,22 @@ import Typechecker.Typeclasses
 
 builtinConstructors :: M.Map VariableName QuantifiedType
 builtinConstructors = M.fromList
-    [ (VariableName "True", Quantified S.empty $ Qualified S.empty typeBool),
-      (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool),
-      (VariableName "Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeType),
-      (VariableName "Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeType)
-    ]
+    [ (VariableName "True", Quantified S.empty $ Qualified S.empty typeBool)
+    , (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool)
+    , (VariableName "Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeA)
+    , (VariableName "Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA) ]
     where a = TypeVariable (TypeVariableName "a") KindStar
           ta = TypeVar a
-          maybeType = TypeConstant (TypeConstantName "Maybe") [] [ta]
+          maybeT = TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar)
+          maybeA = applyTypeUnsafe maybeT ta
+
+    
+builtinKinds :: M.Map TypeVariableName Kind
+builtinKinds = M.fromList
+    [ (TypeVariableName "Bool", KindStar)
+    , (TypeVariableName "Maybe", KindFun KindStar KindStar)
+    , (TypeVariableName "[]", KindFun KindStar KindStar)
+    , (TypeVariableName "(,)", KindFun KindStar KindStar) ]
           
 
 builtinFunctions :: M.Map VariableName QuantifiedType
@@ -39,8 +47,8 @@ builtinFunctions = M.fromList
     ]
     where a = TypeVariable (TypeVariableName "a") KindStar
           ta = TypeVar a
-          classEq = TypeConstantName "Eq"
-          classNum = TypeConstantName "Num"
+          classEq = TypeVariableName "Eq"
+          classNum = TypeVariableName "Num"
 
 builtinClasses :: ClassEnvironment
 builtinClasses = M.fromList
@@ -76,7 +84,7 @@ builtinClasses = M.fromList
     where
         a = TypeVar (TypeVariable (TypeVariableName "a") KindStar)
         b = TypeVar (TypeVariable (TypeVariableName "b") KindStar)
-        classShow = TypeConstantName "Show"
-        classEq = TypeConstantName "Eq"
-        classNum = TypeConstantName "Num"
-        classFractional = TypeConstantName "Fractional"
+        classShow = TypeVariableName "Show"
+        classEq = TypeVariableName "Eq"
+        classNum = TypeVariableName "Num"
+        classFractional = TypeVariableName "Fractional"

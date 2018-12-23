@@ -26,16 +26,21 @@ class (Ord t, Show t, Substitutable t) => Unifiable t where
 instance Unifiable Type where
     mgu (TypeVar var) t2 = unifyVar var t2
     mgu t1 (TypeVar var) = unifyVar var t1
-    mgu (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
-        | name1 /= name2 = throwError $ printf "Names don't unify: %s vs %s" (show name1) (show name2)
-        | ks1 /= ks2 = throwError $ printf "Kinds don't unify: %s vs %s" (show ks1) (show ks2)
-        | otherwise = mgu ts1 ts2
+    mgu (TypeCon c1) (TypeCon c2)
+        | c1 == c2 = return subEmpty
+        | otherwise = throwError $ printf "Type constants don't unify: %s vs %s" (show c1) (show c2)
+    mgu (TypeApp t1a t1b k1) (TypeApp t2a t2b k2)
+        | k1 == k2 = mgu [t1a, t1b] [t2a, t2b]
+        | otherwise = throwError $ printf "Mismatched kinds: %s vs %s" (show k1) (show k2)
+    mgu t1 t2 = throwError $ printf "Failed to unify: %s vs %s" (show t1) (show t2)
 
     match (TypeVar var) t2 = unifyVar var t2
-    match (TypeConstant name1 ks1 ts1) (TypeConstant name2 ks2 ts2)
-        | name1 /= name2 = throwError $ printf "Names don't match: %s vs %s" (show name1) (show name2)
-        | ks1 /= ks2 = throwError $ printf "Kinds don't match: %s vs %s" (show ks1) (show ks2)
-        | otherwise = match ts1 ts2
+    match (TypeCon c1) (TypeCon c2)
+        | c1 == c2 = return subEmpty
+        | otherwise = throwError $ printf "Type constants don't match: %s vs %s" (show c1) (show c2)
+    match (TypeApp t1a t1b k1) (TypeApp t2a t2b k2)
+        | k1 == k2 = match [t1a, t1b] [t2a, t2b]
+        | otherwise = throwError $ printf "Kinds don't match: %s vs %s" (show k1) (show k2)
     match t1 t2 = throwError $ printf "Failed to match: %s vs %s" (show t1) (show t2)
 instance Unifiable TypePredicate where
     mgu (IsInstance name1 t1) (IsInstance name2 t2)

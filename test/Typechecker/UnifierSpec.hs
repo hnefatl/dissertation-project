@@ -30,8 +30,8 @@ test =
 
         in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
     ,
-        let x = IsInstance (TypeConstantName "Eq") (TypeVar (TypeVariable a KindStar))
-            y = IsInstance (TypeConstantName "Eq") typeBool
+        let x = IsInstance (TypeVariableName "Eq") (TypeVar (TypeVariable a KindStar))
+            y = IsInstance (TypeVariableName "Eq") typeBool
         in testCase "match (Eq a) (Eq Bool)" $ assertEqual "" (Right $ subMultiple [(a, typeBool)]) (match x y)
     ,
         let expected = Substitution $ M.fromList $ map (,typeBool) [a,b,c]

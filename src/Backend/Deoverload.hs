@@ -15,6 +15,7 @@ import qualified Data.Map.Strict as M
 import Names
 import NameGenerator
 import Typechecker.Types
+import Typechecker.Hardcoded
 
 newtype Deoverload a = Deoverload (ExceptT String (StateT DeoverloadState NameGenerator) a)
     deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError String, MonadNameGenerator)
@@ -22,7 +23,7 @@ newtype Deoverload a = Deoverload (ExceptT String (StateT DeoverloadState NameGe
 data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
     , types :: M.Map VariableName QuantifiedType
-    , kinds :: M.Map TypeConstantName Kind }
+    , kinds :: M.Map TypeVariableName Kind }
     deriving (Eq, Show)
 instance Default DeoverloadState where
     def = DeoverloadState
@@ -48,11 +49,11 @@ getType name = gets (M.lookup name . types) >>= \case
     Nothing -> throwError $ printf "Variable %s not found in environment." (show name)
     Just qt -> return qt
 
-addKinds :: M.Map TypeConstantName Kind -> Deoverload ()
+addKinds :: M.Map TypeVariableName Kind -> Deoverload ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
-getKinds :: Deoverload (M.Map TypeConstantName Kind)
+getKinds :: Deoverload (M.Map TypeVariableName Kind)
 getKinds = gets kinds
-getKind :: TypeConstantName -> Deoverload (Maybe Kind)
+getKind :: TypeVariableName -> Deoverload (Maybe Kind)
 getKind name = M.lookup name <$> getKinds
 
 addDictionaries :: M.Map TypePredicate VariableName -> Deoverload ()
@@ -78,17 +79,20 @@ getDictionaryExp p = do
     return $ HsVar $ UnQual (HsIdent name)
 
 makeDictName :: TypePredicate -> Deoverload VariableName
-makeDictName (IsInstance (TypeConstantName cl) t) = do
+makeDictName (IsInstance (TypeVariableName cl) t) = do
     TypeVariableName suffix <- case t of
         TypeVar (TypeVariable tvn _) -> return tvn
-        TypeConstant{} -> freshTypeVarName
+        TypeCon (TypeConstant tcn _) -> return tcn
+        TypeApp{} -> freshTypeVarName
     return $ VariableName $ "d" ++ cl ++ suffix
 
 
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
-deoverloadModule (HsModule a b c d decls) = HsModule a b c d <$> deoverloadDecls decls
+deoverloadModule (HsModule a b c d decls) = do
+    addKinds builtinKinds
+    HsModule a b c d <$> deoverloadDecls decls
 
 deoverloadDecls :: [HsDecl] -> Deoverload [HsDecl]
 deoverloadDecls = mapM deoverloadDecl
@@ -132,7 +136,7 @@ deoverloadName _ = throwError "Argument to deoverloadName needs to be wrapped in
 deoverloadExp :: HsExp -> Deoverload HsExp
 deoverloadExp e@(HsExpTypeSig _ (HsVar _) _) = deoverloadName e
 deoverloadExp e@(HsExpTypeSig _ (HsCon _) _) = deoverloadName e
-deoverloadExp e@(HsExpTypeSig _ (HsLit _) _) = return e
+deoverloadExp (HsExpTypeSig l lit@(HsLit _) (HsQualType _ t)) = return $ HsExpTypeSig l lit (HsQualType [] t)
 deoverloadExp (HsExpTypeSig l (HsApp f e) _) = do
     fExp@(HsExpTypeSig _ _ t) <- deoverloadExp f
     eExp <- deoverloadExp e

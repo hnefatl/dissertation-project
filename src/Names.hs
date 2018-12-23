@@ -15,8 +15,6 @@ instance Show UniqueVariableName where
     show (UniqueVariableName s) = s
 instance Show TypeVariableName where
     show (TypeVariableName s) = s
-instance Show TypeConstantName where
-    show (TypeConstantName s) = s
 
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
@@ -36,10 +34,6 @@ instance NameConvertible Syntax.HsName TypeVariableName where
     convertName name = TypeVariableName (convertName name)
 instance NameConvertible Syntax.HsQName TypeVariableName where
     convertName name = TypeVariableName (convertName name)
-instance NameConvertible Syntax.HsName TypeConstantName where
-    convertName name = TypeConstantName (convertName name)
-instance NameConvertible Syntax.HsQName TypeConstantName where
-    convertName name = TypeConstantName (convertName name)
 instance NameConvertible Syntax.HsName VariableName where
     convertName name = VariableName (convertName name)
 instance NameConvertible Syntax.HsQName VariableName where

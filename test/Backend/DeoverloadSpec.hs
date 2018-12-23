@@ -56,4 +56,12 @@ test = testGroup "Deoverload"
         addType = "((+) :: Num a -> a -> a -> a)"
     in makeTest "f = \\x -> x + x" $
         printf "f = (\\d -> (\\x -> ((%s (d :: Num a) :: a -> a -> a) %s :: a -> a) %s :: a) :: a -> a) :: Num a -> a -> a" addType x x
+    ,
+        makeTest
+            "x = if True then 0 else 1"
+            "x = (\\d -> (if True :: Bool then 0 :: a else 1 :: a) :: a) :: Num a -> a"
+    ,
+        makeTest
+            "(x, y) = (True, [1])"
+            "(x, y) = (\\d -> (True :: Bool, [1 :: a] :: [a]) :: (Bool, [a])) :: Num a -> (Bool, [a])"
     ]

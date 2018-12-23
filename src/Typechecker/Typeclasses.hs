@@ -15,7 +15,7 @@ import Typechecker.Types
 import Typechecker.Substitution
 import Typechecker.Unifier
 
-type ClassName = TypeConstantName
+type ClassName = TypeVariableName
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`

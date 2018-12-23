@@ -29,7 +29,7 @@ makeFailTest ce ps goal = testCase ("Fails: " ++ show goal) $ case result of
 test :: TestTree
 test = testGroup "Type Classes"
     [ 
-        makeTest builtinClasses S.empty (IsInstance (TypeConstantName "Eq") typeBool),
-        makeTest builtinClasses S.empty (IsInstance (TypeConstantName "Eq") typeString),
-        makeFailTest builtinClasses S.empty (IsInstance (TypeConstantName "Eq") typeFloat)
+        makeTest builtinClasses S.empty (IsInstance (TypeVariableName "Eq") typeBool),
+        makeTest builtinClasses S.empty (IsInstance (TypeVariableName "Eq") typeString),
+        makeFailTest builtinClasses S.empty (IsInstance (TypeVariableName "Eq") typeFloat)
     ]
