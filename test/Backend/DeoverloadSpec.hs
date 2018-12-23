@@ -17,6 +17,7 @@ import AlphaEq
 import ExtraDefs
 import NameGenerator
 import Typechecker.Typechecker
+import Typechecker.Hardcoded
 import Backend.Deoverload
 
 pretty :: Show a => a -> String
@@ -38,10 +39,13 @@ makeTest sActual sExpected = testCase (deline sActual) $ case (parseModule sExpe
             infer = runTypeInferrer action
             ((eTiOutput, tState), i) = runNameGenerator infer 0
         (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-        let deoverload = runDeoverload $ addTypes ts >> deoverloadModule taggedModule
+        let deoverload = runDeoverload $ do
+                addTypes ts
+                addClassEnvironment builtinClasses
+                deoverloadModule taggedModule
             (eDeoverloaded, dState) = evalNameGenerator deoverload i
             prettified m = printf "%s\n%s" (prettyPrint expected') (prettyPrint m)
-            deoverloadMsg = printf "Expected:\n%s\nTagged:\n%s" (prettyPrint expected') (prettyPrint taggedModule)
+            deoverloadMsg = printf "Expected:\n%s\nTagged:\n%s\n%s" (prettyPrint expected') (prettyPrint taggedModule) (format taggedModule)
             assertMsg actual = printf "Expected:\n%s\nGot:\n%s" (format expected') (format actual)
             expected' = stripModuleParens expected
         actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, prettified taggedModule, deoverloadMsg, pretty tState, pretty dState])
@@ -64,4 +68,8 @@ test = testGroup "Deoverload"
         makeTest
             "(x, y) = (True, [1])"
             "(x, y) = (\\d -> (True :: Bool, [1 :: a] :: [a]) :: (Bool, [a])) :: Num a -> (Bool, [a])"
+    ,
+        makeTest
+            "f = \\x -> x ; y = f 0"
+            "f = (\\x -> x :: a) :: a -> a ; y = (\\d -> (f :: b -> b) (0 :: b) :: b) :: Num b -> b"
     ]

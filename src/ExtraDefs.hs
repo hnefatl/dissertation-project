@@ -8,6 +8,9 @@ import Control.Monad
 import qualified Data.Set as S
 import qualified Data.Map as M
 
+-- TODO(kc06): Replace by using Extra/Control.Monad.Extra, whichever seems more complete
+-- Probably Extra, as it would allow `pairmap` to be replaced by `both`.
+-- Search for the type signatures using the new Hoogle.
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
 anyM f = foldlM (\x y -> (x ||) <$> f y) False

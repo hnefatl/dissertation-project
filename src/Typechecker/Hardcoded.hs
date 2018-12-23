@@ -25,7 +25,7 @@ builtinKinds = M.fromList
     , (TypeVariableName "Maybe", KindFun KindStar KindStar)
     , (TypeVariableName "[]", KindFun KindStar KindStar)
     , (TypeVariableName "(,)", KindFun KindStar KindStar) ]
-          
+
 
 builtinFunctions :: M.Map VariableName QuantifiedType
 builtinFunctions = M.fromList
