@@ -35,6 +35,8 @@ freshUniqueVarName :: MonadNameGenerator m => m UniqueVariableName
 freshUniqueVarName = UniqueVariableName . ('v':) <$> freshName
 freshTypeVarName :: MonadNameGenerator m => m TypeVariableName
 freshTypeVarName = TypeVariableName . ('t':) <$> freshName
+freshUniqueTypeVarName :: MonadNameGenerator m => m UniqueTypeVariableName
+freshUniqueTypeVarName = UniqueTypeVariableName . ('t':) <$> freshName
 
 instance MonadNameGenerator m => MonadNameGenerator (ExceptT e m) where
     freshName = lift freshName

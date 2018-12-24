@@ -6,15 +6,20 @@ import Language.Haskell.Syntax as Syntax
 import Data.Hashable
 
 newtype VariableName = VariableName String deriving (Eq, Ord, Hashable)
-newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName String deriving (Eq, Ord, Hashable)
 newtype TypeConstantName = TypeConstantName String deriving (Eq, Ord, Hashable)
+-- Unique variants are only used within the renamer
+newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
+newtype UniqueTypeVariableName = UniqueTypeVariableName String deriving (Eq, Ord, Hashable)
 instance Show VariableName where
     show (VariableName s) = s
-instance Show UniqueVariableName where
-    show (UniqueVariableName s) = s
 instance Show TypeVariableName where
     show (TypeVariableName s) = s
+instance Show UniqueVariableName where
+    show (UniqueVariableName s) = s
+instance Show UniqueTypeVariableName where
+    show (UniqueTypeVariableName s) = s
+
 
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
@@ -30,6 +35,14 @@ instance NameConvertible Syntax.HsQName String where
     convertName (Special HsCons) = ":"
     convertName (Special HsFunCon) = "->"
     convertName (Special (HsTupleCon _)) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
+instance NameConvertible VariableName String where
+    convertName (VariableName n) = n
+instance NameConvertible TypeVariableName String where
+    convertName (TypeVariableName n) = n
+instance NameConvertible UniqueVariableName String where
+    convertName (UniqueVariableName n) = n
+instance NameConvertible UniqueTypeVariableName String where
+    convertName (UniqueTypeVariableName n) = n
 instance NameConvertible Syntax.HsName TypeVariableName where
     convertName name = TypeVariableName (convertName name)
 instance NameConvertible Syntax.HsQName TypeVariableName where

@@ -21,7 +21,8 @@ dependencyOrder ds = do
             -- name and pretend this declaration binds that variable.
             bound' <- if S.null bound then S.singleton <$> freshVarName else return bound
             -- Any variables used in this declaration that are also defined in this binding group
-            contained <- S.intersection declBindings <$> getDeclContainedNames d 
+            boundVars <- getDeclContainedNames d 
+            let contained = S.intersection declBindings boundVars
             -- We make one node for each bound variable: the "node" is the declaration binding that variable, the
             -- key is the variable itself, and the dependencies are all variables used in the declaration along with
             -- all other variables bound by the declaration: otherwise vars bound in the same decl are seen as

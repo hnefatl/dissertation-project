@@ -71,11 +71,11 @@ getRhsContainedNames (HsUnGuardedRhs e) = getExpContainedNames e
 getRhsContainedNames (HsGuardedRhss _) = throwError "Guarded rhss not supported"
 
 getExpContainedNames :: MonadError String m => HsExp -> m (S.Set VariableName)
-getExpContainedNames (HsVar name) = return $ S.singleton (convertName name)
-getExpContainedNames (HsCon name) = return $ S.singleton (convertName name)
+getExpContainedNames (HsVar name) = return $ S.singleton $ convertName name
+getExpContainedNames (HsCon _) = return S.empty
 getExpContainedNames (HsLit _) = return S.empty
 getExpContainedNames (HsInfixApp e1 op e2) = do
-    let opNames = S.singleton (convertName op)
+    let opNames = S.singleton $ convertName op
     e1Names <- getExpContainedNames e1
     e2Names <- getExpContainedNames e2
     return $ S.unions [opNames, e1Names, e2Names]
@@ -87,4 +87,18 @@ getExpContainedNames (HsIf e1 e2 e3) = S.unions <$> mapM getExpContainedNames [e
 getExpContainedNames (HsTuple es) = S.unions <$> mapM getExpContainedNames es
 getExpContainedNames (HsList es) = S.unions <$> mapM getExpContainedNames es
 getExpContainedNames (HsParen e) = getExpContainedNames e
+getExpContainedNames (HsExpTypeSig _ e _) = getExpContainedNames e
 getExpContainedNames e = throwError $ "Unsupported expression " ++ show e
+
+getQualTypeContainedNames :: HsQualType -> S.Set TypeVariableName
+getQualTypeContainedNames (HsQualType quals t) = S.union (getAsstsContainedNames quals) (getTypeContainedNames t)
+getAsstContainedNames :: HsAsst -> S.Set TypeVariableName
+getAsstContainedNames (_, ts) = S.unions $ map getTypeContainedNames ts
+getAsstsContainedNames :: [HsAsst] -> S.Set TypeVariableName
+getAsstsContainedNames = S.unions . map getAsstContainedNames
+getTypeContainedNames :: HsType -> S.Set TypeVariableName
+getTypeContainedNames (HsTyFun t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
+getTypeContainedNames (HsTyTuple ts) = S.unions $ map getTypeContainedNames ts
+getTypeContainedNames (HsTyApp t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
+getTypeContainedNames (HsTyVar n) = S.singleton $ convertName n
+getTypeContainedNames (HsTyCon _) = S.empty

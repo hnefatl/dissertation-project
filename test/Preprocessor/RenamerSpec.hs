@@ -19,7 +19,7 @@ makeTest input expected = testCase (deline input) $ case (,) <$> parseModule inp
     ParseOk (input', expected') ->
         case runExcept renamedInput of
             Right actual -> assertBool (unpack $ pShow state) (alphaEq expected' actual)
-            Left err -> assertFailure err
+            Left err -> assertFailure $ unlines [err, unpack $ pShow state]
         where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
     ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
 
@@ -53,4 +53,7 @@ test = testGroup "Renamer"
     , makeTest
         "_ = let { x = 0 ; y = (\\x -> x) } in y"
         "_ = let { v0 = 0 ; v1 = (\\v2 -> v2) } in v1"
+    , makeTest
+        "f = (\\x -> x) :: a -> a ; g = f :: a -> a"
+        "f = (\\x -> x) :: t0 -> t0 ; g = f :: t1 -> t1"
     ]
