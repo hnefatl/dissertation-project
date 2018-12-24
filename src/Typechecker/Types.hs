@@ -87,6 +87,9 @@ instance Show Type where
     show (TypeCon c) = show c
     show (TypeApp t1 t2 _) = case t1 of
         TypeCon (TypeConstant (TypeVariableName "[]") _) -> printf "[%s]" (show t2)
+        TypeApp (TypeCon (TypeConstant (TypeVariableName "->") _)) t3 _ -> case t3 of
+            TypeApp _ _ _ -> printf "(%s) -> %s" (show t3) (show t2)
+            _ -> printf "%s -> %s" (show t3) (show t2)
         _ -> show t1 ++ " " ++ show t2
 
 instance Show TypePredicate where
