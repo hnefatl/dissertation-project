@@ -80,25 +80,26 @@ test = testGroup "Deoverload"
     , makeTest
         "f = \\x -> x ; y = f True"
         "f = (\\x -> x :: a) :: a -> a ; y = (f :: Bool -> Bool) (True :: Bool) :: Bool"
-    , let 
-        a = unlines
-            [ "const = \\x _ -> x"
-            , "f = \\y z -> const (y == y) (z + z)"
-            , "g = f 0 1" ]
-        -- Subexpressions of the expected expression
-        y = "(y :: Eq c -> c) (dc :: Eq c) :: c"
-        z = "(z :: Num d -> d) (dd :: Num d) :: d"
-        eq = "((==) :: Eq c -> c -> c -> Bool) (dc :: Eq c) :: c -> c -> Bool"
-        plus = "((+) :: Num d -> d -> d -> d) (dd :: Num d) :: d -> d -> d"
-        yeqy = printf "((%s) (%s) :: c -> Bool) (%s) :: Bool" eq y y :: String
-        zplusz = printf "((%s) (%s) :: d -> d) (%s) :: d" plus z z :: String
-        constapp = printf "((const :: Bool -> d -> Bool) (%s) :: d -> Bool) (%s) :: Bool" yeqy zplusz :: String
-        bbody = printf "(\\y z -> (%s) :: Bool) :: c -> d -> Bool" constapp :: String
-        bdicts = printf "\\dc dd -> (%s) :: Eq c -> Num d -> c -> d -> Bool" bbody :: String
-        b = unlines
-            [ "const = (\\x _ -> x :: a) :: a -> b -> a"
-            , "f = " ++ bdicts
-            , "g = undefined"
-            ]
-      in makeTest a b
+    , testCase "Add explicit type signatures to bypass ambiguity issues" $ assertFailure ""
+    --, let 
+    --    a = unlines
+    --        [ "const = \\x _ -> x"
+    --        , "f = \\y z -> const (y == y) (z + z)"
+    --        , "g = f 0 1" ]
+    --    -- Subexpressions of the expected expression
+    --    y = "(y :: Eq c -> c) (dc :: Eq c) :: c"
+    --    z = "(z :: Num d -> d) (dd :: Num d) :: d"
+    --    eq = "((==) :: Eq c -> c -> c -> Bool) (dc :: Eq c) :: c -> c -> Bool"
+    --    plus = "((+) :: Num d -> d -> d -> d) (dd :: Num d) :: d -> d -> d"
+    --    yeqy = printf "((%s) (%s) :: c -> Bool) (%s) :: Bool" eq y y :: String
+    --    zplusz = printf "((%s) (%s) :: d -> d) (%s) :: d" plus z z :: String
+    --    constapp = printf "((const :: Bool -> d -> Bool) (%s) :: d -> Bool) (%s) :: Bool" yeqy zplusz :: String
+    --    bbody = printf "(\\y z -> (%s) :: Bool) :: c -> d -> Bool" constapp :: String
+    --    bdicts = printf "\\dc dd -> (%s) :: Eq c -> Num d -> c -> d -> Bool" bbody :: String
+    --    b = unlines
+    --        [ "const = (\\x _ -> x :: a) :: a -> b -> a"
+    --        , "f = " ++ bdicts
+    --        , "g = undefined"
+    --        ]
+    --  in makeTest a b
     ]

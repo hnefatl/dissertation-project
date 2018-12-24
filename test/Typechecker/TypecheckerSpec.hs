@@ -285,6 +285,13 @@ test = let
             [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
             , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
             , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
-    ----,
-    ----    testBindingsFail "const = \\x y -> x ; z = const True (1 + 2)"
+    --,
+    ---- Test for ambiguity support
+    --    testBindingsFail "const = \\x y -> x ; z = const True (1 + 2)"
+    ,
+        testBindings "x = 0 :: Int" [("x", Quantified S.empty $ Qualified S.empty typeInt)]
+    ,
+        testBindings "f = \\x -> x + x ; y = (f :: Int -> Int) 0"
+            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta] ta)
+            , ("y", Quantified S.empty $ Qualified S.empty typeInt) ]
     ]

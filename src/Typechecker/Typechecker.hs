@@ -113,6 +113,8 @@ addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironm
 
 addKinds :: M.Map TypeVariableName Kind -> TypeInferrer ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
+getKinds :: TypeInferrer (M.Map TypeVariableName Kind)
+getKinds = gets kinds
 
 addVariableType :: VariableName -> TypeVariableName -> TypeInferrer ()
 addVariableType name t = addVariableTypes (M.singleton name t)
@@ -334,6 +336,13 @@ inferExpression (HsIf cond e1 e2) = do
     unify commonType e1Type
     unify commonType e2Type
     makeExpTypeWrapper (HsIf condExp e1Exp e2Exp) commonVar
+inferExpression (HsExpTypeSig l e t) = do
+    (taggedExp, expVar) <- inferExpression e
+    ks <- getKinds
+    Qualified quals t' <- synToQualType ks t
+    unify (TypeVar $ TypeVariable expVar KindStar) t'
+    addTypePredicates quals
+    return (HsExpTypeSig l taggedExp t, expVar)
 inferExpression e = throwError ("Unsupported expression: " ++ show e)
 
 

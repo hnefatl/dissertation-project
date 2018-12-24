@@ -22,6 +22,7 @@ builtinConstructors = M.fromList
 builtinKinds :: M.Map TypeVariableName Kind
 builtinKinds = M.fromList
     [ (TypeVariableName "Bool", KindStar)
+    , (TypeVariableName "Int", KindStar)
     , (TypeVariableName "Maybe", KindFun KindStar KindStar)
     , (TypeVariableName "[]", KindFun KindStar KindStar)
     , (TypeVariableName "(,)", KindFun KindStar KindStar) ]
