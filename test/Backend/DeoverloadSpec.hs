@@ -11,6 +11,7 @@ import Language.Haskell.Pretty
 import Control.Monad.Except
 import Data.Text.Lazy (unpack)
 import Text.Printf
+import Data.List.Extra
 import Text.Pretty.Simple
 
 import AlphaEq
@@ -29,6 +30,12 @@ unpackEither (Right x) _ = return x
 
 format :: Show a => a -> String
 format = unpack . pShow
+
+-- |Cascading substitution: if the first string contains "{}", replace it `sub` called on the 2nd string, and so on.
+-- `sub ["({})", "[{}]", "{{}}"]` gives `"([{}])".
+sub :: [String] -> String
+sub [] = ""
+sub (s:ss) = replace "{}" (sub ss) s
 
 makeTest :: String -> String -> TestTree
 makeTest sActual sExpected = testCase (deline sActual) $ case (parseModule sExpected, parseModule sActual) of
@@ -55,21 +62,43 @@ makeTest sActual sExpected = testCase (deline sActual) $ case (parseModule sExpe
 
 test :: TestTree
 test = testGroup "Deoverload"
-    [
-    let x = "((x :: Num a -> a) (d :: Num a) :: a)"
+    [ let
+        x = "((x :: Num a -> a) (d :: Num a) :: a)"
         addType = "((+) :: Num a -> a -> a -> a)"
-    in makeTest "f = \\x -> x + x" $
+      in makeTest
+        "f = \\x -> x + x" $
         printf "f = (\\d -> (\\x -> ((%s (d :: Num a) :: a -> a -> a) %s :: a -> a) %s :: a) :: a -> a) :: Num a -> a -> a" addType x x
-    ,
-        makeTest
-            "x = if True then 0 else 1"
-            "x = (\\d -> (if True :: Bool then 0 :: a else 1 :: a) :: a) :: Num a -> a"
-    ,
-        makeTest
-            "(x, y) = (True, [1])"
-            "(x, y) = (\\d -> (True :: Bool, [1 :: a] :: [a]) :: (Bool, [a])) :: Num a -> (Bool, [a])"
-    ,
-        makeTest
-            "f = \\x -> x ; y = f 0"
-            "f = (\\x -> x :: a) :: a -> a ; y = (\\d -> (f :: b -> b) (0 :: b) :: b) :: Num b -> b"
+    , makeTest
+        "x = if True then 0 else 1"
+        "x = (\\d -> (if True :: Bool then 0 :: a else 1 :: a) :: a) :: Num a -> a"
+    , makeTest
+        "(x, y) = (True, [1])"
+        "(x, y) = (\\d -> (True :: Bool, [1 :: a] :: [a]) :: (Bool, [a])) :: Num a -> (Bool, [a])"
+    , makeTest
+        "f = \\x -> x ; y = f 0"
+        "f = (\\x -> x :: a) :: a -> a ; y = (\\d -> (f :: b -> b) (0 :: b) :: b) :: Num b -> b"
+    , makeTest
+        "f = \\x -> x ; y = f True"
+        "f = (\\x -> x :: a) :: a -> a ; y = (f :: Bool -> Bool) (True :: Bool) :: Bool"
+    , let 
+        a = unlines
+            [ "const = \\x _ -> x"
+            , "f = \\y z -> const (y == y) (z + z)"
+            , "g = f 0 1" ]
+        -- Subexpressions of the expected expression
+        y = "(y :: Eq c -> c) (dc :: Eq c) :: c"
+        z = "(z :: Num d -> d) (dd :: Num d) :: d"
+        eq = "((==) :: Eq c -> c -> c -> Bool) (dc :: Eq c) :: c -> c -> Bool"
+        plus = "((+) :: Num d -> d -> d -> d) (dd :: Num d) :: d -> d -> d"
+        yeqy = printf "((%s) (%s) :: c -> Bool) (%s) :: Bool" eq y y :: String
+        zplusz = printf "((%s) (%s) :: d -> d) (%s) :: d" plus z z :: String
+        constapp = printf "((const :: Bool -> d -> Bool) (%s) :: d -> Bool) (%s) :: Bool" yeqy zplusz :: String
+        bbody = printf "(\\y z -> (%s) :: Bool) :: c -> d -> Bool" constapp :: String
+        bdicts = printf "\\dc dd -> (%s) :: Eq c -> Num d -> c -> d -> Bool" bbody :: String
+        b = unlines
+            [ "const = (\\x _ -> x :: a) :: a -> b -> a"
+            , "f = " ++ bdicts
+            , "g = undefined"
+            ]
+      in makeTest a b
     ]
