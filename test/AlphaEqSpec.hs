@@ -5,6 +5,7 @@ import Test.Tasty.HUnit
 
 import Control.Monad
 import Text.Printf
+import Language.Haskell.Syntax
 import qualified Data.Set as S
 
 import AlphaEq
@@ -36,6 +37,9 @@ test = testGroup "AlphaEq"
     , makeFailTest
         (Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
         (Qualified (S.fromList [num tc, fractional td]) $ makeFun [td] tc)
+    , makeFailTest
+        (Qualified (S.singleton $ num ta) $ makeFun [ta] ta)
+        (Qualified S.empty $ makeFun [ta] ta)
     , makeTest
         (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
         (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num tc, fractional td]) $ makeFun [tc] td)
@@ -45,6 +49,15 @@ test = testGroup "AlphaEq"
     , makeFailTest
         (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
         (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num td, fractional tc]) $ makeFun [tc] td)
+    , makeFailTest
+        (Quantified (S.singleton a) $ Qualified (S.singleton $ num ta) $ makeFun [ta] ta)
+        (Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+    , makeTest
+        (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "a"])] $ HsTyVar $ HsIdent "a")
+        (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "b"])] $ HsTyVar $ HsIdent "b")
+    , makeFailTest
+        (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "a"])] $ HsTyVar $ HsIdent "a")
+        (HsQualType [] $ HsTyVar $ HsIdent "a")
     ]
     where
         [a, b, c, d] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c", "d"]

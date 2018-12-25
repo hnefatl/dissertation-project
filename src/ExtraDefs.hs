@@ -39,6 +39,13 @@ foldlM' f !e = foldlM (\(!acc) x -> f acc x) e
 pairmap :: (a -> b) -> (a, a) -> (b, b)
 pairmap f (x, y) = (f x, f y)
 
+-- |Check if the given function holds for each element in the same index in the given lists. Returns `False` if the
+-- lists are different lengths.
+pairwiseAndM :: Applicative f => (a -> b -> f Bool) -> [a] -> [b] -> f Bool
+pairwiseAndM _ [] [] = pure True
+pairwiseAndM f (x:xs) (y:ys) = (&&) <$> f x y <*> pairwiseAndM f xs ys
+pairwiseAndM _ _ _ = pure False
+
 eitherToMaybe :: Either a b -> Maybe b
 eitherToMaybe = either (const Nothing) Just
 

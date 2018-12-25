@@ -286,7 +286,7 @@ test = let
             , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
             , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     --,
-    ---- Test for ambiguity support
+    --    -- Test for ambiguity check support
     --    testBindingsFail "const = \\x y -> x ; z = const True (1 + 2)"
     ,
         testBindings "x = 0 :: Int" [("x", Quantified S.empty $ Qualified S.empty typeInt)]
@@ -294,4 +294,16 @@ test = let
         testBindings "f = \\x -> x + x ; y = (f :: Int -> Int) 0"
             [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta] ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeInt) ]
+    ,
+        testBindings "f = \\x -> x ; y = f (0 :: Int)"
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+            , ("y", Quantified S.empty $ Qualified S.empty typeInt) ]
+    ,
+        testBindingsFail "f = (\\x -> x + x) :: Bool -> Bool"
+    ,
+        testBindingsFail "f = (\\x -> x + x) :: a -> a"
+    ,
+        testBindingsFail "f = (\\x -> x + x) :: Int -> a"
+    ,
+        testBindingsFail "f = (\\x -> (x :: Int) + x) :: a -> a"
     ]

@@ -13,7 +13,9 @@ import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Language.Haskell.Syntax as Syntax
+import Language.Haskell.Pretty
 
+import AlphaEq
 import ExtraDefs
 import Names
 import NameGenerator
@@ -337,13 +339,15 @@ inferExpression (HsIf cond e1 e2) = do
     unify commonType e2Type
     makeExpTypeWrapper (HsIf condExp e1Exp e2Exp) commonVar
 inferExpression (HsExpTypeSig l e t) = do
+    -- Unify the given type signature with the variable representing the type of the expression
     (taggedExp, expVar) <- inferExpression e
     ks <- getKinds
     Qualified quals t' <- synToQualType ks t
     unify (TypeVar $ TypeVariable expVar KindStar) t'
     addTypePredicates quals
-    return (HsExpTypeSig l taggedExp t, expVar)
-inferExpression e = throwError ("Unsupported expression: " ++ show e)
+    -- Wrap this type signature in another one - each expression should be tagged with a type sig, this is no different
+    makeExpTypeWrapper (HsExpTypeSig l taggedExp t) expVar
+inferExpression e = throwError $ "Unsupported expression: " ++ show e
 
 
 inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
@@ -448,7 +452,12 @@ inferDeclGroup ds = do
 
 -- TODO(kc506): Take advantage of explicit type hints
 inferModule :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule (HsModule a b c d decls) = (,) <$> (HsModule a b c d <$> inferDeclGroup decls) <*> getBoundVariableTypes
+inferModule (HsModule a b c d decls) = do
+    m <- HsModule a b c d <$> inferDeclGroup decls
+    ts <- getBoundVariableTypes
+    m' <- updateModuleTypeTags m
+    checkModuleExpTypes m'
+    return (m', ts)
 
 -- TODO(kc506): Delete once we don't need builtins
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
@@ -500,3 +509,28 @@ updateExpTypeTags (HsIf c e1 e2) = HsIf <$> updateExpTypeTags c <*> updateExpTyp
 updateExpTypeTags (HsTuple es) = HsTuple <$> mapM updateExpTypeTags es
 updateExpTypeTags (HsList es) = HsList <$> mapM updateExpTypeTags es
 updateExpTypeTags e = return e
+
+checkModuleExpTypes :: MonadError String m => Syntax.HsModule -> m ()
+checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
+checkDeclExpTypes :: MonadError String m => Syntax.HsDecl -> m ()
+checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
+checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
+checkDeclsExpTypes :: MonadError String m => [Syntax.HsDecl] -> m ()
+checkDeclsExpTypes = mapM_ checkDeclExpTypes
+checkRhsExpTypes :: MonadError String m => Syntax.HsRhs -> m ()
+checkRhsExpTypes (HsUnGuardedRhs e) = checkExpExpTypes e
+checkRhsExpTypes (HsGuardedRhss _) = throwError "Unsupported RHS when checking user-defined explicit type signatures."
+checkExpExpTypes :: MonadError String m => Syntax.HsExp -> m ()
+checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
+    | alphaEq manualType autoType = checkExpExpTypes e
+    | otherwise = throwError $ printf "Type mismatch in explicit type annotation: tagged with %s but inferred %s." x y
+        where x = prettyPrint manualType
+              y = prettyPrint autoType
+checkExpExpTypes (HsInfixApp e1 _ e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
+checkExpExpTypes (HsApp e1 e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
+checkExpExpTypes (HsNegApp e) = checkExpExpTypes e
+checkExpExpTypes (HsLambda _ _ e) = checkExpExpTypes e
+checkExpExpTypes (HsIf c e1 e2) = checkExpExpTypes c >> checkExpExpTypes e1 >> checkExpExpTypes e2
+checkExpExpTypes (HsTuple es) = mapM_ checkExpExpTypes es
+checkExpExpTypes (HsList es) = mapM_ checkExpExpTypes es
+checkExpExpTypes _ = return ()

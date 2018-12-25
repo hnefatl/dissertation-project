@@ -1,5 +1,3 @@
-{-# Language TupleSections #-}
-
 module Backend.DeoverloadSpec where
 
 import Test.Tasty
@@ -40,10 +38,7 @@ sub (s:ss) = replace "{}" (sub ss) s
 makeTest :: String -> String -> TestTree
 makeTest sActual sExpected = testCase (deline sActual) $ case (parseModule sExpected, parseModule sActual) of
     (ParseOk expected, ParseOk actualModule) -> do
-        let action = do
-                (m, res) <- inferModuleWithBuiltins actualModule
-                (, res) <$> updateModuleTypeTags m
-            infer = runTypeInferrer action
+        let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
             ((eTiOutput, tState), i) = runNameGenerator infer 0
         (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
         let deoverload = runDeoverload $ do

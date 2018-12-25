@@ -8,6 +8,8 @@ Quick notes on milestones/features/problems/bugs during implementation.
 - Rewrite to use `Text` instead of `String` (can make some nicer instance declarations after that, String's a List).
 - Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
 - Ambiguity check.
+- Check each use of `zip`/`zipWith`/`zipWithM` to make absolutely sure that the two lists being different lengths is
+  acceptable: we might want to check they're the same length.
 
 ## Preprocessing
 

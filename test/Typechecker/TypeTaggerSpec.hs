@@ -1,5 +1,3 @@
-{-#Language TupleSections #-}
-
 module Typechecker.TypeTaggerSpec where
 
 import Test.Tasty
@@ -24,10 +22,7 @@ makeTest input expected = testCase (deline input) $ do
         (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " ++ msg
         (ParseOk m, ParseOk n) -> return (m, n)
     let expectedModule' = stripModuleParens expectedModule
-        (eModule, inferrerState) = evalNameGenerator (runTypeInferrer action) 0
-        action = do
-            (m, types) <- inferModuleWithBuiltins inputModule
-            (,types) <$> updateModuleTypeTags m
+        (eModule, inferrerState) = evalNameGenerator (runTypeInferrer $ inferModuleWithBuiltins inputModule) 0
     case runExcept eModule of
         Left msg -> assertFailure $ "Failed to generate tagged tree: " ++ msg
         Right (inputModule', _) -> assertBool err $ alphaEq inputModule' expectedModule'
