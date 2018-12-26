@@ -14,6 +14,7 @@ import Text.Printf
 import ExtraDefs
 import Names
 import Typechecker.Types
+import Backend.ILA
 
 newtype AlphaEqM a = AlphaEqM { inner :: ExceptT String (State (M.Map String String)) a }
     deriving (Functor, Applicative, Monad, MonadState (M.Map String String), MonadError String)
@@ -59,10 +60,16 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
             findM (alphaEqBool' x) (S.toList s2) >>= \case -- Find an alpha-eq element from the other set
                 Nothing -> throwError $ printf "Couldn't find alpha-eq element for %s in %s" (show x) (show s2)
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
-
+instance (AlphaEq a, AlphaEq b) => AlphaEq (a, b) where
+    alphaEq' (x1, y1) (x2, y2) = alphaEq' x1 x2 >> alphaEq' y1 y2
+instance (Ord a, Ord b, AlphaEq a, AlphaEq b) => AlphaEq (M.Map a b) where
+    alphaEq' m1 m2 = alphaEq' (S.fromList $ M.toList m1) (S.fromList $ M.toList m2)
+     
 
 instance AlphaEq TypeVariableName where
     alphaEq' (TypeVariableName s1) (TypeVariableName s2) = alphaEq' s1 s2
+instance AlphaEq VariableName where
+    alphaEq' (VariableName s1) (VariableName s2) = alphaEq' s1 s2
 instance AlphaEq TypeVariable where
     alphaEq' (TypeVariable n1 k1) (TypeVariable n2 k2) = do
         unless (k1 == k2) $ throwError $ printf "Kind mismatch: %s vs %s" (show n1) (show n2)
@@ -88,6 +95,11 @@ instance AlphaEq a => AlphaEq (Qualified a) where
 instance AlphaEq QuantifiedType where
     alphaEq' (Quantified quants1 t1) (Quantified quants2 t2) = alphaEq' t1 t2 >> alphaEq' quants1 quants2
 
+
+instance AlphaEq HsName where
+    alphaEq' n1 n2 = alphaEq' (convertName n1 :: String) (convertName n2)
+instance AlphaEq HsQName where
+    alphaEq' n1 n2 = alphaEq' (convertName n1 :: String) (convertName n2)
 instance AlphaEq HsModule where
     alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEqs' ds1 ds2
 instance AlphaEq HsDecl where
@@ -139,10 +151,39 @@ instance AlphaEq HsType where
     alphaEq' t1 t2 = throwError $ printf "Type mismatch: %s vs %s" (prettyPrint t1) (prettyPrint t2)
 instance AlphaEq HsQualType where
     alphaEq' (HsQualType c1 t1) (HsQualType c2 t2) = alphaEqs' c1 c2 >> alphaEq' t1 t2
-instance AlphaEq HsAsst where
-    alphaEq' (name1, ts1) (name2, ts2) = do
-        unless (name1 == name2) $ throwError $ printf "Name mismatch: %s vs %s" (prettyPrint name1) (prettyPrint name2)
-        alphaEqs' ts1 ts2
+
+
+instance AlphaEq Literal where
+    alphaEq' (LiteralInt i1) (LiteralInt i2) =
+        unless (i1 == i2) $ throwError $ printf "Integer literal mismatch: %s vs %s" i1 i2
+    alphaEq' (LiteralFrac f1) (LiteralFrac f2) =
+        unless (f1 == f2) $ throwError $ printf "Rational literal mismatch: %s vs %s" (show f1) (show f2)
+    alphaEq' (LiteralChar c1) (LiteralChar c2) =
+        unless (c1 == c2) $ throwError $ printf "Character literal mismatch: %s vs %s" c1 c2
+    alphaEq' (LiteralString s1) (LiteralString s2) =
+        unless (s1 == s2) $ throwError $ printf "String literal mismatch: %s vs %s" (show s1) (show s2)
+    alphaEq' l1 l2 = throwError $ printf "Literal mismatch: %s vs %s" (show l1) (show l2)
+instance AlphaEq Alt where
+    alphaEq' (Alt ac1 vs1 e1) (Alt ac2 vs2 e2) = alphaEq' ac1 ac2 >> alphaEqs' vs1 vs2 >> alphaEq' e1 e2
+instance AlphaEq AltConstructor where
+    alphaEq' (DataCon v1) (DataCon v2) = alphaEq' v1 v2
+    alphaEq' (LitCon l1) (LitCon l2) = alphaEq' l1 l2
+    alphaEq' Default Default = return ()
+    alphaEq' c1 c2 = throwError $ printf "Alt constructor mismatch:\n%s\nvs\n%s" (show c1) (show c2)
+instance AlphaEq Expr where
+    alphaEq' (Var n1) (Var n2) = alphaEq' n1 n2
+    alphaEq' (Lit l1) (Lit l2) = alphaEq' l1 l2
+    alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (Lam v1 e1) (Lam v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
+    alphaEq' (Let v1 e1a e1b) (Let v2 e2a e2b) = alphaEq' v1 v2 >> alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEqs' vs1 vs2 >> alphaEqs' as1 as2
+    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
+    alphaEq' e1 e2 = throwError $ printf "Expression mismatch:\n%s\nvs\n%s" (show e1) (show e2)
+instance AlphaEq Binding where
+    alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
+    alphaEq' (Rec m1) (Rec m2) = alphaEq' m1 m2
+    alphaEq' b1 b2 = throwError $ printf "Binding mismatch:\n%s\nvs\n%s"
+
 
 stripModuleParens :: HsModule -> HsModule
 stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)

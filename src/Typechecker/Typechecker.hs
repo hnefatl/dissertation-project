@@ -62,13 +62,13 @@ newtype TypeInferrer a = TypeInferrer (ExceptT String (StateT InferrerState Name
 
 -- |Run type inference, and return the (possible failed) result along with the last state
 runTypeInferrer :: TypeInferrer a -> NameGenerator (Except String a, InferrerState)
-runTypeInferrer (TypeInferrer inner) = do
-    (x, s) <- runStateT (runExceptT inner) def
+runTypeInferrer (TypeInferrer x) = do
+    (x, s) <- runStateT (runExceptT x) def
     return (liftEither x, s)
 
 evalTypeInferrer :: TypeInferrer a -> ExceptT String NameGenerator a
-evalTypeInferrer (TypeInferrer inner) = do
-    x <- lift $ evalStateT (runExceptT inner) def
+evalTypeInferrer (TypeInferrer x) = do
+    x <- lift $ evalStateT (runExceptT x) def
     liftEither x
 
 

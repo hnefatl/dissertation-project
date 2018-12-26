@@ -39,7 +39,7 @@ data AltConstructor = DataCon VariableName | LitCon Literal | Default
 instance Show AltConstructor where
     show (DataCon n) = show n
     show (LitCon l) = show l
-    show Default = "__default"
+    show Default = "default"
 
 data Expr = Var VariableName -- Variable/function/data constructor
           | Lit Literal
