@@ -89,3 +89,9 @@ builtinClasses = M.fromList
         classEq = TypeVariableName "Eq"
         classNum = TypeVariableName "Num"
         classFractional = TypeVariableName "Fractional"
+
+builtinDictionaries :: M.Map TypePredicate VariableName
+builtinDictionaries = M.fromList
+    [ (IsInstance (TypeVariableName "Num") typeInt, VariableName "dNumInt")
+    , (IsInstance (TypeVariableName "Eq") typeInt, VariableName "dEqInt")
+    , (IsInstance (TypeVariableName "Eq") typeBool, VariableName "dEqBool") ]

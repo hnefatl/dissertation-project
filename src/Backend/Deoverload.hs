@@ -4,6 +4,7 @@ module Backend.Deoverload where
 
 import Prelude hiding (exp)
 import Language.Haskell.Syntax
+import Language.Haskell.Pretty
 import Text.Printf
 import Data.Default
 import Data.Foldable
@@ -12,6 +13,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Except
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
+import qualified Data.Sequence as Seq
 
 import Names
 import NameGenerator
@@ -28,14 +30,16 @@ data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
     , types :: M.Map VariableName QuantifiedType
     , kinds :: M.Map TypeVariableName Kind
-    , classEnvironment :: ClassEnvironment }
+    , classEnvironment :: ClassEnvironment
+    , logs :: Seq.Seq String }
     deriving (Eq, Show)
 instance Default DeoverloadState where
     def = DeoverloadState
         { dictionaries = M.empty
         , types = M.empty
         , kinds = M.empty
-        , classEnvironment = M.empty }
+        , classEnvironment = M.empty
+        , logs = Seq.empty }
 
 runDeoverload :: Deoverload a -> NameGenerator (Except String a, DeoverloadState)
 runDeoverload (Deoverload inner) = do
@@ -47,6 +51,8 @@ evalDeoverload (Deoverload inner) = do
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
 
+writeLog :: String -> Deoverload ()
+writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
@@ -136,14 +142,11 @@ deoverloadRhs (HsUnGuardedRhs expr) = case expr of
     _ -> throwError $ "Found rhs without top-level type annotation: forgot to run type tagger?\n" ++ show expr
 deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 
--- |Called on an HsExpTypeSig wrapping an HsVar or HsCon: they're almost identical in function so this is just a helper.
-deoverloadName :: HsExp -> Deoverload HsExp
-deoverloadName (HsExpTypeSig l e t@(HsQualType origTagQuals origSimpleType)) = do
+deoverloadExp :: HsExp -> Deoverload HsExp
+deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleType)) = do
     ks <- getKinds
-    varName <- case e of
-            HsVar n -> return $ convertName n
-            HsCon n -> return $ convertName n
-            _ -> throwError "Argument to deoverloadName needs to be an HsVar/HsCon wrapped in a type signature"
+    let varName = convertName n
+    writeLog $ printf "Deoverloading %s, with tagged type %s" (show varName) (prettyPrint t)
     requiredQuals <- tryGetType varName >>= \case
         -- Not a decl-bound name with an original type, so the tagged type must be correct. Return all constraints.
         Nothing -> mapM (synToTypePred ks) origTagQuals
@@ -152,7 +155,8 @@ deoverloadName (HsExpTypeSig l e t@(HsQualType origTagQuals origSimpleType)) = d
         -- We get the "real" type of the name, unify the real simple type with the tagged simple type, apply the
         -- substitution to the real type, then see which constraints are actually needed to match the two constraint
         -- sets.
-        Just (Quantified _ (Qualified varQuals varSimpleType)) -> do
+        Just t'@(Quantified _ (Qualified varQuals varSimpleType)) -> do
+            writeLog $ printf "Found bound type %s" (show t')
             Qualified tagQuals tagSimpleType <- synToQualType ks t
             sub <- mgu varSimpleType tagSimpleType
             classEnv <- getClassEnvironment
@@ -161,19 +165,20 @@ deoverloadName (HsExpTypeSig l e t@(HsQualType origTagQuals origSimpleType)) = d
             -- pull out the superclass types though, which means we need to find a path from the subclass to the
             -- superclass and translate it.
             fmap catMaybes $ forM (S.toList $ applySub sub varQuals) $ \varQual -> do
-                superQuals <- ifPThenBySuper classEnv varQual
-                return $ if any (`S.member` superQuals) tagQuals then Just varQual else Nothing
+                writeLog $ show varQual
+                -- Using ifPThenBySuper would let us check for superclasses. Using entails lets us also grab any
+                -- instances like `Num Int` which we'd like to keep so we know to pass a dictionary.
+                p <- entails classEnv tagQuals varQual
+                return $ if p then Just varQual else Nothing
+    writeLog $ printf "Required qualifiers: %s" (show requiredQuals)
     synRequiredQuals <- mapM typePredToSyn requiredQuals
     -- Replace the qualifiers on the tagged type with only the required ones, then deoverload
     let t' = deoverloadType (HsQualType synRequiredQuals origSimpleType)
-        e' = HsExpTypeSig l e t'
+        e = HsExpTypeSig l (HsVar n) t'
     -- Apply the variable to any dictionaries it needs
-    addDictArgs e' =<< mapM getDictionaryExp requiredQuals
-deoverloadName _ = throwError "Argument to deoverloadName needs to be wrapped in a type signature"
-
-deoverloadExp :: HsExp -> Deoverload HsExp
-deoverloadExp e@(HsExpTypeSig _ (HsVar _) _) = deoverloadName e
-deoverloadExp e@(HsExpTypeSig _ (HsCon _) _) = deoverloadName e
+    addDictArgs e =<< mapM getDictionaryExp requiredQuals
+-- We don't need to deoverload the constructor name, as constructors can't be qualified in Haskell 98.
+deoverloadExp c@(HsCon _) = return c
 deoverloadExp (HsExpTypeSig l lit@(HsLit _) (HsQualType _ t)) = return $ HsExpTypeSig l lit (HsQualType [] t)
 deoverloadExp (HsExpTypeSig l (HsApp f e) _) = do
     fExp@(HsExpTypeSig _ _ t) <- deoverloadExp f
@@ -187,7 +192,9 @@ deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*>
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
 deoverloadExp (HsList es) = HsList <$> mapM deoverloadExp es
 deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
-deoverloadExp (HsExpTypeSig l e t) = HsExpTypeSig l <$> deoverloadExp e <*> pure t
+-- We can ignore any qualifiers: any expression needing them further down the tree will have had the dictionaries passed
+-- appropriately and now just have the simple type: we should propagate this change up the tree.
+deoverloadExp (HsExpTypeSig l e (HsQualType _ t)) = HsExpTypeSig l <$> deoverloadExp e <*> pure (HsQualType [] t)
 deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " ++ show e
 
 -- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> a -> b -> ()` to represent the dicts.
