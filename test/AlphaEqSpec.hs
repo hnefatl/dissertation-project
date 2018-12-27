@@ -6,20 +6,28 @@ import Test.Tasty.HUnit
 import BasicPrelude
 import TextShow (TextShow, showt)
 import Control.Monad.Extra (whenJust)
-import Data.Text (unpack)
+import Data.Text (pack, unpack)
 import Language.Haskell.Syntax
+import Language.Haskell.Pretty (Pretty, prettyPrint)
 import qualified Data.Set as S
 
 import AlphaEq
 import Names
 import Typechecker.Types
 
+synPrint :: Pretty a => a -> Text
+synPrint = pack . prettyPrint
+
 makeTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
-makeTest x y = testCase (unpack $ showt x <> " vs " <> showt y) $
+makeTest x = makeTestWith showt x
+makeTestWith :: AlphaEq a => (a -> Text) -> a -> a -> TestTree
+makeTestWith f x y = testCase (unpack $ f x <> " vs " <> f y) $
     whenJust result (\err -> assertFailure $ unpack $ unlines [err, showt state])
     where (result, state) = runAlphaEq x y
 makeFailTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
-makeFailTest x y = testCase (unpack $ "Fails: " <> showt x <> " vs " <> showt y) $
+makeFailTest x = makeFailTestWith showt x
+makeFailTestWith :: AlphaEq a => (a -> Text) -> a -> a -> TestTree
+makeFailTestWith f x y = testCase (unpack $ "Fails: " <> f x <> " vs " <> f y) $
     when (isNothing result) (assertFailure $ show state)
     where (result, state) = runAlphaEq x y
 
@@ -56,10 +64,10 @@ test = testGroup "AlphaEq"
     , makeFailTest
         (Quantified (S.singleton a) $ Qualified (S.singleton $ num ta) $ makeFun [ta] ta)
         (Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
-    , makeTest
+    , makeTestWith synPrint
         (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "a"])] $ HsTyVar $ HsIdent "a")
         (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "b"])] $ HsTyVar $ HsIdent "b")
-    , makeFailTest
+    , makeFailTestWith synPrint
         (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "a"])] $ HsTyVar $ HsIdent "a")
         (HsQualType [] $ HsTyVar $ HsIdent "a")
     ]

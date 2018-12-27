@@ -64,8 +64,8 @@ instance (AlphaEq a, AlphaEq b) => AlphaEq (a, b) where
 instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
     alphaEq' s1 s2
         | S.null s1 && S.null s2 = return () -- Both empty, both alpha equivalent
-        | S.null s1 = throwError $ "Set is non-empty: %s" <> showt s2
-        | S.null s2 = throwError $ "Set is non-empty: %s" <> showt s1
+        | S.null s1 = throwError $ "Set is non-empty: " <> showt s2
+        | S.null s2 = throwError $ "Set is non-empty: " <> showt s1
         | otherwise = do -- Find an element from a set that's alpha-eq to one from the other set, remove it, recurse
             let x = S.findMin s1 -- Arbitrary element from first set
             findM (alphaEqBool' x) (S.toList s2) >>= \case -- Find an alpha-eq element from the other set

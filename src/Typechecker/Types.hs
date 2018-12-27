@@ -105,7 +105,7 @@ instance TextShow a => TextShow (Qualified a) where
               qualifiers = mconcat $ intersperse ", " $ map showb $ S.toList quals
 instance TextShow QuantifiedType where
     showb (Quantified quants t) = (if S.null quants then "" else quantifiers) <> showb t
-        where quantifiers = "∀%s. " <> (mconcat $ intersperse ", " $ map showb $ S.toList quants)
+        where quantifiers = "∀" <> (mconcat $ intersperse ", " $ map showb $ S.toList quants) <> ". "
 
 
 getInstantiatingTypeMap :: (MonadNameGenerator m, MonadError Text m) => QuantifiedType -> m (M.Map TypeVariableName Type)
