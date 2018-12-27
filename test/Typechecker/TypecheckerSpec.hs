@@ -2,61 +2,66 @@
 
 module Typechecker.TypecheckerSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import BasicPrelude
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertFailure, assertBool)
 
 import Language.Haskell.Syntax
-import Language.Haskell.Parser
+import Language.Haskell.Parser (parseModule, ParseResult(..))
 
-import AlphaEq
-import ExtraDefs
-import Names
-import NameGenerator
+import AlphaEq (alphaEq)
+import ExtraDefs (deline)
+import Names (VariableName(..), TypeVariableName(..))
+import NameGenerator (evalNameGenerator)
 import Typechecker.Types
 import Typechecker.Typechecker
 
-import Data.Either
-import Data.Text.Lazy (unpack)
-import Text.Printf
-import Text.Pretty.Simple
+import TextShow (TextShow, showt)
+import Data.Either (isLeft)
+import Data.Text (unpack, pack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pString)
 import Control.Monad.State.Strict (get)
-import Control.Monad.Except
+import Control.Monad.Except (MonadError, runExcept, throwError, catchError)
 import qualified Data.Set as S
 import qualified Data.Map as M
 
-parse :: MonadError String m => String -> m HsModule
-parse s = case parseModule s of
-    ParseOk m -> return m
-    ParseFailed loc msg -> throwError (msg ++ ": " ++ show loc)
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pString . unpack . showt
 
-inferModule' :: String -> (Either String (M.Map VariableName QuantifiedType), InferrerState)
+parse :: MonadError Text m => Text -> m HsModule
+parse s = case parseModule (unpack s) of
+    ParseOk m -> return m
+    ParseFailed loc msg -> throwError $ pack msg <> ": " <> showt loc
+
+inferModule' :: Text -> (Either Text (M.Map VariableName QuantifiedType), InferrerState)
 inferModule' s = (runExcept out, state)
     where (out, state) = evalNameGenerator (runTypeInferrer $ catchError infer handler) 0
-          handler err = get >>= \st -> throwError $ unlines [err, unpack $ pShow st]
+          handler err = get >>= \st -> throwError $ unlines [err, pretty st]
           infer = do
             m <- parse s
             _ <- inferModuleWithBuiltins m -- Discard the updated tree and bound types
             getAllVariableTypes -- Explicitly pull all the variable types, not just the bound ones
 
-testBindings :: String -> [(String, QuantifiedType)] -> TestTree
-testBindings s cases = testCase (deline s) $ do
+testBindings :: Text -> [(Text, QuantifiedType)] -> TestTree
+testBindings s cases = testCase (unpack $ deline s) $ do
     let (etypes, state) = inferModule' s
     ts <- unpackEither etypes
-    let check (name, qt1) = either (assertFailure . printf "%s: %s" (show name)) return $ runExcept $ addDebugInfo $
-            case M.lookup (VariableName name) ts of
-                Nothing -> throwError "Variable not in environment"
-                Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ printf "Got %s, expected %s" (show qt2) (show qt1)
-        addDebugInfo action = catchError action (\err -> throwError $ err ++ "\n" ++ unpack (pShow state))
+    let getResult (name, qt1) = runExcept $ addDebugInfo $ case M.lookup (VariableName name) ts of
+            Nothing -> throwError "Variable not in environment"
+            Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ "Got " <> showt qt2 <> " expected " <> showt qt1
+        addDebugInfo action = catchError action (\err -> throwError $ unlines [err, pretty state])
+        check x@(name, _) = either (\e -> assertFailure $ unpack $ showt name <> ": " <> showt e) return (getResult x)
     mapM_ check cases
 
-testBindingsFail :: String -> TestTree
-testBindingsFail s = testCase ("Fails: " ++ s') $ assertBool errMsg (isLeft result)
+testBindingsFail :: Text -> TestTree
+testBindingsFail s = testCase ("Fails: " <> unpack s') $ assertBool errMsg (isLeft result)
     where s' = deline s
           (result, state) = inferModule' s
-          errMsg = printf "%s: Got %s\n%s" s' (unpack $ pShow result) (unpack $ pShow state)
+          errMsg = unpack $ unlines [s', "Got:", pretty result, "vs", pretty state]
 
-unpackEither :: Either String b -> IO b
-unpackEither = either assertFailure return
+unpackEither :: Either Text b -> IO b
+unpackEither = either (assertFailure . unpack) return
 
 test :: TestTree
 test = let
@@ -70,7 +75,7 @@ test = let
         -- Utility checks
         let args = [makeMaybe ta, typeBool, typeString, tb]
             output = unmakeFun (makeFun args tc)
-        in testCase "unmakeFun . makeFun" $ assertEqual (show output) (args, tc) output
+        in testCase "unmakeFun . makeFun" $ assertBool "" $ (args, tc) == output
     ,
         -- Simple literal type checks
         let s = "x = 5"

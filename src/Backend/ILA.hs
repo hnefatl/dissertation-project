@@ -3,15 +3,15 @@
 -- |Intermediate Language A - basically GHC's Core but without support for complicated language features like GADTs.
 module Backend.ILA where
 
-import Prelude hiding (head)
-import Control.Monad.Reader
-import Control.Monad.Except
+import BasicPrelude
+import TextShow (TextShow, showb, showt)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT, local, reader)
+import Control.Monad.Except (MonadError, ExceptT, throwError)
 import Language.Haskell.Syntax
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.List (foldl', intercalate)
-import Data.Default
-import Text.Printf
+import Data.List (foldl', intersperse)
+import Data.Default (Default, def)
 
 import Names
 import NameGenerator
@@ -23,7 +23,12 @@ data Literal = LiteralInt Integer
              | LiteralFrac Rational
              | LiteralChar Char
              | LiteralString String
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+instance TextShow Literal where
+    showb (LiteralInt i) = showb i
+    showb (LiteralFrac r) = showb r
+    showb (LiteralChar c) = showb c
+    showb (LiteralString s) = showb s
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
@@ -31,15 +36,16 @@ data Literal = LiteralInt Integer
 -- and checked subsequently, as the alternatives can only contain variable names.
 data Alt = Alt AltConstructor [VariableName] Expr
     deriving (Eq, Ord)
-instance Show Alt where
-    show (Alt con vs e) = printf "%s %s -> %s" (show con) (unwords $ map show vs) (show e)
+instance TextShow Alt where
+    showb (Alt con vs e) = showb con <> " " <> args <> " -> " <> showb e
+        where args = mconcat $ intersperse " " $ map showb vs
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName | LitCon Literal | Default
     deriving (Eq, Ord)
-instance Show AltConstructor where
-    show (DataCon n) = show n
-    show (LitCon l) = show l
-    show Default = "default"
+instance TextShow AltConstructor where
+    showb (DataCon n) = showb n
+    showb (LitCon l) = showb l
+    showb Default = "default"
 
 data Expr = Var VariableName -- Variable/function/data constructor
           | Lit Literal
@@ -49,25 +55,26 @@ data Expr = Var VariableName -- Variable/function/data constructor
           | Case Expr [VariableName] [Alt] -- case e of x { a1 ; a2 ; ... }. x is bound to the value of e.
           | Type Type
     deriving (Eq, Ord)
-instance Show Expr where
-    show (Var n) = show n
-    show (Lit l) = show l
-    show (App e1 e2) = printf "(%s) (%s)" (show e1) (show e2) 
-    show (Lam v b) = printf "λ%s -> %s" (show v) (show b)
-    show (Let v e1 e2) = printf "let %s = %s in %s" (show v) (show e1) (show e2)
-    show (Case s bs as) = printf "case %s of %s { %s }" (show s) (show bs) (intercalate " ; " $ map show as)
-    show (Type t) = "Type " ++ show t
+instance TextShow Expr where
+    showb (Var n) = showb n
+    showb (Lit l) = showb l
+    showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
+    showb (Lam v b) = "λ" <> showb v <> " -> " <> showb b
+    showb (Let v e1 e2) = "let " <> showb v <> " = " <> showb e1 <> " in " <> showb e2
+    showb (Case s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }" 
+        where cases = mconcat $ intersperse " ; " $ map showb as
+    showb (Type t) = "Type " <> showb t
 
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding = NonRec VariableName Expr | Rec (M.Map VariableName Expr)
     deriving (Eq, Ord)
-instance Show Binding where
-    show (NonRec v e) = printf "NonRec: %s = %s" (show v) (show e)
-    show (Rec m) = unlines (headline:bodylines)
+instance TextShow Binding where
+    showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
+    showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines
         where (v1, e1):bs = M.toList m
-              headline =    printf "Rec: %s = %s" (show v1) (show e1)
-              bodylines = [ printf "     %s = %s" (show v) (show e) | (v, e) <- bs ]
+              headline =    "Rec: " <> showb v1 <> " = " <> showb e1
+              bodylines = [ "     " <> showb v  <> " = " <> showb e | (v, e) <- bs ]
 
 data ConverterState = ConverterState
     { types :: M.Map VariableName QuantifiedType
@@ -77,20 +84,22 @@ instance Default ConverterState where
         { types = M.empty
         , renamings = M.empty }
 
-newtype Converter a = Converter (ReaderT ConverterState (ExceptT String NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError String, MonadNameGenerator)
+newtype Converter a = Converter (ReaderT ConverterState (ExceptT Text NameGenerator) a)
+    deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError Text, MonadNameGenerator)
 
-evalConverter :: Converter a -> M.Map VariableName QuantifiedType -> ExceptT String NameGenerator a
-evalConverter (Converter inner) ts = runReaderT inner def
+evalConverter :: Converter a -> M.Map VariableName QuantifiedType -> ExceptT Text NameGenerator a
+evalConverter (Converter inner) ts = runReaderT (local (addTypes ts) inner) def
 
 addRenaming :: VariableName -> VariableName -> ConverterState -> ConverterState
 addRenaming x = addRenamings . M.singleton x
 addRenamings :: M.Map VariableName VariableName -> ConverterState -> ConverterState
 addRenamings rens state = state { renamings = M.union rens (renamings state) }
+addTypes :: M.Map VariableName QuantifiedType -> ConverterState -> ConverterState
+addTypes ts state = state { types = M.union ts (types state) }
 
 getRenamed :: VariableName -> Converter VariableName
 getRenamed name = reader (M.lookup name . renamings) >>= \case
-    Nothing -> throwError $ "Variable " ++ show name ++ " not in renamings."
+    Nothing -> throwError $ "Variable " <> showt name <> " not in renamings."
     Just renamed -> return renamed
 
 getRenamedOrDefault :: VariableName -> Converter VariableName
@@ -98,7 +107,7 @@ getRenamedOrDefault name = reader (M.findWithDefault name name . renamings)
 
 getType :: VariableName -> Converter QuantifiedType
 getType name = reader (M.lookup name . types) >>= \case
-    Nothing -> throwError $ "Variable " ++ show name ++ " not in type environment"
+    Nothing -> throwError $ "Variable " <> showt name <> " not in type environment"
     Just t -> return t
 
 makeTuple :: [Expr] -> Expr

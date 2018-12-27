@@ -3,7 +3,10 @@ module AlphaEqSpec where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Text.Printf
+import BasicPrelude
+import TextShow (TextShow, showt)
+import Control.Monad.Extra (whenJust)
+import Data.Text (unpack)
 import Language.Haskell.Syntax
 import qualified Data.Set as S
 
@@ -11,15 +14,13 @@ import AlphaEq
 import Names
 import Typechecker.Types
 
-makeTest :: (Show a, AlphaEq a) => a -> a -> TestTree
-makeTest x y = testCase (printf "%s vs %s" (show x) (show y)) $ case result of
-    Just err -> assertFailure $ unlines [err, show state]
-    Nothing -> return ()
+makeTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
+makeTest x y = testCase (unpack $ showt x <> " vs " <> showt y) $
+    whenJust result (\err -> assertFailure $ unpack $ unlines [err, showt state])
     where (result, state) = runAlphaEq x y
-makeFailTest :: (Show a, AlphaEq a) => a -> a -> TestTree
-makeFailTest x y = testCase (printf "Fails: %s vs %s" (show x) (show y)) $ case result of
-    Just _ -> return ()
-    Nothing -> assertFailure $ show state
+makeFailTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
+makeFailTest x y = testCase (unpack $ "Fails: " <> showt x <> " vs " <> showt y) $
+    when (isNothing result) (assertFailure $ show state)
     where (result, state) = runAlphaEq x y
 
 test :: TestTree

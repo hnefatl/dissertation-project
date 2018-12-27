@@ -1,27 +1,34 @@
 module Preprocessor.RenamerSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import BasicPrelude
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertFailure, assertBool)
 
-import Language.Haskell.Parser
+import Language.Haskell.Parser (parseModule, ParseResult(..))
 
-import Control.Monad.Except
-import Data.Text.Lazy (unpack)
-import Text.Pretty.Simple
+import TextShow (TextShow, showt)
+import Control.Monad.Except (runExcept)
+import Data.Text (unpack, pack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pString)
 
-import AlphaEq
-import ExtraDefs
-import NameGenerator
-import Preprocessor.Renamer
+import AlphaEq (alphaEq)
+import ExtraDefs (deline)
+import NameGenerator (evalNameGenerator)
+import Preprocessor.Renamer (runRenamer, renameModule)
 
-makeTest :: String -> String -> TestTree
-makeTest input expected = testCase (deline input) $ case (,) <$> parseModule input <*> parseModule expected of
-    ParseOk (input', expected') ->
-        case runExcept renamedInput of
-            Right actual -> assertBool (unpack $ pShow state) (alphaEq expected' actual)
-            Left err -> assertFailure $ unlines [err, unpack $ pShow state]
-        where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
-    ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pString . unpack . showt
+
+makeTest :: Text -> Text -> TestTree
+makeTest input expected =
+    testCase (unpack $ deline input) $ case (,) <$> parseModule (unpack input) <*> parseModule (unpack expected) of
+        ParseOk (input', expected') ->
+            case runExcept renamedInput of
+                Right actual -> assertBool (unpack $ pretty state) (alphaEq expected' actual)
+                Left err -> assertFailure $ unpack $ unlines [err, pretty state]
+            where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
+        ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
 
 test :: TestTree
 test = testGroup "Renamer"

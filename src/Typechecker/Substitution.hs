@@ -2,11 +2,11 @@
 
 module Typechecker.Substitution where
 
-import Prelude hiding (all)
-import Data.Default
-import Data.Foldable
-import Control.Monad.Except
-import Data.List (intercalate)
+import BasicPrelude
+import TextShow (TextShow, showb, showt)
+import Data.Text (unpack)
+import Data.Default (Default, def)
+import Control.Monad.Except (MonadError, throwError)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 
@@ -19,9 +19,11 @@ newtype Substitution = Substitution (M.Map TypeVariableName Type) deriving (Eq)
 instance Default Substitution where
     def = Substitution M.empty
 
+instance TextShow Substitution where
+    showb (Substitution subs) = "[" <> mconcat (intersperse ", " prettyElements) <> "]"
+        where prettyElements = map (\(k, v) -> "(" <> showb v <> ")/" <> showb k) $ M.toList subs
 instance Show Substitution where
-    show (Substitution subs) = "[" ++ intercalate ", " prettyElements ++ "]"
-        where prettyElements = map (\(k, v) -> "(" ++ show v ++ ")/" ++ show k) $ M.toList subs
+    show = unpack . showt
 
 class Substitutable t where
     -- |Apply the given type variable -> type substitution
@@ -90,7 +92,7 @@ subComposes = foldl' subCompose subEmpty
 
 -- |Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
-subMerge :: MonadError String m => Substitution -> Substitution -> m Substitution
+subMerge :: MonadError Text m => Substitution -> Substitution -> m Substitution
 subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
     if agree then return $ Substitution (M.union subs1 subs2) else throwError "Conflicting substitutions"
     where agree = all subsGiveSameResult (M.keys $ M.intersection subs1 subs2)
@@ -98,5 +100,5 @@ subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
           -- Ensures that eg. `[b/a, Int/b]` and `c/a, Int/c]` are merged
           subsGiveSameResult var = fmap (applySub s2) (M.lookup var subs1) == fmap (applySub s1) (M.lookup var subs2)
 
-subMerges :: MonadError String m => [Substitution] -> m Substitution
+subMerges :: MonadError Text m => [Substitution] -> m Substitution
 subMerges = foldM subMerge subEmpty

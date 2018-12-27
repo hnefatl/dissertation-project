@@ -29,12 +29,20 @@ dependencies:
 - extra
 - data-default
 - text
+- text-show
+- text-show-instances
+- formatting
+- basic-prelude
 
 library:
   source-dirs: src
 
 ghc-options:
 - -Wall
+
+default-extensions:
+  - NoImplicitPrelude
+  - OverloadedStrings
 
 executables:
   compiler-exe:

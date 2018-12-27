@@ -2,32 +2,42 @@
 
 module Names where
 
+import BasicPrelude
+import Data.Text (unpack, pack)
+import TextShow (TextShow, showb, fromText)
 import Language.Haskell.Syntax as Syntax
-import Data.Hashable
 
-newtype VariableName = VariableName String deriving (Eq, Ord, Hashable)
-newtype TypeVariableName = TypeVariableName String deriving (Eq, Ord, Hashable)
-newtype TypeConstantName = TypeConstantName String deriving (Eq, Ord, Hashable)
+newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
+newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
+newtype TypeConstantName = TypeConstantName Text deriving (Eq, Ord, Hashable)
 -- Unique variants are only used within the renamer
-newtype UniqueVariableName = UniqueVariableName String deriving (Eq, Ord, Hashable)
-newtype UniqueTypeVariableName = UniqueTypeVariableName String deriving (Eq, Ord, Hashable)
+newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable)
+newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable)
+instance TextShow VariableName where
+    showb (VariableName s) = fromText s
+instance TextShow TypeVariableName where
+    showb (TypeVariableName s) = fromText s
+instance TextShow UniqueVariableName where
+    showb (UniqueVariableName s) = fromText s
+instance TextShow UniqueTypeVariableName where
+    showb (UniqueTypeVariableName s) = fromText s
 instance Show VariableName where
-    show (VariableName s) = s
+    show (VariableName s) = unpack s
 instance Show TypeVariableName where
-    show (TypeVariableName s) = s
+    show (TypeVariableName s) = unpack s
 instance Show UniqueVariableName where
-    show (UniqueVariableName s) = s
+    show (UniqueVariableName s) = unpack s
 instance Show UniqueTypeVariableName where
-    show (UniqueTypeVariableName s) = s
+    show (UniqueTypeVariableName s) = unpack s
 
 
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
 
-instance NameConvertible Syntax.HsName String where
-    convertName (HsIdent name) = name
-    convertName (HsSymbol name) = name
-instance NameConvertible Syntax.HsQName String where
+instance NameConvertible Syntax.HsName Text where
+    convertName (HsIdent name) = pack name
+    convertName (HsSymbol name) = pack name
+instance NameConvertible Syntax.HsQName Text where
     convertName (Qual _ name) = convertName name
     convertName (UnQual name) = convertName name
     convertName (Special HsUnitCon) = "()"
@@ -35,13 +45,13 @@ instance NameConvertible Syntax.HsQName String where
     convertName (Special HsCons) = ":"
     convertName (Special HsFunCon) = "->"
     convertName (Special (HsTupleCon _)) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
-instance NameConvertible VariableName String where
+instance NameConvertible VariableName Text where
     convertName (VariableName n) = n
-instance NameConvertible TypeVariableName String where
+instance NameConvertible TypeVariableName Text where
     convertName (TypeVariableName n) = n
-instance NameConvertible UniqueVariableName String where
+instance NameConvertible UniqueVariableName Text where
     convertName (UniqueVariableName n) = n
-instance NameConvertible UniqueTypeVariableName String where
+instance NameConvertible UniqueTypeVariableName Text where
     convertName (UniqueTypeVariableName n) = n
 instance NameConvertible Syntax.HsName TypeVariableName where
     convertName name = TypeVariableName (convertName name)

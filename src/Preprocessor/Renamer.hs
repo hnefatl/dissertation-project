@@ -1,16 +1,19 @@
-{-# Language GeneralizedNewtypeDeriving, TupleSections, MultiParamTypeClasses, FlexibleContexts, LambdaCase #-}
+{-# Language GeneralizedNewtypeDeriving, TupleSections, MultiParamTypeClasses, FlexibleContexts, LambdaCase, TemplateHaskell #-}
 
 module Preprocessor.Renamer where
 
+import BasicPrelude
+import Data.Text (unpack)
+import TextShow (TextShow, showt)
+import TextShow.Instances ()
+import TextShow.TH (deriveTextShow)
 import Language.Haskell.Syntax
-import Data.Foldable
-import Data.Default
-import Data.Tuple
-import Data.Hashable
-import Control.Monad.State.Strict
-import Control.Monad.Except
+import Data.Default (Default, def)
+import Data.Tuple ()
+import Control.Monad.State.Strict (StateT, MonadState, runStateT, evalStateT, modify, gets)
+import Control.Monad.Except (ExceptT, Except, MonadError, runExceptT, throwError, liftEither)
 import qualified Data.Set as S
-import qualified Data.HashMap.Strict as M
+import qualified Data.Map.Strict as M
 
 import Names
 import NameGenerator
@@ -20,13 +23,12 @@ data RenamerState = RenamerState
       -- Used to generate unique variable names
     { variableCounter :: Int
       -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
-    , variableBindings :: M.HashMap VariableName [UniqueVariableName] 
+    , variableBindings :: M.Map VariableName [UniqueVariableName] 
       -- A reverse mapping from unique names to their original variable name: useful for printing error messages.
-    , variableReverseMapping :: M.HashMap UniqueVariableName VariableName
+    , variableReverseMapping :: M.Map UniqueVariableName VariableName
     -- Analogous to the above but for type variables
-    , typeVariableBindings :: M.HashMap TypeVariableName [UniqueTypeVariableName]
-    , typeVariableReverseMapping :: M.HashMap UniqueTypeVariableName TypeVariableName }
-    deriving (Show)
+    , typeVariableBindings :: M.Map TypeVariableName [UniqueTypeVariableName]
+    , typeVariableReverseMapping :: M.Map UniqueTypeVariableName TypeVariableName }
 instance Default RenamerState where
     def = RenamerState
             { variableCounter = 0
@@ -34,26 +36,27 @@ instance Default RenamerState where
             , variableReverseMapping = M.empty
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }
+deriveTextShow ''RenamerState -- instance TextShow RenamerState where ...
 
-newtype Renamer a = Renamer (ExceptT String (StateT RenamerState NameGenerator) a)
-    deriving (Applicative, Functor, Monad, MonadError String, MonadState RenamerState, MonadNameGenerator)
+newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState NameGenerator) a)
+    deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadNameGenerator)
 
-runRenamer :: Renamer a -> NameGenerator (Except String a, RenamerState)
+runRenamer :: Renamer a -> NameGenerator (Except Text a, RenamerState)
 runRenamer (Renamer inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalRenamer :: Renamer a -> ExceptT String NameGenerator a
+evalRenamer :: Renamer a -> ExceptT Text NameGenerator a
 evalRenamer (Renamer inner) = do
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
 
 type Rename a = a -> Renamer a
 
-getUniqueScopedName :: (Eq n, Hashable n, Show n) => (RenamerState -> M.HashMap n [un]) -> n -> Renamer un
+getUniqueScopedName :: (Ord n, TextShow n) => (RenamerState -> M.Map n [un]) -> n -> Renamer un
 getUniqueScopedName f name = gets (M.lookup name . f) >>= \case
-    Nothing -> throwError $ "Missing unique name for variable " ++ show name
-    Just [] -> throwError $ "Variable out of scope " ++ show name
+    Nothing -> throwError $ "Missing unique name for variable " <> showt name
+    Just [] -> throwError $ "Variable out of scope " <> showt name
     Just (newname:_) -> return newname
 getUniqueScopedVariableName :: VariableName -> Renamer UniqueVariableName
 getUniqueScopedVariableName = getUniqueScopedName variableBindings
@@ -74,8 +77,8 @@ bindVariableForScope names action = do
     forM_ names $ \name -> do
         bindings' <- gets variableBindings
         case M.lookup name bindings' of
-            Nothing -> throwError $ "Variable " ++ show name ++ " is not defined."
-            Just [] -> throwError $ "Variable " ++ show name ++ " is not in scope."
+            Nothing -> throwError $ "Variable " <> showt name <> " is not defined."
+            Just [] -> throwError $ "Variable " <> showt name <> " is not in scope."
             Just (_:bs) -> modify (\s -> s { variableBindings = M.insert name bs bindings' }) -- Pop the first binding
     return result
 -- We need to duplicate the code :( We can't parametrise on record fields like `typeVariableBindings`. Could use
@@ -90,8 +93,8 @@ bindTypeVariableForScope names action = do
     forM_ names $ \name -> do
         bindings' <- gets typeVariableBindings
         case M.lookup name bindings' of
-            Nothing -> throwError $ "Type Variable " ++ show name ++ " is not defined."
-            Just [] -> throwError $ "Type Variable " ++ show name ++ " is not in scope."
+            Nothing -> throwError $ "Type Variable " <> showt name <> " is not defined."
+            Just [] -> throwError $ "Type Variable " <> showt name <> " is not in scope."
             Just (_:bs) -> modify (\s -> s { typeVariableBindings = M.insert name bs bindings' })
     return result
 
@@ -103,15 +106,15 @@ renameModule :: Rename HsModule
 renameModule (HsModule a b c d e) = HsModule a b c d <$> renameDeclGroup e
 
 renameVariable :: Rename HsName
-renameVariable n@(HsIdent _) = HsIdent . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@(HsSymbol _) = HsSymbol . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameVariableQ :: Rename HsQName
 renameVariableQ (Qual m n) = Qual m <$> renameVariable n
 renameVariableQ (UnQual n) = UnQual <$> renameVariable n
 renameVariableQ (Special _) = throwError "Special forms not supported"
 renameTypeVariable :: Rename HsName
-renameTypeVariable n@(HsIdent _) = HsIdent . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@(HsSymbol _) = HsSymbol . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 
 renameQOp :: Rename HsQOp
 renameQOp (HsQVarOp n) = HsQVarOp <$> renameVariableQ n

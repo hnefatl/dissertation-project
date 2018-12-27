@@ -2,12 +2,15 @@
 
 module Typechecker.UnifierSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import BasicPrelude
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertEqual)
 
+import TextShow (showt)
+import Data.Text (unpack)
 import Names
-import Typechecker.Unifier
-import Typechecker.Substitution
+import Typechecker.Unifier (mgu, match)
+import Typechecker.Substitution (Substitution(..), subMultiple)
 import Typechecker.Types
 
 import qualified Data.Map as M
@@ -24,11 +27,11 @@ test =
             -- y = [(Char -> c, (b, Bool))]
             y = makeList (makeTuple [makeFun [typeChar] tc, makeTuple [tb, typeBool]])
 
-            actual = mgu x y :: Either String Substitution
+            actual = mgu x y :: Either Text Substitution
             -- expected = [(Char -> Bool)/a, Int/b, Bool/c]
             expected = Right $ subMultiple [(a, makeFun [typeChar] typeBool), (b, typeInt), (c, typeBool)]
 
-        in testCase ("mgu (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
+        in testCase (unpack $ "mgu (" <> showt x <> ") (" <> showt y <> ")") $ assertEqual "" expected actual
     ,
         let x = IsInstance (TypeVariableName "Eq") (TypeVar (TypeVariable a KindStar))
             y = IsInstance (TypeVariableName "Eq") typeBool

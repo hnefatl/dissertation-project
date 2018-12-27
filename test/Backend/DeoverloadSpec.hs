@@ -1,15 +1,18 @@
 module Backend.DeoverloadSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertFailure)
 
 import Language.Haskell.Parser
-import Language.Haskell.Pretty
+import Language.Haskell.Pretty (Pretty, prettyPrint)
 
-import Control.Monad.Except
-import Data.Text.Lazy (unpack)
-import Text.Printf
-import Text.Pretty.Simple
+import BasicPrelude
+import TextShow (TextShow, showt)
+import Formatting (sformat, stext, (%))
+import Control.Monad.Except (runExcept)
+import Data.Text (unpack, pack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pString)
 
 import AlphaEq
 import ExtraDefs
@@ -18,37 +21,36 @@ import Typechecker.Typechecker
 import Typechecker.Hardcoded
 import Backend.Deoverload
 
-pretty :: Show a => a -> String
-pretty = unpack . pShow
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pString . unpack . showt
+synPrint :: Pretty a => a -> Text
+synPrint = pack . prettyPrint
 
-unpackEither :: Either e a -> (e -> String) -> IO a
-unpackEither (Left err) f = assertFailure (f err)
+unpackEither :: Either e a -> (e -> Text) -> IO a
+unpackEither (Left err) f = assertFailure $ unpack (f err)
 unpackEither (Right x) _ = return x
 
-format :: Show a => a -> String
-format = unpack . pShow
-
-
-makeTest :: String -> String -> TestTree
-makeTest sActual sExpected = testCase (deline sActual) $ case (parseModule sExpected, parseModule sActual) of
-    (ParseOk expected, ParseOk actualModule) -> do
-        let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
-            ((eTiOutput, tState), i) = runNameGenerator infer 0
-        (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-        let deoverload = runDeoverload $ do
-                addTypes ts
-                addClassEnvironment builtinClasses
-                addDictionaries builtinDictionaries
-                deoverloadModule taggedModule
-            (eDeoverloaded, dState) = evalNameGenerator deoverload i
-            prettified m = printf "%s\n%s" (prettyPrint expected') (prettyPrint m)
-            deoverloadMsg = printf "Expected:\n%s\nTagged:\n%s\n%s" (prettyPrint expected') (prettyPrint taggedModule) (format taggedModule)
-            assertMsg actual = printf "Expected:\n%s\nGot:\n%s" (format expected') (format actual)
-            expected' = stripModuleParens expected
-        actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, prettified taggedModule, deoverloadMsg, pretty tState, pretty dState])
-        unpackEither (alphaEqError expected' actual) (\err -> unlines [err, prettified actual, assertMsg actual, pretty dState])
-    (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
-    (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
+makeTest :: Text -> Text -> TestTree
+makeTest sActual sExpected =
+    testCase (unpack $ deline sActual) $ case (parseModule $ unpack sExpected, parseModule $ unpack sActual) of
+        (ParseOk expected, ParseOk actualModule) -> do
+            let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
+                ((eTiOutput, tState), i) = runNameGenerator infer 0
+            (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
+            let deoverload = runDeoverload $ do
+                    addTypes ts
+                    addClassEnvironment builtinClasses
+                    addDictionaries builtinDictionaries
+                    deoverloadModule taggedModule
+                (eDeoverloaded, dState) = evalNameGenerator deoverload i
+                prettified m = unlines [synPrint expected', synPrint m]
+                deoverloadMsg = unlines ["Expected:", synPrint expected', "Tagged:", synPrint taggedModule, pretty taggedModule]
+                assertMsg actual = unlines ["Expected:", pretty expected', "Got:", pretty actual]
+                expected' = stripModuleParens expected
+            actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, prettified taggedModule, deoverloadMsg, pretty tState, pretty dState])
+            unpackEither (alphaEqError expected' actual) (\err -> unlines [err, prettified actual, assertMsg actual, pretty dState])
+        (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
+        (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 
 test :: TestTree
 test = testGroup "Deoverload"
@@ -57,7 +59,7 @@ test = testGroup "Deoverload"
         addType = "((+) :: Num a -> a -> a -> a)"
       in makeTest
         "f = \\x -> x + x" $
-        printf "f = (\\d -> (\\x -> ((%s (d :: Num a) :: a -> a -> a) %s :: a -> a) %s :: a) :: a -> a) :: Num a -> a -> a" addType x x
+        sformat ("f = (\\d -> (\\x -> (("%stext%" (d :: Num a) :: a -> a -> a) "%stext%" :: a -> a) "%stext%" :: a) :: a -> a) :: Num a -> a -> a") addType x x
     , makeTest
         "x = if True then 0 else 1"
         "x = (\\d -> (if True :: Bool then 0 :: a else 1 :: a) :: a) :: Num a -> a"
@@ -89,14 +91,14 @@ test = testGroup "Deoverload"
         z = "(z :: Num d -> d) (dd :: Num d) :: d"
         eq = "((==) :: Eq c -> c -> c -> Bool) (dc :: Eq c) :: c -> c -> Bool"
         plus = "((+) :: Num d -> d -> d -> d) (dd :: Num d) :: d -> d -> d"
-        yeqy = printf "((%s) (%s) :: c -> Bool) (%s) :: Bool" eq y y :: String
-        zplusz = printf "((%s) (%s) :: d -> d) (%s) :: d" plus z z :: String
-        constapp = printf "((const :: Bool -> d -> Bool) (%s) :: d -> Bool) (%s) :: Bool" yeqy zplusz :: String
-        bbody = printf "(\\y z -> (%s)) :: c -> d -> Bool" constapp :: String
-        bdicts = printf "(\\dc dd -> (%s)) :: Eq c -> Num d -> c -> d -> Bool" bbody :: String
+        yeqy = sformat ("(("%stext%") ("%stext%") :: c -> Bool) ("%stext%") :: Bool") eq y y
+        zplusz = sformat ("(("%stext%") ("%stext%") :: d -> d) ("%stext%") :: d") plus z z
+        constapp = sformat ("((const :: Bool -> d -> Bool) ("%stext%") :: d -> Bool) ("%stext%") :: Bool") yeqy zplusz
+        bbody = sformat ("(\\y z -> ("%stext%")) :: c -> d -> Bool") constapp
+        bdicts = sformat ("(\\dc dd -> ("%stext%")) :: Eq c -> Num d -> c -> d -> Bool") bbody
         b = unlines
             [ "const = (\\x _ -> x :: a) :: a -> b -> a"
-            , "f = " ++ bdicts
+            , "f = " <> bdicts
             , "g = ((((f :: Eq Bool -> Num Int -> Bool -> Int -> Bool) (dEqBool :: Eq Bool) :: Num Int -> Bool -> Int -> Bool) (dNumInt :: Num Int) :: Bool -> Int -> Bool) (True :: Bool) :: Int -> Bool) (((1 :: Int) :: Int) :: Int) :: Bool"
             ]
       in makeTest a b

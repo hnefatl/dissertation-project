@@ -2,33 +2,40 @@
 
 module Preprocessor.DependencySpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertFailure, assertEqual)
 
-import Language.Haskell.Parser
+import BasicPrelude
+import TextShow (TextShow, showt)
+import Language.Haskell.Parser (parseModule, ParseResult(..))
 import Language.Haskell.Syntax
-import Control.Monad.Except
-import Text.Printf
-import Text.Pretty.Simple
+import Control.Monad.Except (runExcept)
+import Data.Text (pack, unpack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pShow)
 import qualified Data.Set as S
 
 import ExtraDefs
 import Names
-import NameGenerator
-import Preprocessor.Dependency
+import TextShowHsSrc ()
+import NameGenerator (evalNameGeneratorT)
+import Preprocessor.Dependency (dependencyOrder)
 import Preprocessor.ContainedNames
 
-makeTest :: String -> [[String]] -> TestTree
-makeTest input cases = testCase (deline input) $ case parseModule input of
-    ParseFailed loc msg -> assertFailure ("Failed to parse input: " ++ show loc ++ "\n" ++ msg)
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pShow . unpack . showt
+
+makeTest :: Text -> [[Text]] -> TestTree
+makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpack input) of
+    ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
     ParseOk (HsModule _ _ _ _ decls) -> case runExcept $ evalNameGeneratorT (dependencyOrder decls) 0 of
-        Left err -> assertFailure err
+        Left err -> assertFailure $ unpack err
         Right declOrder
             | length declOrder /= length cases ->
-                assertFailure $ printf "Lengths: %s vs %s" (pShow cases) (pShow declOrder)
+                assertFailure $ unpack $ "Lengths: " <> pretty cases <> " vs " <> pretty declOrder
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
                 case runExcept (getDeclsBoundNames actualGroup) of
-                    Left err -> assertFailure err
+                    Left err -> assertFailure $ unpack err
                     Right boundNames -> assertEqual "" boundNames (S.fromList $ map VariableName expectedGroup)
 
 

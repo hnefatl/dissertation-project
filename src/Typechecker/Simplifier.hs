@@ -2,16 +2,17 @@
 
 module Typechecker.Simplifier where
 
-import Text.Printf
-import Data.Foldable
-import Control.Monad.Except
+import BasicPrelude
+import TextShow (showt)
+import Data.Foldable (foldlM)
+import Control.Monad.Except (MonadError, throwError)
 import qualified Data.Set as S
 
 import NameGenerator
 import Typechecker.Types
 import Typechecker.Typeclasses
 
-type Simplifier m = (MonadNameGenerator m, MonadError String m)
+type Simplifier m = (MonadNameGenerator m, MonadError Text m)
 
 class HasHnf t where
     -- |Returns whether `t` is in head-normal form, as defined by the Haskell report
@@ -46,7 +47,7 @@ detectInvalidPredicate ce inst@(IsInstance classname _) = do
     -- Int`) and it has the same head as the given predicate. We can use `==` instead of eg. `hasMgu` because these
     -- ground terms should be structurally and nominally equal.
     let isInstance = any (\(Qualified quals t) -> S.null quals && inst == t) insts
-    unless isInstance (throwError $ printf "Predicate %s doesn't hold in the environment." (show inst))
+    unless isInstance $ throwError $ "Predicate " <> showt inst <> " doesn't hold in the environment."
 
 detectInvalidPredicates :: Simplifier m => ClassEnvironment -> S.Set TypePredicate -> m ()
 detectInvalidPredicates ce = mapM_ (detectInvalidPredicate ce)

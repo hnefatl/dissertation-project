@@ -1,7 +1,10 @@
 module Typechecker.SubstitutionSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import BasicPrelude
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertEqual)
+import TextShow (showt)
+import Data.Text (unpack)
 
 import Names
 import Typechecker.Substitution
@@ -19,5 +22,5 @@ test = testGroup "Substitution"
             actual = subCompose x y
             -- expected = [Int/a, Bool/b, (Int -> Bool)/c]
             expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFun [typeInt] typeBool)]
-        in testCase ("subCompose (" ++ show x ++ ") (" ++ show y ++ ")") $ assertEqual "" expected actual
+        in testCase (unpack $ "subCompose (" <> showt x <> ") (" <> showt y <> ")") $ assertEqual "" expected actual
     ]

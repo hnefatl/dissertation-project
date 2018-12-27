@@ -1,35 +1,41 @@
 module Typechecker.TypeTaggerSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import BasicPrelude
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (testCase, assertFailure, assertBool)
 
-import Language.Haskell.Parser
-import Language.Haskell.Pretty
+import TextShow (TextShow, showt)
+import Language.Haskell.Parser (parseModule, ParseResult(..))
+import Language.Haskell.Pretty (Pretty, prettyPrint)
 import Control.Monad.Except
-import Data.Text.Lazy (unpack)
-import Text.Pretty.Simple
-import Text.Printf
+import Data.Text (unpack, pack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pString)
 
 import AlphaEq
 import ExtraDefs
 import NameGenerator
 import Typechecker.Typechecker
 
-makeTest :: String -> String -> TestTree
-makeTest input expected = testCase (deline input) $ do
-    (inputModule, expectedModule) <- case (parseModule input, parseModule expected) of
-        (ParseFailed _ msg, _) -> assertFailure $ "Failed to parse input: " ++ msg
-        (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " ++ msg
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pString . unpack . showt
+synPrint :: Pretty a => a -> Text
+synPrint = pack . prettyPrint
+
+makeTest :: Text -> Text -> TestTree
+makeTest input expected = testCase (unpack $ deline input) $ do
+    (inputModule, expectedModule) <- case (parseModule $ unpack input, parseModule $ unpack expected) of
+        (ParseFailed _ msg, _) -> assertFailure $ "Failed to parse input: " <> msg
+        (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " <> msg
         (ParseOk m, ParseOk n) -> return (m, n)
     let expectedModule' = stripModuleParens expectedModule
         (eModule, inferrerState) = evalNameGenerator (runTypeInferrer $ inferModuleWithBuiltins inputModule) 0
     case runExcept eModule of
-        Left msg -> assertFailure $ "Failed to generate tagged tree: " ++ msg
+        Left msg -> assertFailure $ unpack $ "Failed to generate tagged tree: " <> msg
         Right (inputModule', _) -> assertBool err $ alphaEq inputModule' expectedModule'
-            where
-                format x = unpack $ pShow x
-                msg = "Expected:\n%s\nGot:\n%s\nExpected Tree:\n%s\nGot Tree:\n%s\nState:%s"
-                err = printf msg (prettyPrint expectedModule') (prettyPrint inputModule') (format expectedModule') (format inputModule') (format inferrerState)
+            where err = unpack $ unlines
+                    [ "Expected:", synPrint expectedModule', "Got:", synPrint inputModule', "Expected Tree:"
+                    , pretty expectedModule', "Got Tree:", pretty inputModule', "State:", pretty inferrerState ]
 
 test :: TestTree
 test = testGroup "Type Tagger"

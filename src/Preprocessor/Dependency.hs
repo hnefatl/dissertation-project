@@ -2,16 +2,17 @@
 
 module Preprocessor.Dependency where
 
-import Data.Graph
+import BasicPrelude
+import Data.Graph (stronglyConnComp, flattenSCC)
 import qualified Data.Set as S
 import Data.List (nub)
-import Control.Monad.Except
+import Control.Monad.Except (MonadError)
 import Language.Haskell.Syntax
 
 import NameGenerator
 import Preprocessor.ContainedNames
 
-dependencyOrder :: (MonadNameGenerator m, MonadError String m) => [HsDecl] -> m [[HsDecl]]
+dependencyOrder :: (MonadNameGenerator m, MonadError Text m) => [HsDecl] -> m [[HsDecl]]
 dependencyOrder ds = do
     declBindings <- getDeclsBoundNames ds -- The names bound in this declaration group
     let declToNodes d = do

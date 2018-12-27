@@ -1,19 +1,21 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses, TupleSections #-}
+{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses, TupleSections, TemplateHaskell #-}
 
 module Typechecker.Typechecker where
 
-import Text.Printf
-import Control.Applicative
-import Control.Monad.Except
-import Control.Monad.State.Strict
-import Data.Default
-import Data.Foldable
-import Data.List (intercalate)
+import BasicPrelude hiding (group)
+import Data.Text (unpack)
+import TextShow (showt)
+import TextShow.TH (deriveTextShow)
+import TextShow.Instances ()
+import Control.Applicative (Alternative)
+import Control.Monad.Except (MonadError, ExceptT, Except, runExceptT, throwError, catchError, liftEither)
+import Control.Monad.State.Strict (MonadState, StateT, runStateT, evalStateT, modify, gets)
+import Data.Default (Default, def)
+import Data.Foldable (toList)
 import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Language.Haskell.Syntax as Syntax
-import Language.Haskell.Pretty
 
 import AlphaEq
 import ExtraDefs
@@ -42,8 +44,8 @@ data InferrerState = InferrerState
     , kinds :: M.Map TypeVariableName Kind
     , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
     , variableCounter :: Int
-    , logs :: Seq.Seq String }
-    deriving (Show)
+    , logs :: Seq.Seq Text }
+deriveTextShow ''InferrerState
 
 instance Default InferrerState where
     def = InferrerState
@@ -57,24 +59,24 @@ instance Default InferrerState where
             , logs = Seq.empty }
 
 -- |A TypeInferrer handles mutable state and error reporting
-newtype TypeInferrer a = TypeInferrer (ExceptT String (StateT InferrerState NameGenerator) a)
-    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError String, MonadNameGenerator)
+newtype TypeInferrer a = TypeInferrer (ExceptT Text (StateT InferrerState NameGenerator) a)
+    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError Text, MonadNameGenerator)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
-runTypeInferrer :: TypeInferrer a -> NameGenerator (Except String a, InferrerState)
+runTypeInferrer :: TypeInferrer a -> NameGenerator (Except Text a, InferrerState)
 runTypeInferrer (TypeInferrer x) = do
-    (x, s) <- runStateT (runExceptT x) def
-    return (liftEither x, s)
+    (y, s) <- runStateT (runExceptT x) def
+    return (liftEither y, s)
 
-evalTypeInferrer :: TypeInferrer a -> ExceptT String NameGenerator a
+evalTypeInferrer :: TypeInferrer a -> ExceptT Text NameGenerator a
 evalTypeInferrer (TypeInferrer x) = do
-    x <- lift $ evalStateT (runExceptT x) def
-    liftEither x
+    y <- lift $ evalStateT (runExceptT x) def
+    liftEither y
 
 
-writeLog :: String -> TypeInferrer ()
+writeLog :: Text -> TypeInferrer ()
 writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
-getLogs :: TypeInferrer [String]
+getLogs :: TypeInferrer [Text]
 getLogs = toList <$> gets logs
 
 nameToType :: TypeVariableName -> TypeInferrer Type
@@ -124,14 +126,14 @@ addVariableTypes :: TypeMap -> TypeInferrer ()
 addVariableTypes vs = do
     vts <- gets variableTypes
     let inter = M.intersection vs vts
-    unless (M.null inter) (throwError $ printf "Overwriting variables %s" (show inter))
+    unless (M.null inter) $ throwError $ "Overwriting variables " <> showt inter
     modify (\s -> s { variableTypes = M.union vs vts })
 -- |Given a variable name, get the type variable name that corresponds
 getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariable name = do
     x <- gets (M.lookup name . variableTypes) -- Variable's either provided by the variableTypes
     y <- traverse instantiate =<< gets (M.lookup name . bindings) -- Or the bindings
-    maybe (throwError $ printf "Symbol %s not in environment" (show name)) return (x <|> y)
+    maybe (throwError $ "Symbol " <> showt name <> " not in environment") return (x <|> y)
 getVariableTypeVariableOrAdd :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ \_ -> do
     tv <- freshTypeVarName
@@ -147,7 +149,7 @@ instantiate qt@(Quantified _ ql@(Qualified quals t)) = do
     let identityMap = M.fromList $ map (\x -> (x, TypeVar $ TypeVariable x KindStar)) $ S.toList $ getTypeVars ql
     -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
     sub <- Substitution <$> (M.union <$> getInstantiatingTypeMap qt <*> pure identityMap)
-    writeLog $ printf "Instantiating %s with %s using %s" (show v) (show qt) (show sub)
+    writeLog $ "Instantiating " <> showt v <> " with " <> showt qt <> " using " <> showt sub
     addTypePredicates $ S.map (applySub sub) quals
     vt <- nameToType v
     unify vt (applySub sub t)
@@ -170,7 +172,7 @@ addTypePredicates = mapM_ addTypePredicate
 insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
 insertQuantifiedType name t = do
     bs <- gets bindings
-    when (M.member name bs) (throwError $ printf "Overwriting binding %s with %s" (show name) (show t))
+    when (M.member name bs) $ throwError $ "Overwriting binding " <> showt name <> " with " <> showt t
     modify (\s -> s { bindings = M.insert name t bs })
 
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
@@ -189,17 +191,17 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
                 predicate <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
                 newPreds <- ifPThenByInstance ce predicate >>= \case
-                    Nothing -> throwError $ "No matching instance for " ++ show predicate
+                    Nothing -> throwError $ "No matching instance for " <> showt predicate
                     Just cs -> return cs
                 detectInvalidPredicates ce newPreds
                 return newPreds
-            writeLog $ printf "New constraints %s from substitution %s" (show newPredicates) (show sub)
+            writeLog $ "New constraints " <> showt newPredicates <> " from substitution " <> showt sub
             addTypePredicates newPredicates
 
 -- |Extend the current substitution with an mgu that unifies the two arguments
 unify :: Type -> Type -> TypeInferrer ()
 unify t1 t2 = do
-    writeLog $ "Unifying " ++ show t1 ++ " with " ++ show t2
+    writeLog $ "Unifying " <> showt t1 <> " with " <> showt t2
     currentSub <- getSubstitution
     -- Update the qualifiers
     newSub <- mgu (applySub currentSub t1) (applySub currentSub t2)
@@ -221,14 +223,14 @@ getQualifiedType name = do
     let typeVars = getTypeVars t
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
     let qt = Qualified predicates t
-    writeLog $ printf "%s has qualified type %s" (show name) (show qt)
+    writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
 getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name = do
     qualT <- getQualifiedType name
     quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qualT)
     qt <- Quantified quantifiers <$> getQualifiedType name
-    writeLog $ printf "%s has quantified type %s" (show name) (show qt)
+    writeLog $ showt name <> " has quantified type " <> showt qt
     return qt
 getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
 getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
@@ -262,7 +264,7 @@ inferLiteral (HsFrac _) = do
     v <- freshTypeVarName
     addTypeConstraint v (TypeVariableName "Fractional")
     return v
-inferLiteral l = throwError ("Unboxed literals not supported: " ++ show l)
+inferLiteral l = throwError $ "Unboxed literals not supported: " <> showt l
 
 -- |Infer the type of an expression and and return a new node in the AST that can be dropped in instead of the given
 -- one, which wraps the given node in an explicit type signature (eg. `5` is replaced with `(5 :: Num t2 => t2)`)
@@ -301,7 +303,7 @@ inferExpression (HsApp f e) = do
 inferExpression (HsInfixApp lhs op rhs) = do
     let VariableName name = convertName op
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
-    inferExpression (HsApp (HsApp (HsVar $ UnQual $ HsIdent name) lhs) rhs)
+    inferExpression (HsApp (HsApp (HsVar $ UnQual $ HsIdent $ unpack name) lhs) rhs)
 inferExpression (HsTuple exps) = do
     (argExps, argVars) <- mapAndUnzipM inferExpression exps
     argTypes <- mapM nameToType argVars
@@ -328,7 +330,7 @@ inferExpression (HsIf cond e1 e2) = do
     (condExp, condVar) <- inferExpression cond
     condType <- getQuantifiedType condVar
     let expected = Quantified S.empty (Qualified S.empty typeBool)
-    unless (condType == expected) $ throwError $ printf "if condition %s doesn't have type bool" $ show cond
+    unless (condType == expected) $ throwError $ "if condition " <> showt cond <> " doesn't have type bool"
     (e1Exp, e1Var) <- inferExpression e1
     e1Type <- nameToType e1Var
     (e2Exp, e2Var) <- inferExpression e2
@@ -347,7 +349,7 @@ inferExpression (HsExpTypeSig l e t) = do
     addTypePredicates quals
     -- Wrap this type signature in another one - each expression should be tagged with a type sig, this is no different
     makeExpTypeWrapper (HsExpTypeSig l taggedExp t) expVar
-inferExpression e = throwError $ "Unsupported expression: " ++ show e
+inferExpression e = throwError $ "Unsupported expression: " <> showt e
 
 
 inferPattern :: Syntax.HsPat -> TypeInferrer TypeVariableName
@@ -387,7 +389,7 @@ inferPattern (HsPList pats) = do
     vt <- nameToType v
     unify vt (makeList commonType)
     return v
-inferPattern p = throwError ("Unsupported pattern: " ++ show p)
+inferPattern p = throwError $ "Unsupported pattern: " <> showt p
 
 inferPatterns :: [Syntax.HsPat] -> TypeInferrer [TypeVariableName]
 inferPatterns = mapM inferPattern
@@ -434,7 +436,7 @@ inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDecls ds = do
     names <- getDeclsBoundNames ds
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
-    writeLog $ printf "Adding %s to environment for declaration group" (show typeVarMapping)
+    writeLog $ "Adding " <> showt typeVarMapping <> " to environment for declaration group"
     addVariableTypes typeVarMapping
     declExps <- mapM inferDecl ds
     -- Update our name -> type mappings
@@ -446,7 +448,7 @@ inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
     declExps <- forM dependencyGroups $ \group -> do
         boundNames <- S.toList <$> getDeclsBoundNames group
-        writeLog $ printf "Processing binding group {%s}" (intercalate "," $ map show boundNames)
+        writeLog $ "Processing binding group {" <> (mconcat $ intersperse "," $ map showt boundNames) <> "}"
         inferDecls group
     return $ concat declExps
 
@@ -510,22 +512,22 @@ updateExpTypeTags (HsTuple es) = HsTuple <$> mapM updateExpTypeTags es
 updateExpTypeTags (HsList es) = HsList <$> mapM updateExpTypeTags es
 updateExpTypeTags e = return e
 
-checkModuleExpTypes :: MonadError String m => Syntax.HsModule -> m ()
+checkModuleExpTypes :: MonadError Text m => Syntax.HsModule -> m ()
 checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
-checkDeclExpTypes :: MonadError String m => Syntax.HsDecl -> m ()
+checkDeclExpTypes :: MonadError Text m => Syntax.HsDecl -> m ()
 checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
-checkDeclsExpTypes :: MonadError String m => [Syntax.HsDecl] -> m ()
+checkDeclsExpTypes :: MonadError Text m => [Syntax.HsDecl] -> m ()
 checkDeclsExpTypes = mapM_ checkDeclExpTypes
-checkRhsExpTypes :: MonadError String m => Syntax.HsRhs -> m ()
+checkRhsExpTypes :: MonadError Text m => Syntax.HsRhs -> m ()
 checkRhsExpTypes (HsUnGuardedRhs e) = checkExpExpTypes e
 checkRhsExpTypes (HsGuardedRhss _) = throwError "Unsupported RHS when checking user-defined explicit type signatures."
-checkExpExpTypes :: MonadError String m => Syntax.HsExp -> m ()
+checkExpExpTypes :: MonadError Text m => Syntax.HsExp -> m ()
 checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
     | alphaEq manualType autoType = checkExpExpTypes e
-    | otherwise = throwError $ printf "Type mismatch in explicit type annotation: tagged with %s but inferred %s." x y
-        where x = prettyPrint manualType
-              y = prettyPrint autoType
+    | otherwise = throwError $ "Type mismatch in explicit type annotation: tagged with " <> x <> " but inferred " <> y
+        where x = prettyPrintT manualType
+              y = prettyPrintT autoType
 checkExpExpTypes (HsInfixApp e1 _ e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsApp e1 e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsNegApp e) = checkExpExpTypes e

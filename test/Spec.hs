@@ -1,5 +1,6 @@
 import Test.Tasty
 
+import BasicPrelude
 import AlphaEqSpec
 import Preprocessor.RenamerSpec
 import Preprocessor.DependencySpec

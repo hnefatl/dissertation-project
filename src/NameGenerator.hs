@@ -2,6 +2,8 @@
 
 module NameGenerator where
 
+import BasicPrelude
+import TextShow
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -12,7 +14,7 @@ import Names
 type NameGeneratorCounter = Int
 class Monad m => MonadNameGenerator m where
     -- |Should generate a new unique name each time it's run
-    freshName :: m String
+    freshName :: m Text
 
 newtype NameGeneratorT m a = NameGeneratorT (StateT Int m a)
     deriving (Applicative, Functor, Monad, MonadTrans)
@@ -28,15 +30,15 @@ evalNameGenerator :: NameGenerator a -> NameGeneratorCounter -> a
 evalNameGenerator x i = runIdentity (evalNameGeneratorT x i)
 
 instance Monad m => MonadNameGenerator (NameGeneratorT m) where
-    freshName = NameGeneratorT $ state (\i -> (show i, i+1))
+    freshName = NameGeneratorT $ state (\i -> (showt i, i+1))
 freshVarName :: MonadNameGenerator m => m VariableName
-freshVarName = VariableName . ('v':) <$> freshName
+freshVarName = VariableName . ("v" <>) <$> freshName
 freshUniqueVarName :: MonadNameGenerator m => m UniqueVariableName
-freshUniqueVarName = UniqueVariableName . ('v':) <$> freshName
+freshUniqueVarName = UniqueVariableName . ("v" <>) <$> freshName
 freshTypeVarName :: MonadNameGenerator m => m TypeVariableName
-freshTypeVarName = TypeVariableName . ('t':) <$> freshName
+freshTypeVarName = TypeVariableName . ("t" <>) <$> freshName
 freshUniqueTypeVarName :: MonadNameGenerator m => m UniqueTypeVariableName
-freshUniqueTypeVarName = UniqueTypeVariableName . ('t':) <$> freshName
+freshUniqueTypeVarName = UniqueTypeVariableName . ("t" <>) <$> freshName
 
 instance MonadNameGenerator m => MonadNameGenerator (ExceptT e m) where
     freshName = lift freshName
