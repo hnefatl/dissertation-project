@@ -4,23 +4,15 @@ import BasicPrelude
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertFailure, assertBool)
 
-import TextShow (TextShow, showt)
 import Language.Haskell.Parser (parseModule, ParseResult(..))
-import Language.Haskell.Pretty (Pretty, prettyPrint)
 import Control.Monad.Except
-import Data.Text (unpack, pack)
-import Data.Text.Lazy (toStrict)
-import Text.Pretty.Simple (pString)
+import Data.Text (unpack)
 
 import AlphaEq
-import ExtraDefs
+import Logger
+import ExtraDefs (pretty, synPrint, deline)
 import NameGenerator
 import Typechecker.Typechecker
-
-pretty :: TextShow a => a -> Text
-pretty = toStrict . pString . unpack . showt
-synPrint :: Pretty a => a -> Text
-synPrint = pack . prettyPrint
 
 makeTest :: Text -> Text -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $ do
@@ -29,13 +21,14 @@ makeTest input expected = testCase (unpack $ deline input) $ do
         (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " <> msg
         (ParseOk m, ParseOk n) -> return (m, n)
     let expectedModule' = stripModuleParens expectedModule
-        (eModule, inferrerState) = evalNameGenerator (runTypeInferrer $ inferModuleWithBuiltins inputModule) 0
+        ((eModule, inferrerState), logs) = evalNameGenerator (runLoggerT $ runTypeInferrer $ inferModuleWithBuiltins inputModule) 0
     case runExcept eModule of
-        Left msg -> assertFailure $ unpack $ "Failed to generate tagged tree: " <> msg
+        Left msg -> assertFailure $ unpack $ unlines ["Failed to generate tagged tree: ", msg, "Logs:", unlines logs]
         Right (inputModule', _) -> assertBool err $ alphaEq inputModule' expectedModule'
             where err = unpack $ unlines
                     [ "Expected:", synPrint expectedModule', "Got:", synPrint inputModule', "Expected Tree:"
-                    , pretty expectedModule', "Got Tree:", pretty inputModule', "State:", pretty inferrerState ]
+                    , pretty expectedModule', "Got Tree:", pretty inputModule', "State:", pretty inferrerState
+                    , "Logs:", unlines logs ]
 
 test :: TestTree
 test = testGroup "Type Tagger"

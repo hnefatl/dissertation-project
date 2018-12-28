@@ -10,24 +10,20 @@ import Language.Haskell.Syntax
 import Language.Haskell.Parser (parseModule, ParseResult(..))
 
 import AlphaEq (alphaEq)
-import ExtraDefs (deline)
+import ExtraDefs (deline, pretty)
+import Logger (runLoggerT)
 import Names (VariableName(..), TypeVariableName(..))
 import NameGenerator (evalNameGenerator)
 import Typechecker.Types
 import Typechecker.Typechecker
 
-import TextShow (TextShow, showt)
+import TextShow (showt)
 import Data.Either (isLeft)
 import Data.Text (unpack, pack)
-import Data.Text.Lazy (toStrict)
-import Text.Pretty.Simple (pString)
 import Control.Monad.State.Strict (get)
 import Control.Monad.Except (MonadError, runExcept, throwError, catchError)
 import qualified Data.Set as S
 import qualified Data.Map as M
-
-pretty :: TextShow a => a -> Text
-pretty = toStrict . pString . unpack . showt
 
 parse :: MonadError Text m => Text -> m HsModule
 parse s = case parseModule (unpack s) of
@@ -36,8 +32,8 @@ parse s = case parseModule (unpack s) of
 
 inferModule' :: Text -> (Either Text (M.Map VariableName QuantifiedType), InferrerState)
 inferModule' s = (runExcept out, state)
-    where (out, state) = evalNameGenerator (runTypeInferrer $ catchError infer handler) 0
-          handler err = get >>= \st -> throwError $ unlines [err, pretty st]
+    where ((out, state), logs) = evalNameGenerator (runLoggerT $ runTypeInferrer $ catchError infer handler) 0
+          handler err = get >>= \st -> throwError $ unlines [err, pretty st, "Logs:", unlines logs]
           infer = do
             m <- parse s
             _ <- inferModuleWithBuiltins m -- Discard the updated tree and bound types
@@ -68,14 +64,14 @@ test = let
         [a, b, c] = map (\n -> TypeVariable (TypeVariableName n) KindStar) ["a", "b", "c"]
         [ta, tb, tc] = map TypeVar [a, b, c]
         [num, fractional] = map TypeVariableName ["Num", "Fractional"]
-        makeMaybe = applyTypeUnsafe (TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar))
+        makeMaybe = applyTypeFunUnsafe (TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar))
     in
         testGroup "Typechecking"
     [
         -- Utility checks
         let args = [makeMaybe ta, typeBool, typeString, tb]
             output = unmakeFun (makeFun args tc)
-        in testCase "unmakeFun . makeFun" $ assertBool "" $ (args, tc) == output
+        in testCase "unmakeFun . makeFun" $ assertBool "" $ Right (args, tc) == output
     ,
         -- Simple literal type checks
         let s = "x = 5"

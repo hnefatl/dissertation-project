@@ -3,6 +3,9 @@ module ExtraDefs where
 import BasicPrelude hiding (intercalate)
 import Language.Haskell.Pretty (Pretty, prettyPrint)
 import Data.Text (intercalate, lines, unpack, pack)
+import Data.Text.Lazy (toStrict)
+import Text.Pretty.Simple (pString)
+import TextShow (TextShow, showt)
 import Data.Foldable (length, foldl', foldlM)
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -15,11 +18,13 @@ anyM f = foldlM (\x y -> (x ||) <$> f y) False
 ifJustM :: Monad m => m (Maybe a) -> (a -> m ()) -> m ()
 ifJustM p action = p >>= maybe (return ()) action
 
-prettyPrintT :: Pretty a => a -> Text
-prettyPrintT = pack . prettyPrint
+pretty :: TextShow a => a -> Text
+pretty = toStrict . pString . unpack . showt
+synPrint :: Pretty a => a -> Text
+synPrint = pack . prettyPrint
 
-textSMap :: (Text -> Text) -> String -> String
-textSMap f = unpack . f . pack
+middleText :: (TextShow a, TextShow b) => Text -> a -> b -> Text
+middleText m l r = showt l <> m <> showt r
 
 -- |Check if the given function holds for each element in the same index in the given lists. Returns `False` if the
 -- lists are different lengths.

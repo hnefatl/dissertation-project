@@ -7,17 +7,17 @@ import TextShow (showt)
 import TextShow.TH (deriveTextShow)
 import Language.Haskell.Syntax
 import Data.Default (Default, def)
-import Data.Foldable ()
+import Data.Foldable (toList)
 import Data.Text (unpack)
 import Control.Monad.State.Strict (MonadState, StateT, runStateT, evalStateT, modify, gets)
 import Control.Monad.Except (MonadError, ExceptT, Except, runExceptT, throwError, liftEither)
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import qualified Data.Sequence as Seq
 
-import ExtraDefs (prettyPrintT)
+import ExtraDefs (synPrint)
 import Names (VariableName(..), TypeVariableName(..), convertName)
 import NameGenerator (MonadNameGenerator, NameGenerator, freshTypeVarName)
+import Logger
 import TextShowHsSrc ()
 import Typechecker.Types
 import Typechecker.Hardcoded (builtinKinds)
@@ -25,15 +25,14 @@ import Typechecker.Typeclasses (ClassEnvironment, entails)
 import Typechecker.Substitution (applySub)
 import Typechecker.Unifier (mgu)
 
-newtype Deoverload a = Deoverload (ExceptT Text (StateT DeoverloadState NameGenerator) a)
-    deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError Text, MonadNameGenerator)
+newtype Deoverload a = Deoverload (ExceptT Text (StateT DeoverloadState (LoggerT NameGenerator)) a)
+    deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError Text, MonadLogger, MonadNameGenerator)
 
 data DeoverloadState = DeoverloadState
     { dictionaries :: M.Map TypePredicate VariableName
     , types :: M.Map VariableName QuantifiedType
     , kinds :: M.Map TypeVariableName Kind
-    , classEnvironment :: ClassEnvironment
-    , logs :: Seq.Seq Text }
+    , classEnvironment :: ClassEnvironment }
     deriving (Eq)
 deriveTextShow ''DeoverloadState
 instance Default DeoverloadState where
@@ -41,21 +40,17 @@ instance Default DeoverloadState where
         { dictionaries = M.empty
         , types = M.empty
         , kinds = M.empty
-        , classEnvironment = M.empty
-        , logs = Seq.empty }
+        , classEnvironment = M.empty }
 
-runDeoverload :: Deoverload a -> NameGenerator (Except Text a, DeoverloadState)
+runDeoverload :: Deoverload a -> LoggerT NameGenerator (Except Text a, DeoverloadState)
 runDeoverload (Deoverload inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalDeoverload :: Deoverload a -> ExceptT Text NameGenerator a
+evalDeoverload :: Deoverload a -> ExceptT Text (LoggerT NameGenerator) a
 evalDeoverload (Deoverload inner) = do
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
-
-writeLog :: Text -> Deoverload ()
-writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
@@ -100,7 +95,7 @@ getDictionaryExp p = do
     VariableName name <- getDictionary p
     return $ HsVar $ UnQual $ HsIdent $ unpack name
 
-makeDictName :: TypePredicate -> Deoverload VariableName
+makeDictName :: MonadNameGenerator m => TypePredicate -> m VariableName
 makeDictName (IsInstance (TypeVariableName cl) t) = do
     TypeVariableName suffix <- case t of
         TypeVar (TypeVariable tvn _) -> return tvn
@@ -149,7 +144,7 @@ deoverloadExp :: HsExp -> Deoverload HsExp
 deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleType)) = do
     ks <- getKinds
     let varName = convertName n
-    writeLog $ "Deoverloading " <> showt varName <> ", with tagged type " <> prettyPrintT t
+    writeLog $ "Deoverloading " <> showt varName <> ", with tagged type " <> synPrint t
     requiredQuals <- tryGetType varName >>= \case
         -- Not a decl-bound name with an original type, so the tagged type must be correct. Return all constraints.
         Nothing -> mapM (synToTypePred ks) origTagQuals
@@ -205,6 +200,14 @@ deoverloadType :: HsQualType -> HsQualType
 deoverloadType (HsQualType constraints t) = HsQualType [] $ foldr (HsTyFun . deoverloadAsst) t constraints
 deoverloadAsst :: HsAsst -> HsType
 deoverloadAsst (name, args) = foldl' HsTyApp (HsTyCon name) args
+
+deoverloadQuantType :: QuantifiedType -> QuantifiedSimpleType
+deoverloadQuantType (Quantified qs qt) = Quantified qs (deoverloadQualType qt)
+deoverloadQualType :: QualifiedType -> Type
+deoverloadQualType (Qualified quals t) = makeFun (map deoverloadTypePredicate $ toList quals) t
+deoverloadTypePredicate :: TypePredicate -> Type
+deoverloadTypePredicate (IsInstance c t) = TypeApp base t KindStar
+    where base = TypeCon $ TypeConstant c (KindFun KindStar KindStar)
 
 -- |Given eg. `(+) :: Num a -> a -> a -> a` and `[dNuma]`, produce a type-annotated tree for the following:
 -- `((+) :: Num a -> a -> a -> a) (dNuma :: Num a) :: a -> a -> a`

@@ -29,19 +29,20 @@ data Type = TypeVar !TypeVariable
     deriving (Eq, Ord)
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
-applyType :: MonadError Text m => Type -> Type -> m Type
-applyType t1 t2 = case getKind t1 of
+applyTypeFun :: MonadError Text m => Type -> Type -> m Type
+applyTypeFun t1 t2 = case getKind t1 of
     KindStar -> throwError $ "Application to type of kind *: " <> showt t1 <> " applied to " <> showt t2
     KindFun argKind resKind
         | argKind == getKind t2 -> return $ TypeApp t1 t2 resKind
         | otherwise -> throwError $ "Kind mismatch: " <> showt t1 <> " applied to " <> showt t2
 
--- |"Unsafe" version of `applyType` which uses `error` instead of `throwError`: useful for compiler tests etc where
+-- |"Unsafe" version of `applyTypeFun` which uses `error` instead of `throwError`: useful for compiler tests etc where
 -- it's convenient to avoid boilerplate and we shouldn't have invalid types being used
-applyTypeUnsafe :: Type -> Type -> Type
-applyTypeUnsafe t1 t2 = case applyType t1 t2 of
+applyTypeFunUnsafe :: Type -> Type -> Type
+applyTypeFunUnsafe t1 t2 = case applyTypeFun t1 t2 of
     Left err -> error (unpack err)
     Right t -> t
+
 
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
@@ -58,7 +59,9 @@ type QualifiedType = Qualified Type
 type ClassInstance = Qualified TypePredicate
 
 -- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
-data QuantifiedType = Quantified !(S.Set TypeVariable) !QualifiedType deriving (Eq, Ord)
+data Quantified a = Quantified !(S.Set TypeVariable) !a deriving (Eq, Ord)
+type QuantifiedType = Quantified QualifiedType
+type QuantifiedSimpleType = Quantified Type
 
 -- |A class for things that have a "kind": type variables/constants, types, ...
 class HasKind t where
@@ -103,7 +106,7 @@ instance TextShow a => TextShow (Qualified a) where
                 1 -> qualifiers <> " => "
                 _ -> "(" <> qualifiers <> ") => "
               qualifiers = mconcat $ intersperse ", " $ map showb $ S.toList quals
-instance TextShow QuantifiedType where
+instance TextShow a => TextShow (Quantified a) where
     showb (Quantified quants t) = (if S.null quants then "" else quantifiers) <> showb t
         where quantifiers = "∀" <> (mconcat $ intersperse ", " $ map showb $ S.toList quants) <> ". "
 
@@ -124,18 +127,40 @@ mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types
 makeList :: Type -> Type
-makeList = applyTypeUnsafe typeList
+makeList = applyTypeFunUnsafe typeList
 makeFun :: [Type] -> Type -> Type
-makeFun args ret = foldr (applyTypeUnsafe . applyTypeUnsafe typeFun) ret args
+makeFun args ret = foldr (applyTypeFunUnsafe . applyTypeFunUnsafe typeFun) ret args
 makeTuple :: [Type] -> Type
-makeTuple elements = foldl' applyTypeUnsafe (typeTuple $ length elements) elements
+makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
 
 -- |Given a type representing a function, unpack it to return the arguments and return type
-unmakeFun :: Type -> ([Type], Type)
-unmakeFun t@(TypeApp (TypeApp f e1 _) e2 _)
-    | f == typeFun = let (args, t') = unmakeFun e2 in (e1:args, t')
-    | otherwise = ([], t)
-unmakeFun t = ([], t)
+unmakeFun :: MonadError Text m => Type -> m ([Type], Type)
+unmakeFun t = do
+    let helper x = case unwrapFunMaybe x of
+            Nothing -> ([], x)
+            Just (t1, t') -> (t1:ts, t'')
+                where (ts, t'') = helper t'
+    (t0, t') <- unwrapFun t
+    let (ts, t'') = helper t'
+    return (t0:ts, t'')
+-- |Unwrapping a constructor is less restrictive than unwrapping a function: we don't necessarily need any arguments
+unmakeCon :: Type -> ([Type], Type)
+unmakeCon t = either (const ([], t)) id (unmakeFun t)
+
+-- |Split a type representing a function into the argument and the return type
+unwrapFunMaybe :: Type -> Maybe (Type, Type)
+unwrapFunMaybe (TypeApp (TypeApp f t1 _) t2 _)
+    | f == typeFun = Just (t1, t2)
+    | otherwise = Nothing
+unwrapFunMaybe _ = Nothing
+unwrapFun :: MonadError Text m => Type -> m (Type, Type)
+unwrapFun t = maybe (throwError $ showt t <> " isn't a function type.") return (unwrapFunMaybe t)
+
+unmakeList :: MonadError Text m => Type -> m Type
+unmakeList t@(TypeApp t1 t2 _)
+    | t1 == typeList = return t2
+    | otherwise = throwError $ showt t <> " isn't a list type"
+unmakeList t = throwError $ showt t <> " isn't a list type"
 
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
@@ -187,7 +212,7 @@ synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts
 synToType ks (HsTyApp t1 t2) = do
     t1' <- synToType ks t1
     t2' <- synToType ks t2
-    applyType t1' t2'
+    applyTypeFun t1' t2'
 
 typePredToSyn :: MonadError Text m => TypePredicate -> m Syntax.HsAsst
 typePredToSyn (IsInstance (TypeVariableName c) t) = do

@@ -11,13 +11,12 @@ import Control.Applicative (Alternative)
 import Control.Monad.Except (MonadError, ExceptT, Except, runExceptT, throwError, catchError, liftEither)
 import Control.Monad.State.Strict (MonadState, StateT, runStateT, evalStateT, modify, gets)
 import Data.Default (Default, def)
-import Data.Foldable (toList)
-import qualified Data.Sequence as Seq
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Language.Haskell.Syntax as Syntax
 
 import AlphaEq
+import Logger
 import ExtraDefs
 import Names
 import NameGenerator
@@ -43,8 +42,7 @@ data InferrerState = InferrerState
     , classEnvironment :: ClassEnvironment
     , kinds :: M.Map TypeVariableName Kind
     , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
-    , variableCounter :: Int
-    , logs :: Seq.Seq Text }
+    , variableCounter :: Int }
 deriveTextShow ''InferrerState
 
 instance Default InferrerState where
@@ -55,29 +53,23 @@ instance Default InferrerState where
             , classEnvironment = M.empty
             , kinds = M.empty
             , typePredicates = M.empty
-            , variableCounter = 0
-            , logs = Seq.empty }
+            , variableCounter = 0 }
 
 -- |A TypeInferrer handles mutable state and error reporting
-newtype TypeInferrer a = TypeInferrer (ExceptT Text (StateT InferrerState NameGenerator) a)
-    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError Text, MonadNameGenerator)
+newtype TypeInferrer a = TypeInferrer (ExceptT Text (StateT InferrerState (LoggerT NameGenerator)) a)
+    deriving (Functor, Applicative, Alternative, Monad, MonadState InferrerState, MonadError Text, MonadLogger, MonadNameGenerator)
 
 -- |Run type inference, and return the (possible failed) result along with the last state
-runTypeInferrer :: TypeInferrer a -> NameGenerator (Except Text a, InferrerState)
+runTypeInferrer :: TypeInferrer a -> LoggerT NameGenerator (Except Text a, InferrerState)
 runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
     return (liftEither y, s)
 
-evalTypeInferrer :: TypeInferrer a -> ExceptT Text NameGenerator a
+evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
 evalTypeInferrer (TypeInferrer x) = do
     y <- lift $ evalStateT (runExceptT x) def
     liftEither y
 
-
-writeLog :: Text -> TypeInferrer ()
-writeLog l = modify (\s -> s { logs = logs s Seq.|> l })
-getLogs :: TypeInferrer [Text]
-getLogs = toList <$> gets logs
 
 nameToType :: TypeVariableName -> TypeInferrer Type
 nameToType name = TypeVar <$> nameToTypeVariable name
@@ -367,7 +359,7 @@ inferPattern (HsPApp con pats) = do
     t <- instantiate =<< getVariableQuantifiedType (convertName con)
     conType <- applyCurrentSubstitution =<< nameToType t
     -- Check the data constructor's been fully applied
-    let (args, _) = unmakeFun conType
+    let (args, _) = unmakeCon conType
     unless (length args == length pats) $ throwError "Partial application of data constructor in pattern"
     ts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVarName
@@ -526,8 +518,8 @@ checkExpExpTypes :: MonadError Text m => Syntax.HsExp -> m ()
 checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
     | alphaEq manualType autoType = checkExpExpTypes e
     | otherwise = throwError $ "Type mismatch in explicit type annotation: tagged with " <> x <> " but inferred " <> y
-        where x = prettyPrintT manualType
-              y = prettyPrintT autoType
+        where x = synPrint manualType
+              y = synPrint autoType
 checkExpExpTypes (HsInfixApp e1 _ e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsApp e1 e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsNegApp e) = checkExpExpTypes e

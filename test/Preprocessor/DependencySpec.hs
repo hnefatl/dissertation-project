@@ -22,9 +22,6 @@ import NameGenerator (evalNameGeneratorT)
 import Preprocessor.Dependency (dependencyOrder)
 import Preprocessor.ContainedNames
 
-pretty :: TextShow a => a -> Text
-pretty = toStrict . pShow . unpack . showt
-
 makeTest :: Text -> [[Text]] -> TestTree
 makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpack input) of
     ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg

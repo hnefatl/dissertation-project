@@ -13,11 +13,14 @@ builtinConstructors = M.fromList
     [ (VariableName "True", Quantified S.empty $ Qualified S.empty typeBool)
     , (VariableName "False", Quantified S.empty $ Qualified S.empty typeBool)
     , (VariableName "Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeA)
-    , (VariableName "Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA) ]
+    , (VariableName "Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA)
+    , (VariableName "(,)", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta, tb] $ makeTuple [ta, tb]) ]
     where a = TypeVariable (TypeVariableName "a") KindStar
+          b = TypeVariable (TypeVariableName "b") KindStar
           ta = TypeVar a
+          tb = TypeVar b
           maybeT = TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar)
-          maybeA = applyTypeUnsafe maybeT ta
+          maybeA = applyTypeFunUnsafe maybeT ta
 
     
 builtinKinds :: M.Map TypeVariableName Kind

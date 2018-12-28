@@ -15,9 +15,14 @@ import qualified Data.Set as S
 
 import AlphaEq (alphaEqError)
 import ExtraDefs
+import Logger (runLoggerT, clearLogs)
 import Names
-import NameGenerator
+import NameGenerator (evalNameGenerator, freshDummyVarName)
+import Typechecker.Types hiding (makeTuple, makeList, makeFun)
+import qualified Typechecker.Types as T
 import Typechecker.Typechecker
+import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
+import Typechecker.Hardcoded (builtinKinds)
 import Backend.ILA
 
 parse :: MonadError Text m => Text -> m HsModule
@@ -27,88 +32,120 @@ parse s = case parseModule $ unpack s of
 
 makeTest :: Text -> [Binding] -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $
-    case evalNameGenerator (runExceptT foo) 0 of
-        Left err -> assertFailure $ unpack err
-        Right binds -> case alphaEqError (S.fromList expected) (S.fromList binds) of
-            Left err -> assertFailure $ unpack $ unlines [err, showt expected, "vs", showt binds]
+    case evalNameGenerator (runLoggerT $ runExceptT foo) 0 of
+        (Left err, logs) -> assertFailure $ unpack $ unlines [err, "Logs:", unlines logs]
+        (Right binds, logs) -> case alphaEqError (S.fromList expected) (S.fromList binds) of
+            Left err -> assertFailure $ unpack $ unlines [err, showt expected, "vs", showt binds, "Logs:", unlines logs]
             Right () -> return ()
     where foo = do
             m <- parse input
-            (_, ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            evalConverter (toIla m) ts
+            (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
+            clearLogs
+            m'' <- evalDeoverload (deoverloadModule m')
+            -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
+            let dets = map deoverloadQuantType ts
+            -- Run the ILA conversion on the deoverloaded module+types
+            clearLogs
+            evalConverter (toIla m'') dets builtinKinds
 
 
 test :: TestTree
 test = testGroup "ILA"
     [
-        let t1:t2:t3:_ = map (VariableName . ("x" ++) . showt) [0 :: Int ..]
+        let t = T.makeTuple [typeBool, typeBool]
             mainBind = Rec $ M.fromList [
                 ( t2
-                , Case (makeTuple [true, false]) [t1] [ Alt Default [] $ makeTuple [Var t1] ] )]
-            auxBind = NonRec x (Case (Var t2) [] [Alt tupleCon [t3] (Var t3), errAlt])
+                , Case (makeTuple' [true, false] t) [t1] [ Alt Default [] $ makeTuple' [Var t1 t] t ] )]
+            auxBind = NonRec x (Case (Var t2 t) [] [Alt tupleCon [t3] (Var t3 t), errAlt t])
         in makeTest "x = (True, False)" [mainBind, auxBind]
         ,
-        let t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = map (VariableName . ("x" <>) . showt) [0 :: Int ..]
+        let t = T.makeTuple [typeBool, typeBool]
             mainBind = Rec $ M.fromList [
                 ( t5
-                , Case (makeTuple [true, false]) []
+                , Case (makeTuple' [true, false] t) []
                     [ Alt tupleCon [t3, t4] $
-                        Case (Var t4) [t2]
-                            [ Alt Default [] (Case (Var t3) [t1] [Alt Default [] $ makeTuple [Var t1, Var t2]]) ]
-                    , errAlt] ) ]
+                        Case (Var t4 typeBool) [t2]
+                            [ Alt Default [] (Case (Var t3 typeBool) [t1]
+                                [ Alt Default [] $ makeTuple' [Var t1 typeBool, Var t2 typeBool] t ]) ]
+                    , errAlt t ] ) ]
             auxBinds =
-                [ NonRec x (Case (Var t5) [] [Alt tupleCon [t6, t7] (Var t6), errAlt])
-                , NonRec y (Case (Var t5) [] [Alt tupleCon [t8, t9] (Var t9), errAlt]) ]
+                [ NonRec x (Case (Var t5 t) [] [Alt tupleCon [t6, t7] (Var t6 typeBool), errAlt typeBool])
+                , NonRec y (Case (Var t5 t) [] [Alt tupleCon [t8, t9] (Var t9 typeBool), errAlt typeBool]) ]
         in makeTest "(x, y) = (True, False)" $ mainBind:auxBinds
     ,
-        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("x" <>) . showt) [0 :: Int ..]
+        let boolList = T.makeList typeBool
+            boolListTuple = T.makeTuple [boolList]
+            err = errAlt boolListTuple
             mainBind = Rec $ M.fromList [
                 ( t6
-                , Case (makeList [false]) [t1]
-                    [ Alt consCon [t2, t3] $ Case (Var t3) []
-                        [ Alt consCon [t4, t5] $ Case (Var t5) []
-                            [ Alt nilCon [] $ Case (Var t4) []
-                                [ Alt Default [] $ Case (Var t2) []
-                                    [ Alt trueCon [] $ makeTuple [Var t1]
-                                    , errAlt ]
+                , Case (makeList' [false] typeBool) [t1]
+                    [ Alt consCon [t2, t3] $ Case (Var t3 boolList) []
+                        [ Alt consCon [t4, t5] $ Case (Var t5 boolList) []
+                            [ Alt nilCon [] $ Case (Var t4 typeBool) []
+                                [ Alt Default [] $ Case (Var t2 typeBool) []
+                                    [ Alt trueCon [] $ makeTuple' [Var t1 typeBool] typeBool
+                                    , err ]
                                 ]
-                            , errAlt ]
-                        , errAlt ]
-                    , errAlt]
+                            , err ]
+                        , err ]
+                    , err ]
                 ) ]
-            auxBind = NonRec x (Case (Var t6) [] [Alt tupleCon [t7] (Var t7), errAlt])
+            auxBind = NonRec x (Case (Var t6 boolListTuple) [] [Alt tupleCon [t7] (Var t7 boolList), errAlt boolList])
         in makeTest "x@[True, _] = [False]" [mainBind, auxBind]
     ,
-        let t1:t2:t3:t4:t5:t6:t7:_ = map (VariableName . ("x" <>) . showt) [0 :: Int ..]
+        let a = TypeVar $ TypeVariable (TypeVariableName "a") KindStar
+            b = TypeVar $ TypeVariable (TypeVariableName "b") KindStar
+            fType = T.makeFun [a, b] a
             lambdaBody =
-                Lam t2 $ Case (Var t2) [t3] [ Alt Default [] $ Lam t4 $ Case (Var t4) [t5] [ Alt Default [] $ Var t3] ]
-            mainBind = Rec $ M.fromList [ (t6 , Case lambdaBody [t1] [ Alt Default [] $ makeTuple [Var t1] ]) ]
-            auxBind = NonRec f (Case (Var t6) [] [Alt tupleCon [t7] (Var t7), errAlt])
+                Lam t2 a $ Case (Var t2 a) [t3]
+                    [ Alt Default [] $ Lam t4 b $ Case (Var t4 b) [t5]
+                        [ Alt Default [] $ Var t3 a] ]
+            mainBind = Rec $ M.fromList
+                [ (t6 , Case lambdaBody [t1] [ Alt Default [] $ makeTuple' [Var t1 fType] fType ]) ]
+            auxBind = NonRec f (Case (Var t6 $ T.makeTuple [fType]) [] [Alt tupleCon [t7] (Var t7 fType), errAlt fType])
         in makeTest "f = \\x y -> x" [mainBind, auxBind]
     ,
-        let t1:t2:t3:t4:t5:t6:_ = map (VariableName . ("x" <>) . showt) [0 :: Int ..]
-            head = Case (Var x) [] [Alt trueCon [] true, Alt falseCon [] false]
+        let head = Case (Var x typeBool) [] [Alt trueCon [] true, Alt falseCon [] false]
             mainBinds =
-                [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple [Var t1] ]) ]
-                , Rec $ M.fromList [ (t5, Case head [t4] [ Alt Default [] $ makeTuple [Var t4] ]) ] ]
+                [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple' [Var t1 typeBool] typeBool ]) ]
+                , Rec $ M.fromList [ (t5, Case head [t4] [ Alt Default [] $ makeTuple' [Var t4 typeBool] typeBool ]) ] ]
             auxBinds =
-                [ NonRec x $ Case (Var t2) [] [Alt tupleCon [t3] (Var t3), errAlt]
-                , NonRec y $ Case (Var t5) [] [Alt tupleCon [t6] (Var t6), errAlt] ]
-        in makeTest "x = True\ny = if x then True else False" (mainBinds ++ auxBinds)
+                [ NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
+                    [Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool]
+                , NonRec y $ Case (Var t5 $ T.makeTuple [typeBool]) []
+                    [Alt tupleCon [t6] (Var t6 typeBool), errAlt typeBool] ]
+        in makeTest "x = True ; y = if x then True else False" (mainBinds <> auxBinds)
     ,
-        let t1:t2:t3:_ = map (VariableName . ("x" <>) . showt) [0 :: Int ..]
-            mainBind = Rec $ M.fromList [ (t2, Case true [t1] [Alt Default [] $ makeTuple [Var t1]]) ]
-            auxBind = NonRec x $ Case (Var t2) [] [Alt tupleCon [t3] (Var t3), errAlt]
+        let mainBind = Rec $ M.fromList
+                [ (t2, Case true [t1] [Alt Default [] $ makeTuple' [Var t1 typeBool] typeBool]) ]
+            auxBind = NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
+                [ Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool ]
         in makeTest "((x)) = (((True)))" [mainBind, auxBind]
+    --,
+    --    let mainBinds =
+    --            [ Rec $ M.fromList [
+    --                ( t1
+    --                , Lam t2 $ Case (Var t2) [t3] -- t1 is a, the type of x
+    --                    [ Alt Default [] $ Lam t4 $ Case (Var t4) [t5] -- t3 is the dictionary dNuma :: Num a
+    --                        [ Alt Default [] $ Lam t6 $ Case (Var t6) [t7] -- t5 is x :: a .
+    --                            [ Alt Default [] $ makeTuple [App (App (App (App plus $ Var t3) $ Var t5) $ Var t7) $ Var t7] ] ] ] ) ]
+    --            ]
+    --        auxBinds =
+    --            [ NonRec y $ Case (Var t1) [] [ Alt tupleCon [t8] (Var t8), errAlt ]
+
+    --            ]
+    --    in makeTest "f = \\x -> x + x ; y = f 1 :: Int" (mainBinds <> auxBinds)
     ]
-    where x = VariableName "x"
+    where t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = evalNameGenerator (replicateM 10 freshDummyVarName) 0
+          x = VariableName "x"
           y = VariableName "y"
           f = VariableName "f"
-          true = Var $ VariableName "True"
-          false = Var $ VariableName "False"
+          true = Var (VariableName "True") typeBool
+          false = Var (VariableName "False") typeBool
           trueCon = DataCon $ VariableName "True"
           falseCon = DataCon $ VariableName "False"
           tupleCon = DataCon $ VariableName "(,)"
           consCon = DataCon $ VariableName ":"
           nilCon = DataCon $ VariableName "[]"
-          errAlt = Alt Default [] makeError
+          errAlt t = Alt Default [] (makeError t)
+          plus t = Var (VariableName "+") (T.makeFun [t, t] t)

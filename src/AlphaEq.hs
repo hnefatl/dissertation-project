@@ -13,7 +13,7 @@ import qualified Data.Set as S
 import Language.Haskell.Syntax
 import Data.Either (isRight)
 
-import ExtraDefs (prettyPrintT)
+import ExtraDefs (synPrint)
 import Names
 import TextShowHsSrc ()
 import Typechecker.Types
@@ -69,7 +69,7 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
         | otherwise = do -- Find an element from a set that's alpha-eq to one from the other set, remove it, recurse
             let x = S.findMin s1 -- Arbitrary element from first set
             findM (alphaEqBool' x) (S.toList s2) >>= \case -- Find an alpha-eq element from the other set
-                Nothing -> throwError $ "Couldn't find alpha-eq element for " <> showt x <> " in " <> showt s2
+                Nothing -> throwError $ unlines ["Couldn't find an alpha-eq element to:", showt x, "in", showt s2]
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
 -- Maps compare in any order by converting to sets
 instance (Ord a, Ord b, AlphaEq a, AlphaEq b) => AlphaEq (M.Map a b) where
@@ -123,7 +123,7 @@ instance AlphaEq HsDecl where
 instance AlphaEq HsPat where
     alphaEq' (HsPVar n1) (HsPVar n2) = alphaEq' (convertName n1 :: Text) (convertName n2)
     alphaEq' (HsPLit l1) (HsPLit l2) =
-        unless (l1 == l2) $ throwError $ unlines [ "Literal pat mismatch:", prettyPrintT l1, "vs", prettyPrintT l2 ]
+        unless (l1 == l2) $ throwError $ unlines [ "Literal pat mismatch:", synPrint l1, "vs", synPrint l2 ]
     alphaEq' (HsPApp con1 ps1) (HsPApp con2 ps2) = do
         alphaEq' (convertName con1 :: Text) (convertName con2) 
         alphaEq' ps1 ps2
@@ -134,15 +134,15 @@ instance AlphaEq HsPat where
         alphaEq' (convertName v1 :: Text) (convertName v2)
         alphaEq' p1 p2
     alphaEq' HsPWildCard HsPWildCard = return ()
-    alphaEq' p1 p2 = throwError $ unlines [ "Pattern mismatch:", prettyPrintT p1, "vs", prettyPrintT p2 ]
+    alphaEq' p1 p2 = throwError $ unlines [ "Pattern mismatch:", synPrint p1, "vs", synPrint p2 ]
 instance AlphaEq HsRhs where
     alphaEq' (HsUnGuardedRhs e1) (HsUnGuardedRhs e2) = alphaEq' e1 e2
-    alphaEq' r1 r2 = throwError $ unlines [ "RHS mismatch:", prettyPrintT r1, "vs", prettyPrintT r2 ]
+    alphaEq' r1 r2 = throwError $ unlines [ "RHS mismatch:", synPrint r1, "vs", synPrint r2 ]
 instance AlphaEq HsExp where
     alphaEq' (HsVar v1) (HsVar v2) = alphaEq' (convertName v1 :: Text) (convertName v2)
     alphaEq' (HsCon c1) (HsCon c2) = alphaEq' (HsVar c1) (HsVar c2)
     alphaEq' (HsLit l1) (HsLit l2) =
-        unless (l1 == l2) $ throwError $ "Literal exp mismatch: " <> prettyPrintT l1 <> " " <> prettyPrintT l2
+        unless (l1 == l2) $ throwError $ "Literal exp mismatch: " <> synPrint l1 <> " " <> synPrint l2
     alphaEq' (HsApp e1a e1b) (HsApp e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
     alphaEq' (HsNegApp e1) (HsNegApp e2) = alphaEq' e1 e2
     alphaEq' (HsLambda _ ps1 e1) (HsLambda _ ps2 e2) = alphaEq' ps1 ps2 >> alphaEq' e1 e2
@@ -159,8 +159,8 @@ instance AlphaEq HsType where
     alphaEq' (HsTyApp t1a t1b) (HsTyApp t2a t2b) = alphaEq' t1a t2a >> alphaEq' t1b t2b
     alphaEq' (HsTyVar v1) (HsTyVar v2) = alphaEq' (convertName v1 :: Text) (convertName v2)
     alphaEq' (HsTyCon v1) (HsTyCon v2) =
-        unless (v1 == v2) $ throwError $ "Name mismatch: " <> prettyPrintT v1 <> " vs " <> prettyPrintT v2
-    alphaEq' t1 t2 = throwError $ "Type mismatch: " <> prettyPrintT t1 <> " vs " <> prettyPrintT t2
+        unless (v1 == v2) $ throwError $ "Name mismatch: " <> synPrint v1 <> " vs " <> synPrint v2
+    alphaEq' t1 t2 = throwError $ "Type mismatch: " <> synPrint t1 <> " vs " <> synPrint t2
 instance AlphaEq HsQualType where
     alphaEq' (HsQualType c1 t1) (HsQualType c2 t2) = alphaEq' c1 c2 >> alphaEq' t1 t2
 
@@ -184,11 +184,15 @@ instance AlphaEq AltConstructor where
     alphaEq' Default Default = return ()
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
 instance AlphaEq Expr where
-    alphaEq' (Var n1) (Var n2) = alphaEq' n1 n2
+    alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (Lit l1) (Lit l2) = alphaEq' l1 l2
     alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
-    alphaEq' (Lam v1 e1) (Lam v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (Let v1 e1a e1b) (Let v2 e2a e2b) = alphaEq' v1 v2 >> alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (Lam v1 t1 e1) (Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (Let v1 t1 e1a e1b) (Let v2 t2 e2a e2b) = do
+        alphaEq' v1 v2
+        alphaEq' t1 t2
+        alphaEq' e1a e2a
+        alphaEq' e1b e2b
     alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
     alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "Expression mismatch:", showt e1, "vs", showt e2 ]

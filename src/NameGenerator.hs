@@ -10,6 +10,7 @@ import Control.Monad.State.Strict
 import Control.Monad.Identity
 
 import Names
+import Logger
 
 type NameGeneratorCounter = Int
 class Monad m => MonadNameGenerator m where
@@ -39,12 +40,16 @@ freshTypeVarName :: MonadNameGenerator m => m TypeVariableName
 freshTypeVarName = TypeVariableName . ("t" <>) <$> freshName
 freshUniqueTypeVarName :: MonadNameGenerator m => m UniqueTypeVariableName
 freshUniqueTypeVarName = UniqueTypeVariableName . ("t" <>) <$> freshName
+freshDummyVarName :: MonadNameGenerator m => m VariableName
+freshDummyVarName = VariableName . ("x" <>) <$> freshName
 
 instance MonadNameGenerator m => MonadNameGenerator (ExceptT e m) where
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (ReaderT e m) where
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (StateT e m) where
+    freshName = lift freshName
+instance MonadNameGenerator m => MonadNameGenerator (LoggerT m) where
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (IdentityT m) where
     freshName = lift freshName
@@ -57,5 +62,9 @@ instance MonadState s m => MonadState s (NameGeneratorT m) where
 instance MonadReader s m => MonadReader s (NameGeneratorT m) where
     ask = lift ask
     local f (NameGeneratorT x) = NameGeneratorT $ local f x
+instance MonadLogger m => MonadLogger (NameGeneratorT m) where
+    writeLogs = lift . writeLogs
+    getLogs = lift getLogs
+    clearLogs = lift clearLogs
 instance MonadIO m => MonadIO (NameGeneratorT m) where
     liftIO = lift . liftIO

@@ -4,27 +4,19 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, assertFailure)
 
 import Language.Haskell.Parser
-import Language.Haskell.Pretty (Pretty, prettyPrint)
 
 import BasicPrelude
-import TextShow (TextShow, showt)
 import Formatting (sformat, stext, (%))
 import Control.Monad.Except (runExcept)
-import Data.Text (unpack, pack)
-import Data.Text.Lazy (toStrict)
-import Text.Pretty.Simple (pString)
+import Data.Text (unpack)
 
 import AlphaEq
-import ExtraDefs
+import Logger (runLoggerT)
+import ExtraDefs (pretty, synPrint, deline)
 import NameGenerator
 import Typechecker.Typechecker
 import Typechecker.Hardcoded
 import Backend.Deoverload
-
-pretty :: TextShow a => a -> Text
-pretty = toStrict . pString . unpack . showt
-synPrint :: Pretty a => a -> Text
-synPrint = pack . prettyPrint
 
 unpackEither :: Either e a -> (e -> Text) -> IO a
 unpackEither (Left err) f = assertFailure $ unpack (f err)
@@ -35,14 +27,14 @@ makeTest sActual sExpected =
     testCase (unpack $ deline sActual) $ case (parseModule $ unpack sExpected, parseModule $ unpack sActual) of
         (ParseOk expected, ParseOk actualModule) -> do
             let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
-                ((eTiOutput, tState), i) = runNameGenerator infer 0
+                (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
             (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
             let deoverload = runDeoverload $ do
                     addTypes ts
                     addClassEnvironment builtinClasses
                     addDictionaries builtinDictionaries
                     deoverloadModule taggedModule
-                (eDeoverloaded, dState) = evalNameGenerator deoverload i
+                ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
                 prettified m = unlines [synPrint expected', synPrint m]
                 deoverloadMsg = unlines ["Expected:", synPrint expected', "Tagged:", synPrint taggedModule, pretty taggedModule]
                 assertMsg actual = unlines ["Expected:", pretty expected', "Got:", pretty actual]
