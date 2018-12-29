@@ -31,10 +31,10 @@ data Literal = LiteralInt Integer
              | LiteralString String
     deriving (Eq, Ord)
 instance TextShow Literal where
-    showb (LiteralInt i) = "(" <> showb i <> " :: Int)"
-    showb (LiteralFrac r) = "(" <> showb r <> " :: Rational)"
-    showb (LiteralChar c) = "(" <> showb c <> " :: Char)"
-    showb (LiteralString s) = "(" <> showb s <> " :: String)"
+    showb (LiteralInt i) = showb i <> " :: Int"
+    showb (LiteralFrac r) = showb r <> " :: Rational"
+    showb (LiteralChar c) = showb c <> " :: Char"
+    showb (LiteralString s) = showb s <> " :: String"
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
@@ -62,7 +62,7 @@ data Expr = Var VariableName Type -- Variable/function/data constructor
           | Type Type
     deriving (Eq, Ord)
 instance TextShow Expr where
-    showb (Var n t) = "(" <> showb n <> " :: " <> showb t <> ")"
+    showb (Var n t) = showb n <> " :: " <> showb t
     showb (Lit l) = showb l
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b

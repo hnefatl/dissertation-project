@@ -53,10 +53,11 @@ test :: TestTree
 test = testGroup "ILA"
     [
         let t = T.makeTuple [typeBool, typeBool]
+            t' = T.makeTuple [t]
             mainBind = Rec $ M.fromList [
                 ( t2
-                , Case (makeTuple' [true, false] t) [t1] [ Alt Default [] $ makeTuple' [Var t1 t] t ] )]
-            auxBind = NonRec x (Case (Var t2 t) [] [Alt tupleCon [t3] (Var t3 t), errAlt t])
+                , Case (makeTuple' [true, false] t) [t1] [ Alt Default [] $ makeTuple' [Var t1 t] t' ] )]
+            auxBind = NonRec x (Case (Var t2 t') [] [Alt tupleCon [t3] (Var t3 t), errAlt t])
         in makeTest "x = (True, False)" [mainBind, auxBind]
         ,
         let t = T.makeTuple [typeBool, typeBool]
