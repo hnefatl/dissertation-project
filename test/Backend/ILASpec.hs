@@ -30,7 +30,7 @@ parse s = case parseModule $ unpack s of
     ParseOk m           -> return m
     ParseFailed loc msg -> throwError $ pack msg <> ": " <> showt loc
 
-makeTest :: Text -> [Binding] -> TestTree
+makeTest :: Text -> [Binding Expr] -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $
     case evalNameGenerator (runLoggerT $ runExceptT foo) 0 of
         (Left err, logs) -> assertFailure $ unpack $ unlines [err, "Logs:", unlines logs]

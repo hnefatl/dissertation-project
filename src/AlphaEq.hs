@@ -179,7 +179,7 @@ instance AlphaEq Literal where
     alphaEq' (LiteralString s1) (LiteralString s2) =
         unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
-instance AlphaEq Alt where
+instance AlphaEq a => AlphaEq (Alt a) where
     alphaEq' (Alt ac1 vs1 e1) (Alt ac2 vs2 e2) = alphaEq' ac1 ac2 >> alphaEq' vs1 vs2 >> alphaEq' e1 e2
 instance AlphaEq AltConstructor where
     alphaEq' (DataCon v1) (DataCon v2) = alphaEq' v1 v2
@@ -199,7 +199,7 @@ instance AlphaEq Expr where
     alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
     alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "Expression mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq Binding where
+instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
     alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
     alphaEq' (Rec m1) (Rec m2)             = alphaEq' m1 m2
     alphaEq' b1 b2                         = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]

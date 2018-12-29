@@ -43,9 +43,9 @@ instance TextShow Literal where
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
 -- If there's a literal or nested data constructor then it needs to be bound to a variable
 -- and checked subsequently, as the alternatives can only contain variable names.
-data Alt = Alt AltConstructor [VariableName] Expr
+data Alt a = Alt AltConstructor [VariableName] a
     deriving (Eq, Ord)
-instance TextShow Alt where
+instance TextShow a => TextShow (Alt a) where
     showb (Alt con vs e) = showb con <> (if null vs then "" else " ") <> args <> " -> " <> showb e
         where args = mconcat $ intersperse " " $ map showb vs
 -- |A constructor that can be used in an alternative statement
@@ -56,12 +56,13 @@ instance TextShow AltConstructor where
     showb (LitCon l)  = showb l
     showb Default     = "default"
 
+-- |The AST of ILA
 data Expr = Var VariableName Type -- Variable/function/data constructor
           | Lit Literal
           | App Expr Expr -- Application of terms or types
           | Lam VariableName Type Expr -- Abstraction of terms or types
           | Let VariableName Type Expr Expr
-          | Case Expr [VariableName] [Alt] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to the value of e.
+          | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to the value of e.
           | Type Type
     deriving (Eq, Ord)
 instance TextShow Expr where
@@ -74,11 +75,28 @@ instance TextShow Expr where
         where cases = mconcat $ intersperse " ; " $ map showb as
     showb (Type t) = "Type " <> showb t
 
+-- |The AST of trivial expressions in the administrative normal form of ILA
+data AnfTrivial = AnfVar VariableName Type
+                | AnfLit Literal
+                | AnfLam VariableName Type AnfComplex
+-- |The AST of complex expressions in the ANF form of ILA
+data AnfComplex = AnfApp AnfTrivial AnfTrivial
+                | AnfLet VariableName Type AnfComplex AnfTrivial
+                | AnfCase AnfTrivial [VariableName] [Alt AnfTrivial]
+instance TextShow AnfTrivial where
+    showb (AnfVar v t) = showb v <> " :: " <> showb t
+    showb (AnfLit l) = showb l
+    showb (AnfLam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
+instance TextShow AnfComplex where
+    showb (AnfApp e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
+    showb (AnfLet v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
+    showb (AnfCase s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }"
+        where cases = mconcat $ intersperse " ; " $ map showb as
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
-data Binding = NonRec VariableName Expr | Rec (M.Map VariableName Expr)
+data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
     deriving (Eq, Ord)
-instance TextShow Binding where
+instance TextShow a => TextShow (Binding a) where
     showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
     showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines
         where (v1, e1):bs = M.toList m
@@ -198,10 +216,10 @@ getPatVariableTypes _           _ = throwError "Unsupported pattern"
 -- TODO(kc506): Enforce that case expressions can only have variable names as their heads, then it's easy to restrict
 -- them to be thunks rather than whole subcomputations?
 -- ^ Think this is ANF, can wait
-toIla :: HsModule -> Converter [Binding]
+toIla :: HsModule -> Converter [Binding Expr]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
 
-declToIla :: HsDecl -> Converter [Binding]
+declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
     -- Precompute a mapping from the bound names in the patterns to some fresh names
     (boundNames, renames) <- getPatRenamings pat
