@@ -95,8 +95,8 @@ instance TextShow Type where
     showb (TypeVar v) = showb v
     showb (TypeCon c) = showb c
     showb (TypeApp t1 t2 _) = case t1 of
-        TypeCon (TypeConstant (TypeVariableName "[]") _) -> "[" <> showb t2 <> "]"
-        TypeApp (TypeCon (TypeConstant (TypeVariableName "->") _)) t3 _ -> case t3 of
+        TypeCon (TypeConstant "[]" _) -> "[" <> showb t2 <> "]"
+        TypeApp (TypeCon (TypeConstant "->" _)) t3 _ -> case t3 of
             TypeApp{} -> "(" <> showb t3 <> ") -> " <> showb t2
             _         -> showb t3 <> " -> " <> showb t2
         _ -> showb t1 <> " " <> showb t2
@@ -168,26 +168,26 @@ unmakeList t@(TypeApp t1 t2 _)
 unmakeList t = throwError $ showt t <> " isn't a list type"
 
 unmakeTuple :: MonadError Text m => Type -> m [Type]
-unmakeTuple (TypeApp (TypeCon (TypeConstant (TypeVariableName "(,)") _)) r _) = return [r]
-unmakeTuple (TypeApp l r _) = (r:) <$> unmakeTuple l
-unmakeTuple t = throwError $ showt t <> " isn't a tuple type"
+unmakeTuple (TypeApp (TypeCon (TypeConstant "(,)" _)) r _) = return [r]
+unmakeTuple (TypeApp l r _)                                = (r:) <$> unmakeTuple l
+unmakeTuple t                                              = throwError $ showt t <> " isn't a tuple type"
 
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
-typeUnit = TypeCon $ TypeConstant (TypeVariableName "()") KindStar
-typeBool = TypeCon $ TypeConstant (TypeVariableName "Bool") KindStar
-typeInt = TypeCon $ TypeConstant (TypeVariableName "Int") KindStar
-typeInteger = TypeCon $ TypeConstant (TypeVariableName "Integer") KindStar
-typeFloat = TypeCon $ TypeConstant (TypeVariableName "Float") KindStar
-typeDouble = TypeCon $ TypeConstant (TypeVariableName "Double") KindStar
-typeChar = TypeCon $ TypeConstant (TypeVariableName "Char") KindStar
+typeUnit = TypeCon $ TypeConstant "()" KindStar
+typeBool = TypeCon $ TypeConstant "Bool" KindStar
+typeInt = TypeCon $ TypeConstant "Int" KindStar
+typeInteger = TypeCon $ TypeConstant "Integer" KindStar
+typeFloat = TypeCon $ TypeConstant "Float" KindStar
+typeDouble = TypeCon $ TypeConstant "Double" KindStar
+typeChar = TypeCon $ TypeConstant "Char" KindStar
 
 typeList, typeFun :: Type
-typeList = TypeCon $ TypeConstant (TypeVariableName "[]") (KindFun KindStar KindStar)
-typeFun = TypeCon $ TypeConstant (TypeVariableName "->") (KindFun KindStar $ KindFun KindStar KindStar)
+typeList = TypeCon $ TypeConstant "[]" (KindFun KindStar KindStar)
+typeFun = TypeCon $ TypeConstant "->" (KindFun KindStar $ KindFun KindStar KindStar)
 
 typeTuple :: Int -> Type
-typeTuple n = TypeCon $ TypeConstant (TypeVariableName "(,)") (foldr KindFun KindStar $ replicate n KindStar)
+typeTuple n = TypeCon $ TypeConstant "(,)" (foldr KindFun KindStar $ replicate n KindStar)
 
 typeString :: Type
 typeString = makeList typeChar

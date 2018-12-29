@@ -8,7 +8,8 @@ module AlphaEq where
 import           BasicPrelude
 import           Control.Monad.Except       (ExceptT, MonadError, catchError, liftEither, runExceptT, throwError)
 import           Control.Monad.Extra        (findM)
-import           Control.Monad.State.Strict (MonadState, State, evalState, gets, modify, runState)
+import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT, get, put)
+import Logger (MonadLogger, Logger, evalLogger, writeLog)
 import           Data.Either                (isRight)
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
@@ -16,28 +17,43 @@ import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showt)
 import           TextShow.Instances         ()
 
-import           Backend.ILA
+import qualified Backend.ILA                as ILA
+import qualified Backend.ILAANF             as ILAANF
 import           ExtraDefs                  (synPrint)
 import           Names
 import           TextShowHsSrc              ()
 import           Typechecker.Types
 
-newtype AlphaEqM a = AlphaEqM { inner :: ExceptT Text (State (M.Map Text Text)) a }
-    deriving (Functor, Applicative, Monad, MonadState (M.Map Text Text), MonadError Text)
+newtype AlphaEqM a = AlphaEqM { inner :: ExceptT Text (StateT (M.Map Text Text) Logger) a }
+    deriving (Functor, Applicative, Monad, MonadState (M.Map Text Text), MonadError Text, MonadLogger)
 
 class TextShow a => AlphaEq a where
     alphaEq' :: a -> a -> AlphaEqM ()
+alphaEqBool :: AlphaEqM a -> AlphaEqM Bool
+alphaEqBool x = catchError (x >> return True) (\err -> writeFail err >> return False)
+    where writeFail err = writeLog $ "Alpha-eq fail: " <> err
 alphaEqBool' :: AlphaEq a => a -> a -> AlphaEqM Bool
-alphaEqBool' x y = catchError (alphaEq' x y >> return True) (const $ return False)
+alphaEqBool' x = alphaEqBool . alphaEq' x
 
 alphaEq :: AlphaEq a => a -> a -> Bool
-alphaEq x y = isRight $ alphaEqError x y
-alphaEqError :: (MonadError Text m, AlphaEq a) => a -> a -> m ()
-alphaEqError x y = liftEither $ evalState (runExceptT $ inner $ alphaEq' x y) M.empty
+alphaEq x y = isRight $ evalLogger $ runExceptT $ alphaEqError x y
+alphaEqError :: AlphaEq a => a -> a -> ExceptT Text Logger ()
+alphaEqError x y = do
+    z <- lift $ evalStateT (runExceptT $ inner $ alphaEq' x y) M.empty
+    liftEither z
 
-runAlphaEq :: AlphaEq a => a -> a -> (Maybe Text, M.Map Text Text)
-runAlphaEq x y = (either Just (const Nothing) result, s)
-    where (result, s) = runState (runExceptT $ inner $ alphaEq' x y) M.empty
+runAlphaEq :: AlphaEq a => a -> a -> Logger (Maybe Text, M.Map Text Text)
+runAlphaEq x y = do
+    (result, s) <- runStateT (runExceptT $ inner $ alphaEq' x y) M.empty
+    return (either Just (const Nothing) result, s)
+
+-- |If the given computation fails, restore internal state to how it was before running the computation. If the
+-- computation succeeds, leave the state alone.
+checkpoint :: AlphaEqM a -> AlphaEqM a
+checkpoint x = do
+    s <- get
+    writeLog $ "Before: " <> showt s
+    catchError x (\err -> get >>= \s' -> writeLog ("After: " <> showt s') >> put s >> throwError err)
 
 -- The workhorse: drives renaming names
 instance AlphaEq Text where
@@ -45,13 +61,15 @@ instance AlphaEq Text where
         | s1 == s2 = return ()
         | otherwise = (,) <$> gets (M.lookup s1) <*> gets (M.lookup s2) >>= \case
             -- Neither's been renamed before, add renames to them both
-            (Nothing, Nothing) -> modify (M.union $ M.fromList [(s1, s2), (s2, s1)])
+            (Nothing, Nothing) -> do
+                modify (M.union $ M.fromList [(s1, s2), (s2, s1)])
+                writeLog $ "Alpha-eq: " <> showt s1 <> " and " <> s2
             -- Both have been renamed before, check if they've been renamed to each other
             (Just x, Just y) ->
-                unless (x == s2 && y == s1) $ throwError $ s1 <> " and " <> s2 <> " have already been renamed"
+                unless (x == s2 && y == s1) $ throwError $ unwords [s1, "and", s2, "already renamed to", x, "and", y]
             -- One's been renamed but the other hasn't: they can't be renamed to the same thing
-            (Nothing, _) -> throwError $ s1 <> " has been renamed but " <> s2 <> " hasn't"
-            (_, Nothing) -> throwError $ s2 <> " has been renamed but " <> s1 <> " hasn't"
+            (Nothing, Just y) -> throwError $ s2 <> " has been renamed to " <> y <> " but " <> s1 <> " hasn't"
+            (Just x, Nothing) -> throwError $ s1 <> " has been renamed to " <> x <> " but " <> s2 <> " hasn't"
 
 
 -- Standard useful instances
@@ -71,7 +89,11 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
         | S.null s2 = throwError $ "Set is non-empty: " <> showt s1
         | otherwise = do -- Find an element from a set that's alpha-eq to one from the other set, remove it, recurse
             let x = S.findMin s1 -- Arbitrary element from first set
-            findM (alphaEqBool' x) (S.toList s2) >>= \case -- Find an alpha-eq element from the other set
+            -- Find an alpha-eq element from the other set
+            -- TODO(kc506): Need to rewrite this to use backtracking: taking the first alpha-eq match isn't sufficient,
+            -- consider [x,y,(x,y)] and [a,b,(b,a)]. Should just be able to merge the `alphaEq' x` call with the
+            -- follow-up into one action, then iterate that action? Remember to checkpoint appropriately.
+            findM (alphaEqBool . checkpoint . alphaEq' x) (S.toList s2) >>= \case
                 Nothing -> throwError $ unlines ["Couldn't find an alpha-eq element to:", showt x, "in", showt s2]
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
 -- Maps compare in any order by converting to sets
@@ -169,40 +191,56 @@ instance AlphaEq HsQualType where
 
 
 -- ILA instances
-instance AlphaEq Literal where
-    alphaEq' (LiteralInt i1) (LiteralInt i2) =
+instance (AlphaEq a, Ord a) => AlphaEq (ILA.Binding a) where
+    alphaEq' (ILA.NonRec v1 e1) (ILA.NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
+    alphaEq' (ILA.Rec m1) (ILA.Rec m2) = alphaEq' m1 m2
+    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+instance AlphaEq a => AlphaEq (ILA.Alt a) where
+    alphaEq' (ILA.Alt ac1 vs1 e1) (ILA.Alt ac2 vs2 e2) = alphaEq' ac1 ac2 >> alphaEq' vs1 vs2 >> alphaEq' e1 e2
+instance AlphaEq ILA.Literal where
+    alphaEq' (ILA.LiteralInt i1) (ILA.LiteralInt i2) =
         unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
-    alphaEq' (LiteralFrac f1) (LiteralFrac f2) =
+    alphaEq' (ILA.LiteralFrac f1) (ILA.LiteralFrac f2) =
         unless (f1 == f2) $ throwError $ "Rational literal mismatch:" <> showt f1 <> " vs " <> showt f2
-    alphaEq' (LiteralChar c1) (LiteralChar c2) =
+    alphaEq' (ILA.LiteralChar c1) (ILA.LiteralChar c2) =
         unless (c1 == c2) $ throwError $ "Character literal mismatch:" <> showt c1 <> " vs " <> showt c2
-    alphaEq' (LiteralString s1) (LiteralString s2) =
+    alphaEq' (ILA.LiteralString s1) (ILA.LiteralString s2) =
         unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
-instance AlphaEq a => AlphaEq (Alt a) where
-    alphaEq' (Alt ac1 vs1 e1) (Alt ac2 vs2 e2) = alphaEq' ac1 ac2 >> alphaEq' vs1 vs2 >> alphaEq' e1 e2
-instance AlphaEq AltConstructor where
-    alphaEq' (DataCon v1) (DataCon v2) = alphaEq' v1 v2
-    alphaEq' (LitCon l1) (LitCon l2) = alphaEq' l1 l2
-    alphaEq' Default Default = return ()
+instance AlphaEq ILA.AltConstructor where
+    alphaEq' (ILA.DataCon v1) (ILA.DataCon v2) = alphaEq' v1 v2
+    alphaEq' (ILA.LitCon l1) (ILA.LitCon l2) = alphaEq' l1 l2
+    alphaEq' ILA.Default ILA.Default = return ()
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
-instance AlphaEq Expr where
-    alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (Lit l1) (Lit l2) = alphaEq' l1 l2
-    alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
-    alphaEq' (Lam v1 t1 e1) (Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
-    alphaEq' (Let v1 t1 e1a e1b) (Let v2 t2 e2a e2b) = do
+instance AlphaEq ILA.Expr where
+    alphaEq' (ILA.Var n1 t1) (ILA.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (ILA.Lit l1) (ILA.Lit l2) = alphaEq' l1 l2
+    alphaEq' (ILA.App e1a e1b) (ILA.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (ILA.Lam v1 t1 e1) (ILA.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (ILA.Let v1 t1 e1a e1b) (ILA.Let v2 t2 e2a e2b) = do
         alphaEq' v1 v2
         alphaEq' t1 t2
         alphaEq' e1a e2a
         alphaEq' e1b e2b
-    alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
-    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
-    alphaEq' e1 e2 = throwError $ unlines [ "Expression mismatch:", showt e1, "vs", showt e2 ]
-instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
-    alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (Rec m1) (Rec m2)             = alphaEq' m1 m2
-    alphaEq' b1 b2                         = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+    alphaEq' (ILA.Case e1 vs1 as1) (ILA.Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (ILA.Type t1) (ILA.Type t2) = alphaEq' t1 t2
+    alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq ILAANF.AnfTrivial where
+    alphaEq' (ILAANF.Var n1 t1) (ILAANF.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (ILAANF.Lit l1) (ILAANF.Lit l2) = alphaEq' l1 l2
+    alphaEq' (ILAANF.Lam v1 t1 e1) (ILAANF.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (ILAANF.Type t1) (ILAANF.Type t2) = alphaEq' t1 t2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq ILAANF.AnfComplex where
+    alphaEq' (ILAANF.App e1a e1b) (ILAANF.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (ILAANF.Let v1 t1 e1a e1b) (ILAANF.Let v2 t2 e2a e2b) = do
+        alphaEq' v1 v2
+        alphaEq' t1 t2
+        alphaEq' e1a e2a
+        alphaEq' e1b e2b
+    alphaEq' (ILAANF.Case e1 vs1 as1) (ILAANF.Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (ILAANF.Trivial e1) (ILAANF.Trivial e2) = alphaEq' e1 e2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]
 
 
 stripModuleParens :: HsModule -> HsModule

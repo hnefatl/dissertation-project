@@ -33,6 +33,11 @@ instance Show UniqueVariableName where
 instance Show UniqueTypeVariableName where
     show (UniqueTypeVariableName s) = unpack s
 
+-- Lets us use `"f"` to mean `VariableName "f"` when the OverloadedStrings extension is enabled
+instance IsString VariableName where
+    fromString = VariableName . pack
+instance IsString TypeVariableName where
+    fromString = TypeVariableName . pack
 
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2

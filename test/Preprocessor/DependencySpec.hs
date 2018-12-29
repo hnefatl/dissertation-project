@@ -9,11 +9,9 @@ import           BasicPrelude
 import           Control.Monad.Except        (runExcept)
 import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
-import           Data.Text.Lazy              (toStrict)
 import           Language.Haskell.Parser     (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax
-import           Text.Pretty.Simple          (pShow)
-import           TextShow                    (TextShow, showt)
+import           TextShow                    (showt)
 
 import           ExtraDefs
 import           NameGenerator               (evalNameGeneratorT)
@@ -22,7 +20,7 @@ import           Preprocessor.ContainedNames
 import           Preprocessor.Dependency     (dependencyOrder)
 import           TextShowHsSrc               ()
 
-makeTest :: Text -> [[Text]] -> TestTree
+makeTest :: Text -> [[VariableName]] -> TestTree
 makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpack input) of
     ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
     ParseOk (HsModule _ _ _ _ decls) -> case runExcept $ evalNameGeneratorT (dependencyOrder decls) 0 of
@@ -33,7 +31,7 @@ makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpa
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
                 case runExcept (getDeclsBoundNames actualGroup) of
                     Left err         -> assertFailure $ unpack err
-                    Right boundNames -> assertEqual "" boundNames (S.fromList $ map VariableName expectedGroup)
+                    Right boundNames -> assertEqual "" boundNames (S.fromList expectedGroup)
 
 
 

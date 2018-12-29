@@ -56,13 +56,23 @@ instance TextShow AltConstructor where
     showb (LitCon l)  = showb l
     showb Default     = "default"
 
+-- |A recursive/nonrecursive binding of a Core expression to a name.
+data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
+    deriving (Eq, Ord)
+instance TextShow a => TextShow (Binding a) where
+    showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
+    showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines
+        where (v1, e1):bs = M.toList m
+              headline =    "Rec: " <> showb v1 <> " = " <> showb e1
+              bodylines = [ "     " <> showb v  <> " = " <> showb e | (v, e) <- bs ]
+
 -- |The AST of ILA
 data Expr = Var VariableName Type -- Variable/function/data constructor
           | Lit Literal
           | App Expr Expr -- Application of terms or types
           | Lam VariableName Type Expr -- Abstraction of terms or types
           | Let VariableName Type Expr Expr
-          | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to the value of e.
+          | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to e.
           | Type Type
     deriving (Eq, Ord)
 instance TextShow Expr where
@@ -75,33 +85,15 @@ instance TextShow Expr where
         where cases = mconcat $ intersperse " ; " $ map showb as
     showb (Type t) = "Type " <> showb t
 
--- |The AST of trivial expressions in the administrative normal form of ILA
-data AnfTrivial = AnfVar VariableName Type
-                | AnfLit Literal
-                | AnfLam VariableName Type AnfComplex
--- |The AST of complex expressions in the ANF form of ILA
-data AnfComplex = AnfApp AnfTrivial AnfTrivial
-                | AnfLet VariableName Type AnfComplex AnfTrivial
-                | AnfCase AnfTrivial [VariableName] [Alt AnfTrivial]
-instance TextShow AnfTrivial where
-    showb (AnfVar v t) = showb v <> " :: " <> showb t
-    showb (AnfLit l) = showb l
-    showb (AnfLam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
-instance TextShow AnfComplex where
-    showb (AnfApp e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
-    showb (AnfLet v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
-    showb (AnfCase s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }"
-        where cases = mconcat $ intersperse " ; " $ map showb as
-
--- |A recursive/nonrecursive binding of a Core expression to a name.
-data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
-    deriving (Eq, Ord)
-instance TextShow a => TextShow (Binding a) where
-    showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
-    showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines
-        where (v1, e1):bs = M.toList m
-              headline =    "Rec: " <> showb v1 <> " = " <> showb e1
-              bodylines = [ "     " <> showb v  <> " = " <> showb e | (v, e) <- bs ]
+getExprType :: MonadError Text m => Expr -> m Type
+getExprType (Var _ t)                = return t
+getExprType (Lit _)                  = throwError "Not sure"
+getExprType (App e1 _)               = snd <$> (T.unwrapFun =<< getExprType e1)
+getExprType (Lam _ t e)              = T.makeFun [t] <$> getExprType e
+getExprType (Let _ _ _ e)            = getExprType e
+getExprType (Case _ _ [])            = throwError $ "No alts in case"
+getExprType (Case _ _ (Alt _ _ e:_)) = getExprType e
+getExprType (Type t)                 = return t
 
 data ConverterState = ConverterState
     { types     :: M.Map VariableName QuantifiedSimpleType
@@ -116,23 +108,15 @@ instance Default ConverterState where
 newtype Converter a = Converter (ReaderT ConverterState (ExceptT Text (LoggerT NameGenerator)) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
-evalConverter
-    :: Converter a
-    -> M.Map VariableName QuantifiedSimpleType
-    -> M.Map TypeVariableName Kind
-    -> ExceptT Text (LoggerT NameGenerator) a
+evalConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
 evalConverter (Converter inner) ts ks =
     runReaderT (local (addTypes ts) $ local (addKinds ks) inner) def
 
 addRenaming :: VariableName -> VariableName -> ConverterState -> ConverterState
 addRenaming x = addRenamings . M.singleton x
-addRenamings
-    :: M.Map VariableName VariableName -> ConverterState -> ConverterState
+addRenamings :: M.Map VariableName VariableName -> ConverterState -> ConverterState
 addRenamings rens state = state { renamings = M.union rens (renamings state) }
-addTypes
-    :: M.Map VariableName QuantifiedSimpleType
-    -> ConverterState
-    -> ConverterState
+addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterState -> ConverterState
 addTypes ts state = state { types = M.union ts (types state) }
 addKinds :: M.Map TypeVariableName Kind -> ConverterState -> ConverterState
 addKinds ks state = state { kinds = M.union ks (kinds state) }
@@ -149,8 +133,7 @@ getRenamedOrDefault name = reader (M.findWithDefault name name . renamings)
 
 getType :: VariableName -> Converter QuantifiedSimpleType
 getType name = reader (M.lookup name . types) >>= \case
-    Nothing ->
-        throwError $ "Variable " <> showt name <> " not in type environment"
+    Nothing -> throwError $ "Variable " <> showt name <> " not in type environment"
     Just t -> return t
 getSimpleType :: VariableName -> Converter Type
 getSimpleType name = (\(Quantified _ t) -> t) <$> getType name
@@ -158,40 +141,34 @@ getSimpleType name = (\(Quantified _ t) -> t) <$> getType name
 -- |Construct an expression representing a tuple given the expressions and types of each element
 makeTuple :: [(Expr, Type)] -> Expr
 makeTuple ps = makeTuple' es t
-  where
-    (es, ts) = unzip ps
-    t        = T.makeFun ts (T.makeTuple ts)
+  where (es, ts) = unzip ps
+        t        = T.makeFun ts (T.makeTuple ts)
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the tuple
 makeTuple' :: [Expr] -> Type -> Expr
-makeTuple' es t = foldl' App base es where base = Var (VariableName "(,)") t
+makeTuple' es t = foldl' App base es where base = Var "(,)" t
 
 makeList :: MonadError Text m => [(Expr, Type)] -> m Expr
 makeList [] = throwError "Empty list passed to makeList"
-makeList ps = do
-    let (es, ts)    = unzip ps
-        uniqueTypes = S.fromList ts
-    case S.toList uniqueTypes of
+makeList ps = case S.toList uniqueTypes of
         [t] -> return $ makeList' es t
-        uts ->
-            throwError $ "Mismatching types passed to makeList: " <> showt uts
+        uts -> throwError $ "Mismatching types passed to makeList: " <> showt uts
+    where (es, ts)    = unzip ps
+          uniqueTypes = S.fromList ts
 makeList' :: [Expr] -> Type -> Expr
 makeList' es t = foldr (\x y -> App (App cons x) y) nil es
-  where
-    cons = Var (VariableName ":") (T.makeFun [t, T.makeList t] $ T.makeList t)
-    nil  = Var (VariableName "[]") (T.makeList t)
+    where cons = Var ":" (T.makeFun [t, T.makeList t] $ T.makeList t)
+          nil  = Var "[]" (T.makeList t)
 
 makeError :: Type -> Expr
-makeError = Var (VariableName "error")
+makeError = Var "error"
 
-getPatRenamings
-    :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
+getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
     boundNames <- S.toAscList <$> getPatContainedNames pat
     renames    <- M.fromList <$> mapM (\n -> (n, ) <$> freshVarName) boundNames
     return (boundNames, renames)
 
-getPatVariableTypes
-    :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
+getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
 getPatVariableTypes (HsPVar v   ) t = return $ M.singleton (convertName v) t
 getPatVariableTypes (HsPLit _   ) _ = return $ M.empty
 getPatVariableTypes (HsPApp _ ps) t = do
@@ -208,14 +185,10 @@ getPatVariableTypes (HsPList ps) t = do
     elementType <- T.unmakeList t
     M.unions <$> mapM (flip getPatVariableTypes $ elementType) ps
 getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
-getPatVariableTypes (HsPAsPat n p) t =
-    M.insert (convertName n) t <$> getPatVariableTypes p t
+getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
 getPatVariableTypes HsPWildCard _ = return M.empty
 getPatVariableTypes _           _ = throwError "Unsupported pattern"
 
--- TODO(kc506): Enforce that case expressions can only have variable names as their heads, then it's easy to restrict
--- them to be thunks rather than whole subcomputations?
--- ^ Think this is ANF, can wait
 toIla :: HsModule -> Converter [Binding Expr]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
 
@@ -225,15 +198,12 @@ declToIla (HsPatBind _ pat rhs _) = do
     (boundNames, renames) <- getPatRenamings pat
     let boundNameLength = length boundNames
     boundTypes <- mapM getSimpleType boundNames -- Type of each bound name
-    writeLog $ "Found bound names: " <> Text.intercalate
-        " "
-        (zipWith (middleText " :: ") boundNames boundTypes)
+    writeLog $ "Found bound names: " <> Text.intercalate " " (zipWith (middleText " :: ") boundNames boundTypes)
     -- Create expressions for each of the fresh names
-    let renamedExps =
-            zipWith (\name t -> Var (renames M.! name) t) boundNames boundTypes
+    let renamedExps = zipWith (\name t -> Var (renames M.! name) t) boundNames boundTypes
     -- Generate an expression that matches the patterns then returns a tuple of every variable
     let resultType  = T.makeTuple boundTypes
-        resultTuple = makeTuple' renamedExps resultType
+        resultTuple = makeTuple (zip renamedExps boundTypes)
     ts         <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
     resultExpr <- local (addRenamings renames . addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
@@ -248,12 +218,7 @@ declToIla (HsPatBind _ pat rhs _) = do
             let tempName = tempNames !! index -- Get the temporary name in the right position in the tuple
                 body     = Var tempName bindingType
             -- Just retrieve the specific output variable
-            return $ NonRec name $ Case
-                (Var resultName resultType)
-                []
-                [ Alt (DataCon $ VariableName "(,)") tempNames body
-                , Alt Default [] (makeError bindingType)
-                ]
+            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)") tempNames body , Alt Default [] (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
     return $ Rec (M.singleton resultName resultExpr) : extractors
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
@@ -263,25 +228,28 @@ rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = do
     ks             <- getKinds
     Qualified _ t' <- T.synToQualType ks t
     return t'
-rhsType (HsUnGuardedRhs _) =
-    throwError "Missing explicit type sig on top-level expression in RHS"
+rhsType (HsUnGuardedRhs _) = throwError "Missing explicit type sig on top-level expression in RHS"
 rhsType (HsGuardedRhss _) = throwError "Guarded RHS not supported"
 rhsToIla :: HsRhs -> Converter Expr
 rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
-expToIla (HsVar v) = do
+expToIla (HsExpTypeSig _ (HsVar v) t) = do
     name <- getRenamedOrDefault (convertName v)
-    Var name <$> getSimpleType name
-expToIla (HsCon c) = Var name <$> getSimpleType name
-    where name = convertName c
+    ks <- getKinds
+    Qualified _ t' <- T.synToQualType ks t
+    return $ Var name t'
+expToIla (HsExpTypeSig _ (HsCon c) t) = do
+    let name = convertName c
+    ks <- getKinds
+    Qualified _ t' <- T.synToQualType ks t
+    return $ Var name t'
 expToIla (HsLit l    ) = Lit <$> litToIla l
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
-expToIla HsInfixApp{} =
-    throwError
-        "Infix applications not supported: should've been removed by the typechecker"
+expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda     _ []                         e) = expToIla e
+-- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
 expToIla (HsExpTypeSig l (HsLambda l' (p : pats) e) t) = do
     ks                  <- getKinds
     argName             <- freshVarName
@@ -289,49 +257,33 @@ expToIla (HsExpTypeSig l (HsLambda l' (p : pats) e) t) = do
     (argType, bodyType) <- T.unwrapFun expType
     reducedType         <- T.qualTypeToSyn $ Qualified S.empty bodyType
     (_, renames)        <- getPatRenamings p
-    patVariableTypes    <-
-        fmap (Quantified S.empty) <$> getPatVariableTypes p argType
+    patVariableTypes    <- fmap (Quantified S.empty) <$> getPatVariableTypes p argType
     let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
-        log_renames =
-            Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList
-                renames
-        log_types =
-            Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList
-                renamedVariableTypes
-    writeLog
-        $  "Lambda pattern: added ["
-        <> log_renames
-        <> "] and ["
-        <> log_types
-        <> "]"
+        log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
+        log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
+    writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addRenamings renames . addTypes renamedVariableTypes) $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
         patToIla p argType (Var argName argType) nextBody
     return (Lam argName argType body)
-expToIla HsLambda{} =
-    throwError "Lambda with body not wrapped in explicit type signature"
+expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 expToIla (HsLet _ _      ) = throwError "Let not yet supported"
 expToIla (HsIf cond e1 e2) = do
     condExp <- expToIla cond
     e1Exp   <- expToIla e1
     e2Exp   <- expToIla e2
-    let alts =
-            [ Alt (DataCon $ VariableName "True")  [] e1Exp
-            , Alt (DataCon $ VariableName "False") [] e2Exp
-            ]
+    let alts = [ Alt (DataCon "True") [] e1Exp , Alt (DataCon "False") [] e2Exp ]
     return $ Case condExp [] alts
 expToIla (HsCase _ _) = throwError "Urgh case not yet supported"
-expToIla (HsExpTypeSig _ (HsTuple exps) t) = do
-    ks             <- getKinds
-    es             <- mapM expToIla exps
-    Qualified _ t' <- T.synToQualType ks t
-    return $ makeTuple' es t'
-expToIla (HsExpTypeSig _ (HsList exps) t) = do
-    ks             <- getKinds
-    es             <- mapM expToIla exps
-    Qualified _ t' <- T.synToQualType ks t
-    return $ makeList' es t'
+expToIla (HsTuple exps) = do
+    es <- mapM expToIla exps
+    ts <- mapM getExprType es
+    return $ makeTuple $ zip es ts
+expToIla (HsList exps) = do
+    es <- mapM expToIla exps
+    ts <- mapM getExprType es
+    makeList $ zip es ts
 expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
@@ -355,46 +307,31 @@ patToIla :: HsPat -> Type -> Expr -> Expr -> Converter Expr
 patToIla (HsPVar n) _ head body = do
     renamedVar <- getRenamed $ convertName n
     return $ Case head [renamedVar] [Alt Default [] body]
-patToIla (HsPLit l) _ head body =
-    throwError "Need to figure out dictionary passing before literals"
+patToIla (HsPLit l) _ head body = throwError "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) _ head body = do
     argNames            <- replicateM (length args) freshVarName
     (argTypes, expType) <- T.unmakeCon <$> getSimpleType (convertName con)
-    let argExpTypes =
-            zipWith3 (\p n t -> (p, Var n t, t)) args argNames argTypes
-    body' <- foldM (\body' (pat, head', t) -> patToIla pat t head' body')
-                   body
-                   argExpTypes
-    return $ Case
-        head
-        []
-        [ Alt (DataCon $ convertName con) argNames body'
-        , Alt Default [] $ makeError expType
-        ]
+    let argExpTypes = zipWith3 (\p n t -> (p, Var n t, t)) args argNames argTypes
+    body' <- foldM (\body' (pat, head', t) -> patToIla pat t head' body') body argExpTypes
+    return $ Case head [] [ Alt (DataCon $ convertName con) argNames body' , Alt Default [] $ makeError expType ]
 patToIla (HsPTuple pats) t head body =
     patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body
 patToIla (HsPList []) t head body = return
     $ Case head [] [Alt nilCon [] body, Alt Default [] $ makeError t]
-    where nilCon = DataCon $ VariableName "[]"
+    where nilCon = DataCon "[]"
 patToIla (HsPList (p : ps)) listType head body = do
     elementType <- T.unmakeList listType
     headName    <- freshVarName
     tailName    <- freshVarName
     headExpr    <- patToIla p elementType (Var headName elementType) body
     tailExpr <- patToIla (HsPList ps) listType (Var tailName listType) headExpr
-    return $ Case
-        head
-        []
-        [ Alt (DataCon $ VariableName ":") [headName, tailName] tailExpr
-        , Alt Default [] $ makeError listType
-        ]
+    return $ Case head [] [ Alt (DataCon ":") [headName, tailName] tailExpr , Alt Default [] $ makeError listType ]
 patToIla (HsPParen pat     ) t head body = patToIla pat t head body
 patToIla (HsPAsPat name pat) t head body = do
     expr      <- patToIla pat t head body
     asArgName <- getRenamed (convertName name)
     case expr of
-        Case head' captures alts' ->
-            return $ Case head' (asArgName : captures) alts'
-        _ -> throwError "@ pattern binding non-case translation"
+        Case head' captures alts' -> return $ Case head' (asArgName : captures) alts'
+        _                         -> throwError "@ pattern binding non-case translation"
 patToIla HsPWildCard _ head body = return $ Case head [] [Alt Default [] body]
 patToIla p _ _ _ = throwError $ "Unsupported pattern: " <> showt p

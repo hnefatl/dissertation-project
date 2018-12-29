@@ -2,6 +2,7 @@ import Test.Tasty
 
 import AlphaEqSpec
 import Backend.DeoverloadSpec
+import Backend.ILAANFSpec
 import Backend.ILASpec
 import BasicPrelude
 import Preprocessor.DependencySpec
@@ -30,7 +31,8 @@ tests = testGroup "Tests"
     ,
         testGroup "Backend"
             [ Backend.DeoverloadSpec.test
-            , Backend.ILASpec.test ]
+            , Backend.ILASpec.test
+            , Backend.ILAANFSpec.test ]
     ]
 
 main :: IO ()

@@ -25,7 +25,7 @@ writeLog l = writeLogs [l]
 
 newtype LoggerT m a = LoggerT (StateT (Seq Text) m a)
     deriving (Functor, Applicative, Monad, MonadTrans)
-type Logger a = LoggerT Identity a
+type Logger = LoggerT Identity
 
 evalLoggerT :: Monad m => LoggerT m a -> m a
 evalLoggerT = fmap fst . runLoggerT

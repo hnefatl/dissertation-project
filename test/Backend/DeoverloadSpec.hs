@@ -6,14 +6,14 @@ import Test.Tasty.HUnit        (assertFailure, testCase)
 import Language.Haskell.Parser
 
 import BasicPrelude
-import Control.Monad.Except    (runExcept)
+import Control.Monad.Except    (runExcept, runExceptT)
 import Data.Text               (unpack)
 import Formatting              (sformat, stext, (%))
 
 import AlphaEq
 import Backend.Deoverload
 import ExtraDefs               (deline, pretty, synPrint)
-import Logger                  (runLoggerT)
+import Logger                  (runLoggerT, runLogger)
 import NameGenerator
 import Typechecker.Hardcoded
 import Typechecker.Typechecker
@@ -40,7 +40,8 @@ makeTest sActual sExpected =
                 assertMsg actual = unlines ["Expected:", pretty expected', "Got:", pretty actual]
                 expected' = stripModuleParens expected
             actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, prettified taggedModule, deoverloadMsg, pretty tState, pretty dState])
-            unpackEither (alphaEqError expected' actual) (\err -> unlines [err, prettified actual, assertMsg actual, pretty dState])
+            let (result, alphaLogs) = runLogger $ runExceptT $ alphaEqError expected' actual
+            unpackEither result (\err -> unlines [err, prettified actual, assertMsg actual, pretty dState])
         (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
         (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 

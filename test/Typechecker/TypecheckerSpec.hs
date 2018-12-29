@@ -39,11 +39,11 @@ inferModule' s = (runExcept out, state)
             _ <- inferModuleWithBuiltins m -- Discard the updated tree and bound types
             getAllVariableTypes -- Explicitly pull all the variable types, not just the bound ones
 
-testBindings :: Text -> [(Text, QuantifiedType)] -> TestTree
+testBindings :: Text -> [(VariableName, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (unpack $ deline s) $ do
     let (etypes, state) = inferModule' s
     ts <- unpackEither etypes
-    let getResult (name, qt1) = runExcept $ addDebugInfo $ case M.lookup (VariableName name) ts of
+    let getResult (name, qt1) = runExcept $ addDebugInfo $ case M.lookup name ts of
             Nothing  -> throwError "Variable not in environment"
             Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ "Got " <> showt qt2 <> " expected " <> showt qt1
         addDebugInfo action = catchError action (\err -> throwError $ unlines [err, pretty state])

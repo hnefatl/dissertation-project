@@ -17,7 +17,7 @@ import           AlphaEq                 (alphaEqError)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
 import           Backend.ILA
 import           ExtraDefs
-import           Logger                  (clearLogs, runLoggerT)
+import           Logger                  (clearLogs, runLoggerT, runLogger)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
 import           Typechecker.Hardcoded   (builtinKinds)
@@ -34,9 +34,9 @@ makeTest :: Text -> [Binding Expr] -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $
     case evalNameGenerator (runLoggerT $ runExceptT foo) 0 of
         (Left err, logs) -> assertFailure $ unpack $ unlines [err, "Logs:", unlines logs]
-        (Right binds, logs) -> case alphaEqError (S.fromList expected) (S.fromList binds) of
-            Left err -> assertFailure $ unpack $ unlines [err, showt expected, "vs", showt binds, "Logs:", unlines logs]
-            Right () -> return ()
+        (Right binds, _) -> case runLogger $ runExceptT $ alphaEqError (S.fromList expected) (S.fromList binds) of
+            (Left err, logs) -> assertFailure $ unpack $ unlines [err, showt expected, "vs", showt binds, "Logs:", unlines logs]
+            _ -> return ()
     where foo = do
             m <- parse input
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
@@ -53,21 +53,23 @@ test :: TestTree
 test = testGroup "ILA"
     [
         let t = T.makeTuple [typeBool, typeBool]
-            t' = T.makeTuple [t]
+            t' = T.makeFun [typeBool, typeBool] t
+            t'' = T.makeFun [t] $ T.makeTuple [t]
             mainBind = Rec $ M.fromList [
                 ( t2
-                , Case (makeTuple' [true, false] t) [t1] [ Alt Default [] $ makeTuple' [Var t1 t] t' ] )]
-            auxBind = NonRec x (Case (Var t2 t') [] [Alt tupleCon [t3] (Var t3 t), errAlt t])
+                , Case (makeTuple' [true, false] t') [t1] [ Alt Default [] $ makeTuple' [Var t1 t] t'' ] )]
+            auxBind = NonRec x (Case (Var t2 $ T.makeTuple [t]) [] [Alt tupleCon [t3] (Var t3 t), errAlt t])
         in makeTest "x = (True, False)" [mainBind, auxBind]
-        ,
+    ,
         let t = T.makeTuple [typeBool, typeBool]
+            t' = T.makeFun [typeBool, typeBool] t
             mainBind = Rec $ M.fromList [
                 ( t5
-                , Case (makeTuple' [true, false] t) []
+                , Case (makeTuple' [true, false] t') []
                     [ Alt tupleCon [t3, t4] $
                         Case (Var t4 typeBool) [t2]
                             [ Alt Default [] (Case (Var t3 typeBool) [t1]
-                                [ Alt Default [] $ makeTuple' [Var t1 typeBool, Var t2 typeBool] t ]) ]
+                                [ Alt Default [] $ makeTuple' [Var t1 typeBool, Var t2 typeBool] t' ]) ]
                     , errAlt t ] ) ]
             auxBinds =
                 [ NonRec x (Case (Var t5 t) [] [Alt tupleCon [t6, t7] (Var t6 typeBool), errAlt typeBool])
