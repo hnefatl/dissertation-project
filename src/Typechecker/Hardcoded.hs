@@ -1,12 +1,12 @@
 module Typechecker.Hardcoded where
 
-import BasicPrelude
-import qualified Data.Map as M
-import qualified Data.Set as S
+import           BasicPrelude
+import qualified Data.Map                as M
+import qualified Data.Set                as S
 
-import Names
-import Typechecker.Types
-import Typechecker.Typeclasses
+import           Names
+import           Typechecker.Typeclasses
+import           Typechecker.Types
 
 builtinConstructors :: M.Map VariableName QuantifiedType
 builtinConstructors = M.fromList
@@ -22,7 +22,7 @@ builtinConstructors = M.fromList
           maybeT = TypeCon $ TypeConstant (TypeVariableName "Maybe") (KindFun KindStar KindStar)
           maybeA = applyTypeFunUnsafe maybeT ta
 
-    
+
 builtinKinds :: M.Map TypeVariableName Kind
 builtinKinds = M.fromList
     [ (TypeVariableName "Bool", KindStar)
@@ -77,7 +77,7 @@ builtinClasses = M.fromList
                 Qualified S.empty (IsInstance classFractional typeFloat)
             ]
         ),
-        (classShow, Class S.empty $ S.fromList 
+        (classShow, Class S.empty $ S.fromList
             [
                 Qualified S.empty (IsInstance classShow typeBool),
                 Qualified S.empty (IsInstance classShow typeInt),

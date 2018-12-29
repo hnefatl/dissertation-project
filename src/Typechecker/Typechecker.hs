@@ -1,33 +1,39 @@
-{-# Language FlexibleContexts, GeneralizedNewtypeDeriving, LambdaCase, MultiParamTypeClasses, TupleSections, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TupleSections              #-}
 
 module Typechecker.Typechecker where
 
-import BasicPrelude hiding (group)
-import Data.Text (unpack)
-import TextShow (showt)
-import TextShow.TH (deriveTextShow)
-import TextShow.Instances ()
-import Control.Applicative (Alternative)
-import Control.Monad.Except (MonadError, ExceptT, Except, runExceptT, throwError, catchError, liftEither)
-import Control.Monad.State.Strict (MonadState, StateT, runStateT, evalStateT, modify, gets)
-import Data.Default (Default, def)
-import qualified Data.Set as S
-import qualified Data.Map as M
-import Language.Haskell.Syntax as Syntax
+import           BasicPrelude                hiding (group)
+import           Control.Applicative         (Alternative)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, liftEither, runExceptT,
+                                              throwError)
+import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, gets, modify, runStateT)
+import           Data.Default                (Default, def)
+import qualified Data.Map                    as M
+import qualified Data.Set                    as S
+import           Data.Text                   (unpack)
+import           Language.Haskell.Syntax     as Syntax
+import           TextShow                    (showt)
+import           TextShow.Instances          ()
+import           TextShow.TH                 (deriveTextShow)
 
-import AlphaEq
-import Logger
-import ExtraDefs
-import Names
-import NameGenerator
-import Typechecker.Hardcoded
-import Typechecker.Types
-import Typechecker.Unifier
-import Typechecker.Substitution
-import Typechecker.Typeclasses
-import Typechecker.Simplifier
-import Preprocessor.ContainedNames (getDeclsBoundNames)
-import Preprocessor.Dependency
+import           AlphaEq
+import           ExtraDefs
+import           Logger
+import           NameGenerator
+import           Names
+import           Preprocessor.ContainedNames (getDeclsBoundNames)
+import           Preprocessor.Dependency
+import           Typechecker.Hardcoded
+import           Typechecker.Simplifier
+import           Typechecker.Substitution
+import           Typechecker.Typeclasses
+import           Typechecker.Types
+import           Typechecker.Unifier
 
 
 -- |Maps globally unique names of functions/variables/data constructors to a type variable representing their type.
@@ -36,13 +42,13 @@ type TypeMap = M.Map VariableName TypeVariableName
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
 data InferrerState = InferrerState
-    { substitutions :: Substitution
-    , variableTypes :: M.Map VariableName TypeVariableName -- "In progress" variable -> type variable mappings
-    , bindings :: M.Map VariableName QuantifiedType -- "Finished" variable -> fully described quantified type mappings
+    { substitutions    :: Substitution
+    , variableTypes    :: M.Map VariableName TypeVariableName -- "In progress" variable -> type variable mappings
+    , bindings         :: M.Map VariableName QuantifiedType -- "Finished" variable -> fully described quantified type mappings
     , classEnvironment :: ClassEnvironment
-    , kinds :: M.Map TypeVariableName Kind
-    , typePredicates :: M.Map TypeVariableName (S.Set ClassName)
-    , variableCounter :: Int }
+    , kinds            :: M.Map TypeVariableName Kind
+    , typePredicates   :: M.Map TypeVariableName (S.Set ClassName)
+    , variableCounter  :: Int }
 deriveTextShow ''InferrerState
 
 instance Default InferrerState where
@@ -156,7 +162,7 @@ mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
 addTypePredicate (IsInstance classname (TypeCon (TypeConstant name _))) = addTypeConstraint name classname
-addTypePredicate (IsInstance _ TypeApp{}) = throwError "Not implemented, but should be"
+addTypePredicate (IsInstance _ TypeApp{})                               = throwError "Not implemented, but should be"
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
 addTypePredicates = mapM_ addTypePredicate
 
@@ -483,18 +489,18 @@ updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDecls
 
 updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
-updateDeclTypeTags _ = throwError "Unsupported declaration when updating type tags"
+updateDeclTypeTags _                        = throwError "Unsupported declaration when updating type tags"
 updateDeclsTypeTags :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 updateDeclsTypeTags = mapM updateDeclTypeTags
 
 updateRhsTypeTags :: Syntax.HsRhs -> TypeInferrer Syntax.HsRhs
 updateRhsTypeTags (HsUnGuardedRhs e) = HsUnGuardedRhs <$> updateExpTypeTags e
-updateRhsTypeTags (HsGuardedRhss _) = throwError "Unsupported RHS when updating type tags"
+updateRhsTypeTags (HsGuardedRhss _)  = throwError "Unsupported RHS when updating type tags"
 
 updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
 updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
     HsQualType [] (HsTyVar tv) -> qualTypeToSyn =<< getQualifiedType (convertName tv)
-    qt -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+    qt                         -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
 updateExpTypeTags (HsInfixApp e1 op e2) = HsInfixApp <$> updateExpTypeTags e1 <*> pure op <*> updateExpTypeTags e2
 updateExpTypeTags (HsApp e1 e2) = HsApp <$> updateExpTypeTags e1 <*> updateExpTypeTags e2
 updateExpTypeTags (HsNegApp e) = HsNegApp <$> updateExpTypeTags e

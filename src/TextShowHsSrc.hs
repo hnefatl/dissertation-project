@@ -1,4 +1,4 @@
-{-# Language TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# Options_GHC -fno-warn-orphans #-}
 
 -- |We want to be able to show `haskell-src` ASTs as `Text`, but the definition of `TextShow` and the AST nodes are in
@@ -6,8 +6,8 @@
 -- Also using TH to reduce instance boilerplate
 module TextShowHsSrc where
 
-import TextShow.TH (deriveTextShow)
 import Language.Haskell.Syntax
+import TextShow.TH             (deriveTextShow)
 
 deriveTextShow ''HsModule
 deriveTextShow ''HsExportSpec

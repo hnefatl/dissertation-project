@@ -1,16 +1,19 @@
-{-# Language FlexibleContexts, FlexibleInstances, LambdaCase, ConstraintKinds #-}
+{-# LANGUAGE ConstraintKinds   #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase        #-}
 
 module Typechecker.Simplifier where
 
-import BasicPrelude
-import TextShow (showt)
-import Data.Foldable (foldlM)
-import Control.Monad.Except (MonadError, throwError)
-import qualified Data.Set as S
+import           BasicPrelude
+import           Control.Monad.Except    (MonadError, throwError)
+import           Data.Foldable           (foldlM)
+import qualified Data.Set                as S
+import           TextShow                (showt)
 
-import NameGenerator
-import Typechecker.Types
-import Typechecker.Typeclasses
+import           NameGenerator
+import           Typechecker.Typeclasses
+import           Typechecker.Types
 
 type Simplifier m = (MonadNameGenerator m, MonadError Text m)
 

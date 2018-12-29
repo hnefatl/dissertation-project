@@ -1,23 +1,26 @@
-{-# Language GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, LambdaCase #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 
 module AlphaEq where
 
-import BasicPrelude
-import TextShow (TextShow, showt)
-import TextShow.Instances ()
-import Control.Monad.State.Strict (MonadState, State, runState, evalState, modify, gets)
-import Control.Monad.Except (MonadError, ExceptT, runExceptT, throwError, catchError, liftEither)
-import Control.Monad.Extra (findM)
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-import Language.Haskell.Syntax
-import Data.Either (isRight)
+import           BasicPrelude
+import           Control.Monad.Except       (ExceptT, MonadError, catchError, liftEither, runExceptT, throwError)
+import           Control.Monad.Extra        (findM)
+import           Control.Monad.State.Strict (MonadState, State, evalState, gets, modify, runState)
+import           Data.Either                (isRight)
+import qualified Data.Map.Strict            as M
+import qualified Data.Set                   as S
+import           Language.Haskell.Syntax
+import           TextShow                   (TextShow, showt)
+import           TextShow.Instances         ()
 
-import ExtraDefs (synPrint)
-import Names
-import TextShowHsSrc ()
-import Typechecker.Types
-import Backend.ILA
+import           Backend.ILA
+import           ExtraDefs                  (synPrint)
+import           Names
+import           TextShowHsSrc              ()
+import           Typechecker.Types
 
 newtype AlphaEqM a = AlphaEqM { inner :: ExceptT Text (State (M.Map Text Text)) a }
     deriving (Functor, Applicative, Monad, MonadState (M.Map Text Text), MonadError Text)
@@ -54,9 +57,9 @@ instance AlphaEq Text where
 -- Standard useful instances
 -- Lists compare pairwise
 instance AlphaEq a => AlphaEq [a] where
-    alphaEq' [] [] = return ()
+    alphaEq' [] []         = return ()
     alphaEq' (x:xs) (y:ys) = alphaEq' x y >> alphaEq' xs ys
-    alphaEq' xs ys = throwError $ unlines ["List length mismatch:", showt xs, "vs", showt ys]
+    alphaEq' xs ys         = throwError $ unlines ["List length mismatch:", showt xs, "vs", showt ys]
 -- Pairs compare... pairwise
 instance (AlphaEq a, AlphaEq b) => AlphaEq (a, b) where
     alphaEq' (x1, y1) (x2, y2) = alphaEq' x1 x2 >> alphaEq' y1 y2
@@ -125,7 +128,7 @@ instance AlphaEq HsPat where
     alphaEq' (HsPLit l1) (HsPLit l2) =
         unless (l1 == l2) $ throwError $ unlines [ "Literal pat mismatch:", synPrint l1, "vs", synPrint l2 ]
     alphaEq' (HsPApp con1 ps1) (HsPApp con2 ps2) = do
-        alphaEq' (convertName con1 :: Text) (convertName con2) 
+        alphaEq' (convertName con1 :: Text) (convertName con2)
         alphaEq' ps1 ps2
     alphaEq' (HsPTuple ps1) (HsPTuple ps2) = alphaEq' ps1 ps2
     alphaEq' (HsPList ps1) (HsPList ps2) = alphaEq' ps1 ps2
@@ -198,29 +201,29 @@ instance AlphaEq Expr where
     alphaEq' e1 e2 = throwError $ unlines [ "Expression mismatch:", showt e1, "vs", showt e2 ]
 instance AlphaEq Binding where
     alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (Rec m1) (Rec m2) = alphaEq' m1 m2
-    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+    alphaEq' (Rec m1) (Rec m2)             = alphaEq' m1 m2
+    alphaEq' b1 b2                         = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
 
 
 stripModuleParens :: HsModule -> HsModule
 stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)
 stripDeclParens :: HsDecl -> HsDecl
 stripDeclParens (HsPatBind l p r ds) = HsPatBind l p (stripRhsParens r) (stripDeclsParens ds)
-stripDeclParens _ = error "Unsupported declaration in paren strip"
+stripDeclParens _                    = error "Unsupported declaration in paren strip"
 stripDeclsParens :: [HsDecl] -> [HsDecl]
 stripDeclsParens = map stripDeclParens
 stripRhsParens :: HsRhs -> HsRhs
 stripRhsParens (HsUnGuardedRhs e) = HsUnGuardedRhs (stripExpParens e)
-stripRhsParens _ = error "Unsupported RHS in paren strip"
+stripRhsParens _                  = error "Unsupported RHS in paren strip"
 stripExpParens :: HsExp -> HsExp
-stripExpParens (HsParen e) = stripExpParens e
-stripExpParens (HsApp e1 e2) = HsApp (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsParen e)           = stripExpParens e
+stripExpParens (HsApp e1 e2)         = HsApp (stripExpParens e1) (stripExpParens e2)
 stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
-stripExpParens (HsNegApp e) = HsNegApp (stripExpParens e)
-stripExpParens (HsLambda l ps e) = HsLambda l ps (stripExpParens e)
-stripExpParens (HsIf c e1 e2) = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
-stripExpParens (HsLet ds e) = HsLet ds (stripExpParens e)
-stripExpParens (HsTuple es) = HsTuple (map stripExpParens es)
-stripExpParens (HsList es) = HsList (map stripExpParens es)
-stripExpParens (HsExpTypeSig l e t) = HsExpTypeSig l (stripExpParens e) t
-stripExpParens e = e
+stripExpParens (HsNegApp e)          = HsNegApp (stripExpParens e)
+stripExpParens (HsLambda l ps e)     = HsLambda l ps (stripExpParens e)
+stripExpParens (HsIf c e1 e2)        = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
+stripExpParens (HsLet ds e)          = HsLet ds (stripExpParens e)
+stripExpParens (HsTuple es)          = HsTuple (map stripExpParens es)
+stripExpParens (HsList es)           = HsList (map stripExpParens es)
+stripExpParens (HsExpTypeSig l e t)  = HsExpTypeSig l (stripExpParens e) t
+stripExpParens e                     = e

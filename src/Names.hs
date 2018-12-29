@@ -1,11 +1,14 @@
-{-# Language MultiParamTypeClasses, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
 
 module Names where
 
 import BasicPrelude
-import Data.Text (unpack, pack)
-import TextShow (TextShow, showb, fromText)
+import Data.Text               (pack, unpack)
 import Language.Haskell.Syntax as Syntax
+import TextShow                (TextShow, fromText, showb)
 
 newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
@@ -35,15 +38,15 @@ class NameConvertible n1 n2 where
     convertName :: n1 -> n2
 
 instance NameConvertible Syntax.HsName Text where
-    convertName (HsIdent name) = pack name
+    convertName (HsIdent name)  = pack name
     convertName (HsSymbol name) = pack name
 instance NameConvertible Syntax.HsQName Text where
-    convertName (Qual _ name) = convertName name
-    convertName (UnQual name) = convertName name
-    convertName (Special HsUnitCon) = "()"
-    convertName (Special HsListCon) = "[]"
-    convertName (Special HsCons) = ":"
-    convertName (Special HsFunCon) = "->"
+    convertName (Qual _ name)            = convertName name
+    convertName (UnQual name)            = convertName name
+    convertName (Special HsUnitCon)      = "()"
+    convertName (Special HsListCon)      = "[]"
+    convertName (Special HsCons)         = ":"
+    convertName (Special HsFunCon)       = "->"
     convertName (Special (HsTupleCon _)) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
 instance NameConvertible VariableName Text where
     convertName (VariableName n) = n

@@ -1,33 +1,33 @@
-{-# Language FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Backend.ILASpec where
 
-import BasicPrelude hiding (head)
-import TextShow (showt)
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertFailure)
-import Data.Text (unpack, pack)
-import Language.Haskell.Syntax
-import Language.Haskell.Parser (parseModule, ParseResult(..))
-import Control.Monad.Except (MonadError, runExceptT, throwError)
-import qualified Data.Map as M
-import qualified Data.Set as S
+import           BasicPrelude            hiding (head)
+import           Control.Monad.Except    (MonadError, runExceptT, throwError)
+import qualified Data.Map                as M
+import qualified Data.Set                as S
+import           Data.Text               (pack, unpack)
+import           Language.Haskell.Parser (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.HUnit        (assertFailure, testCase)
+import           TextShow                (showt)
 
-import AlphaEq (alphaEqError)
-import ExtraDefs
-import Logger (runLoggerT, clearLogs)
-import Names
-import NameGenerator (evalNameGenerator, freshDummyVarName)
-import Typechecker.Types hiding (makeTuple, makeList, makeFun)
-import qualified Typechecker.Types as T
-import Typechecker.Typechecker
-import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
-import Typechecker.Hardcoded (builtinKinds)
-import Backend.ILA
+import           AlphaEq                 (alphaEqError)
+import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
+import           Backend.ILA
+import           ExtraDefs
+import           Logger                  (clearLogs, runLoggerT)
+import           NameGenerator           (evalNameGenerator, freshDummyVarName)
+import           Names
+import           Typechecker.Hardcoded   (builtinKinds)
+import           Typechecker.Typechecker
+import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
+import qualified Typechecker.Types       as T
 
 parse :: MonadError Text m => Text -> m HsModule
 parse s = case parseModule $ unpack s of
-    ParseOk m -> return m
+    ParseOk m           -> return m
     ParseFailed loc msg -> throwError $ pack msg <> ": " <> showt loc
 
 makeTest :: Text -> [Binding] -> TestTree

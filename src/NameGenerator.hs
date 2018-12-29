@@ -1,16 +1,19 @@
-{-# Language MultiParamTypeClasses, GeneralizedNewtypeDeriving, FlexibleInstances, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module NameGenerator where
 
 import BasicPrelude
-import TextShow
 import Control.Monad.Except
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Control.Monad.State.Strict
-import Control.Monad.Identity
+import TextShow
 
-import Names
 import Logger
+import Names
 
 type NameGeneratorCounter = Int
 class Monad m => MonadNameGenerator m where

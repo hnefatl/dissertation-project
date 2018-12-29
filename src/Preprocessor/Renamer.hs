@@ -1,33 +1,38 @@
-{-# Language GeneralizedNewtypeDeriving, TupleSections, MultiParamTypeClasses, FlexibleContexts, LambdaCase, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TupleSections              #-}
 
 module Preprocessor.Renamer where
 
-import BasicPrelude
-import Data.Text (unpack)
-import TextShow (TextShow, showt)
-import TextShow.Instances ()
-import TextShow.TH (deriveTextShow)
-import Language.Haskell.Syntax
-import Data.Default (Default, def)
-import Data.Tuple ()
-import Control.Monad.State.Strict (StateT, MonadState, runStateT, evalStateT, modify, gets)
-import Control.Monad.Except (ExceptT, Except, MonadError, runExceptT, throwError, liftEither)
-import qualified Data.Set as S
-import qualified Data.Map.Strict as M
+import           BasicPrelude
+import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
+import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, gets, modify, runStateT)
+import           Data.Default                (Default, def)
+import qualified Data.Map.Strict             as M
+import qualified Data.Set                    as S
+import           Data.Text                   (unpack)
+import           Data.Tuple                  ()
+import           Language.Haskell.Syntax
+import           TextShow                    (TextShow, showt)
+import           TextShow.Instances          ()
+import           TextShow.TH                 (deriveTextShow)
 
-import Names
-import NameGenerator
-import Preprocessor.ContainedNames
+import           NameGenerator
+import           Names
+import           Preprocessor.ContainedNames
 
 data RenamerState = RenamerState
       -- Used to generate unique variable names
-    { variableCounter :: Int
+    { variableCounter            :: Int
       -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
-    , variableBindings :: M.Map VariableName [UniqueVariableName] 
+    , variableBindings           :: M.Map VariableName [UniqueVariableName]
       -- A reverse mapping from unique names to their original variable name: useful for printing error messages.
-    , variableReverseMapping :: M.Map UniqueVariableName VariableName
+    , variableReverseMapping     :: M.Map UniqueVariableName VariableName
     -- Analogous to the above but for type variables
-    , typeVariableBindings :: M.Map TypeVariableName [UniqueTypeVariableName]
+    , typeVariableBindings       :: M.Map TypeVariableName [UniqueTypeVariableName]
     , typeVariableReverseMapping :: M.Map UniqueTypeVariableName TypeVariableName }
 instance Default RenamerState where
     def = RenamerState
@@ -77,8 +82,8 @@ bindVariableForScope names action = do
     forM_ names $ \name -> do
         bindings' <- gets variableBindings
         case M.lookup name bindings' of
-            Nothing -> throwError $ "Variable " <> showt name <> " is not defined."
-            Just [] -> throwError $ "Variable " <> showt name <> " is not in scope."
+            Nothing     -> throwError $ "Variable " <> showt name <> " is not defined."
+            Just []     -> throwError $ "Variable " <> showt name <> " is not in scope."
             Just (_:bs) -> modify (\s -> s { variableBindings = M.insert name bs bindings' }) -- Pop the first binding
     return result
 -- We need to duplicate the code :( We can't parametrise on record fields like `typeVariableBindings`. Could use
@@ -93,8 +98,8 @@ bindTypeVariableForScope names action = do
     forM_ names $ \name -> do
         bindings' <- gets typeVariableBindings
         case M.lookup name bindings' of
-            Nothing -> throwError $ "Type Variable " <> showt name <> " is not defined."
-            Just [] -> throwError $ "Type Variable " <> showt name <> " is not in scope."
+            Nothing     -> throwError $ "Type Variable " <> showt name <> " is not defined."
+            Just []     -> throwError $ "Type Variable " <> showt name <> " is not in scope."
             Just (_:bs) -> modify (\s -> s { typeVariableBindings = M.insert name bs bindings' })
     return result
 
@@ -106,11 +111,11 @@ renameModule :: Rename HsModule
 renameModule (HsModule a b c d e) = HsModule a b c d <$> renameDeclGroup e
 
 renameVariable :: Rename HsName
-renameVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@(HsIdent _)  = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameVariableQ :: Rename HsQName
-renameVariableQ (Qual m n) = Qual m <$> renameVariable n
-renameVariableQ (UnQual n) = UnQual <$> renameVariable n
+renameVariableQ (Qual m n)  = Qual m <$> renameVariable n
+renameVariableQ (UnQual n)  = UnQual <$> renameVariable n
 renameVariableQ (Special _) = throwError "Special forms not supported"
 renameTypeVariable :: Rename HsName
 renameTypeVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
@@ -135,8 +140,8 @@ renameDeclGroupWith decls action = do
 -- |Rename variables in a single declaration: here we take into account the nesting scope of a "where" clause
 renameDecl :: Rename HsDecl
 renameDecl (HsPatBind loc pat rhs decls) = HsPatBind loc <$> renamePat pat <*> renameRhs rhs <*> renameDeclGroup decls
-renameDecl (HsFunBind matches) = HsFunBind <$> mapM renameMatch matches
-renameDecl _ = throwError "Declaration not supported"
+renameDecl (HsFunBind matches)           = HsFunBind <$> mapM renameMatch matches
+renameDecl _                             = throwError "Declaration not supported"
 
 renameMatch :: Rename HsMatch
 renameMatch (HsMatch loc funName pats rhs decls) = do
@@ -148,21 +153,21 @@ renameMatch (HsMatch loc funName pats rhs decls) = do
 
 renameRhs :: Rename HsRhs
 renameRhs (HsUnGuardedRhs e) = HsUnGuardedRhs <$> renameExp e
-renameRhs (HsGuardedRhss _) = throwError "Guarded RHS's not supported"
+renameRhs (HsGuardedRhss _)  = throwError "Guarded RHS's not supported"
 
 renamePat :: Rename HsPat
-renamePat (HsPVar n) = HsPVar <$> renameVariable n
-renamePat l@(HsPLit _) = return l
-renamePat (HsPNeg p) = HsPNeg <$> renamePat p
+renamePat (HsPVar n)            = HsPVar <$> renameVariable n
+renamePat l@(HsPLit _)          = return l
+renamePat (HsPNeg p)            = HsPNeg <$> renamePat p
 renamePat (HsPInfixApp p1 n p2) = HsPInfixApp <$> renamePat p1 <*> renameVariableQ n <*> renamePat p2
-renamePat (HsPApp con ps) = HsPApp con <$> renamePats ps
-renamePat (HsPTuple ps) = HsPTuple <$> renamePats ps
-renamePat (HsPList ps) = HsPList <$> renamePats ps
-renamePat (HsPParen p) = HsPParen <$> renamePat p
-renamePat (HsPRec _ _) = throwError "Record fields not supported"
-renamePat (HsPAsPat n p) = HsPAsPat <$> renameVariable n <*> renamePat p
-renamePat HsPWildCard = return HsPWildCard
-renamePat (HsPIrrPat p) = HsPIrrPat <$> renamePat p
+renamePat (HsPApp con ps)       = HsPApp con <$> renamePats ps
+renamePat (HsPTuple ps)         = HsPTuple <$> renamePats ps
+renamePat (HsPList ps)          = HsPList <$> renamePats ps
+renamePat (HsPParen p)          = HsPParen <$> renamePat p
+renamePat (HsPRec _ _)          = throwError "Record fields not supported"
+renamePat (HsPAsPat n p)        = HsPAsPat <$> renameVariable n <*> renamePat p
+renamePat HsPWildCard           = return HsPWildCard
+renamePat (HsPIrrPat p)         = HsPIrrPat <$> renamePat p
 renamePats :: Rename [HsPat]
 renamePats = mapM renamePat
 
@@ -198,7 +203,7 @@ renameAssts :: Rename [HsAsst]
 renameAssts = mapM renameAsst
 renameType :: Rename HsType
 renameType (HsTyFun t1 t2) = HsTyFun <$> renameType t1 <*> renameType t2
-renameType (HsTyTuple ts) = HsTyTuple <$> mapM renameType ts
+renameType (HsTyTuple ts)  = HsTyTuple <$> mapM renameType ts
 renameType (HsTyApp t1 t2) = HsTyApp <$> renameType t1 <*> renameType t2
-renameType (HsTyVar n) = HsTyVar <$> renameTypeVariable n
-renameType (HsTyCon c) = return $ HsTyCon c
+renameType (HsTyVar n)     = HsTyVar <$> renameTypeVariable n
+renameType (HsTyCon c)     = return $ HsTyCon c

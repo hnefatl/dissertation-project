@@ -1,17 +1,19 @@
-{-# Language FlexibleContexts, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Typechecker.Substitution where
 
-import BasicPrelude
-import TextShow (TextShow, showb, showt)
-import Data.Text (unpack)
-import Data.Default (Default, def)
-import Control.Monad.Except (MonadError, throwError)
-import qualified Data.Set as S
-import qualified Data.Map.Strict as M
+import           BasicPrelude
+import           Control.Monad.Except (MonadError, throwError)
+import           Data.Default         (Default, def)
+import qualified Data.Map.Strict      as M
+import qualified Data.Set             as S
+import           Data.Text            (unpack)
+import           TextShow             (TextShow, showb, showt)
 
-import Names
-import Typechecker.Types
+import           Names
+import           Typechecker.Types
 
 -- |A substitution is a collection of assignments of a type to a variable
 newtype Substitution = Substitution (M.Map TypeVariableName Type) deriving (Eq)
@@ -39,12 +41,12 @@ getSubstitutedTypeVariables (Substitution sub) tvs = S.unions $ map getTvs (S.to
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable Type where
     applySub (Substitution subs) t@(TypeVar (TypeVariable name _)) = M.findWithDefault t name subs
-    applySub _ t@(TypeCon _) = t
-    applySub sub (TypeApp t1 t2 kind) = TypeApp (applySub sub t1) (applySub sub t2) kind
-    
+    applySub _ t@(TypeCon _)                                       = t
+    applySub sub (TypeApp t1 t2 kind)                              = TypeApp (applySub sub t1) (applySub sub t2) kind
+
     getTypeVars (TypeVar (TypeVariable name _)) = S.singleton name
-    getTypeVars (TypeCon _) = S.empty
-    getTypeVars (TypeApp t1 t2 _) = S.union (getTypeVars t1) (getTypeVars t2)
+    getTypeVars (TypeCon _)                     = S.empty
+    getTypeVars (TypeApp t1 t2 _)               = S.union (getTypeVars t1) (getTypeVars t2)
 instance Substitutable TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
     getTypeVars (IsInstance _ t) = getTypeVars t
@@ -81,7 +83,7 @@ subMultiple = subComposes . map (uncurry subSingle)
 
 
 -- |Composition of substitutions
--- 
+--
 -- > (s1 `subCompose` s2) `applySub` <exp> = (s1 . s2)<exp> = s2(s1<exp>)
 subCompose :: Substitution -> Substitution -> Substitution
 subCompose (Substitution subs1) s2@(Substitution subs2) = Substitution (M.union subs1' subs2)

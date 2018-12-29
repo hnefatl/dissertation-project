@@ -1,26 +1,26 @@
 module Backend.DeoverloadSpec where
 
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertFailure)
+import Test.Tasty              (TestTree, testGroup)
+import Test.Tasty.HUnit        (assertFailure, testCase)
 
 import Language.Haskell.Parser
 
 import BasicPrelude
-import Formatting (sformat, stext, (%))
-import Control.Monad.Except (runExcept)
-import Data.Text (unpack)
+import Control.Monad.Except    (runExcept)
+import Data.Text               (unpack)
+import Formatting              (sformat, stext, (%))
 
 import AlphaEq
-import Logger (runLoggerT)
-import ExtraDefs (pretty, synPrint, deline)
-import NameGenerator
-import Typechecker.Typechecker
-import Typechecker.Hardcoded
 import Backend.Deoverload
+import ExtraDefs               (deline, pretty, synPrint)
+import Logger                  (runLoggerT)
+import NameGenerator
+import Typechecker.Hardcoded
+import Typechecker.Typechecker
 
 unpackEither :: Either e a -> (e -> Text) -> IO a
 unpackEither (Left err) f = assertFailure $ unpack (f err)
-unpackEither (Right x) _ = return x
+unpackEither (Right x) _  = return x
 
 makeTest :: Text -> Text -> TestTree
 makeTest sActual sExpected =
@@ -73,7 +73,7 @@ test = testGroup "Deoverload"
     , makeTest
         "f = \\x -> x + x ; y = f (0 :: Int)"
         "f = (\\d -> (\\x -> ((((+) :: Num a -> a -> a -> a) (d :: Num a) :: a -> a -> a) ((x :: Num a -> a) (d :: Num a) :: a) :: a -> a) ((x :: Num a -> a) (d :: Num a) :: a) :: a) :: a -> a) :: Num a -> a -> a ; y = ((f :: Num Int -> Int -> Int) (dNumInt :: Num Int) :: Int -> Int) (((0 :: Int) :: Int) :: Int) :: Int"
-    , let 
+    , let
         a = unlines
             [ "const = \\x _ -> x"
             , "f = \\y z -> const (y == y) (z + z)"

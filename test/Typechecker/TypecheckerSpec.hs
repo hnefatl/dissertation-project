@@ -1,33 +1,33 @@
-{-# Language FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Typechecker.TypecheckerSpec where
 
-import BasicPrelude
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertFailure, assertBool)
+import           BasicPrelude
+import           Test.Tasty                 (TestTree, testGroup)
+import           Test.Tasty.HUnit           (assertBool, assertFailure, testCase)
 
-import Language.Haskell.Syntax
-import Language.Haskell.Parser (parseModule, ParseResult(..))
+import           Language.Haskell.Parser    (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax
 
-import AlphaEq (alphaEq)
-import ExtraDefs (deline, pretty)
-import Logger (runLoggerT)
-import Names (VariableName(..), TypeVariableName(..))
-import NameGenerator (evalNameGenerator)
-import Typechecker.Types
-import Typechecker.Typechecker
+import           AlphaEq                    (alphaEq)
+import           ExtraDefs                  (deline, pretty)
+import           Logger                     (runLoggerT)
+import           NameGenerator              (evalNameGenerator)
+import           Names                      (TypeVariableName(..), VariableName(..))
+import           Typechecker.Typechecker
+import           Typechecker.Types
 
-import TextShow (showt)
-import Data.Either (isLeft)
-import Data.Text (unpack, pack)
-import Control.Monad.State.Strict (get)
-import Control.Monad.Except (MonadError, runExcept, throwError, catchError)
-import qualified Data.Set as S
-import qualified Data.Map as M
+import           Control.Monad.Except       (MonadError, catchError, runExcept, throwError)
+import           Control.Monad.State.Strict (get)
+import           Data.Either                (isLeft)
+import qualified Data.Map                   as M
+import qualified Data.Set                   as S
+import           Data.Text                  (pack, unpack)
+import           TextShow                   (showt)
 
 parse :: MonadError Text m => Text -> m HsModule
 parse s = case parseModule (unpack s) of
-    ParseOk m -> return m
+    ParseOk m           -> return m
     ParseFailed loc msg -> throwError $ pack msg <> ": " <> showt loc
 
 inferModule' :: Text -> (Either Text (M.Map VariableName QuantifiedType), InferrerState)
@@ -44,7 +44,7 @@ testBindings s cases = testCase (unpack $ deline s) $ do
     let (etypes, state) = inferModule' s
     ts <- unpackEither etypes
     let getResult (name, qt1) = runExcept $ addDebugInfo $ case M.lookup (VariableName name) ts of
-            Nothing -> throwError "Variable not in environment"
+            Nothing  -> throwError "Variable not in environment"
             Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ "Got " <> showt qt2 <> " expected " <> showt qt1
         addDebugInfo action = catchError action (\err -> throwError $ unlines [err, pretty state])
         check x@(name, _) = either (\e -> assertFailure $ unpack $ showt name <> ": " <> showt e) return (getResult x)
@@ -96,7 +96,7 @@ test = let
         testBindingsFail "x = Foo"
     ,
         -- Pattern matching
-        let s = "(x, y) = (1, True)" 
+        let s = "(x, y) = (1, True)"
         in testBindings s
             [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
@@ -121,9 +121,9 @@ test = let
             [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
-        testBindingsFail "(x, y) = True" 
+        testBindingsFail "(x, y) = True"
     ,
-        let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))" 
+        let s = "(x, (y, z, w)) = (1, (True, False, \"Hi\"))"
         in testBindings s
             [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool)
@@ -150,17 +150,17 @@ test = let
         in testBindings s [("+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
     ,
         -- Function application (prefix and infix)
-        let s = "x = (+) 3" 
+        let s = "x = (+) 3"
             t = makeFun [ta] ta
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
     ,
-        let s = "x = (+) 3 4" 
+        let s = "x = (+) 3 4"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     ,
-        let s = "x = 1 + 2" 
+        let s = "x = 1 + 2"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     ,
-        let s = "x = 1 + 2 + 3" 
+        let s = "x = 1 + 2 + 3"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
     ,
         let s = "x = 1 + 2 ; y = x + 3"
@@ -284,7 +284,7 @@ test = let
     ,
         testBindings "const = \\x y -> x ; z = const True 1 ; w = const 1 2"
             [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
-            , ("z", Quantified S.empty $ Qualified S.empty typeBool) 
+            , ("z", Quantified S.empty $ Qualified S.empty typeBool)
             , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     --,
     --    -- Test for ambiguity check support

@@ -1,19 +1,19 @@
 module AlphaEqSpec where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import           Test.Tasty
+import           Test.Tasty.HUnit
 
-import BasicPrelude
-import TextShow (TextShow, showt)
-import Control.Monad.Extra (whenJust)
-import Data.Text (pack, unpack)
-import Language.Haskell.Syntax
-import Language.Haskell.Pretty (Pretty, prettyPrint)
-import qualified Data.Set as S
+import           BasicPrelude
+import           Control.Monad.Extra     (whenJust)
+import qualified Data.Set                as S
+import           Data.Text               (pack, unpack)
+import           Language.Haskell.Pretty (Pretty, prettyPrint)
+import           Language.Haskell.Syntax
+import           TextShow                (TextShow, showt)
 
-import AlphaEq
-import Names
-import Typechecker.Types
+import           AlphaEq
+import           Names
+import           Typechecker.Types
 
 synPrint :: Pretty a => a -> Text
 synPrint = pack . prettyPrint

@@ -1,20 +1,22 @@
-{-# Language FlexibleContexts, LambdaCase, TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE TemplateHaskell  #-}
 
 module Typechecker.Typeclasses where
 
-import BasicPrelude
-import TextShow (showt)
-import TextShow.TH (deriveTextShow)
-import Data.Either (isRight)
-import qualified Data.Set as S
-import qualified Data.Map.Strict as M
-import Control.Monad.Except (MonadError, throwError)
+import           BasicPrelude
+import           Control.Monad.Except     (MonadError, throwError)
+import           Data.Either              (isRight)
+import qualified Data.Map.Strict          as M
+import qualified Data.Set                 as S
+import           TextShow                 (showt)
+import           TextShow.TH              (deriveTextShow)
 
-import ExtraDefs
-import Names
-import Typechecker.Types
-import Typechecker.Substitution
-import Typechecker.Unifier
+import           ExtraDefs
+import           Names
+import           Typechecker.Substitution
+import           Typechecker.Types
+import           Typechecker.Unifier
 
 type ClassName = TypeVariableName
 
@@ -30,13 +32,13 @@ type ClassEnvironment = M.Map ClassName TypeClass
 superclasses :: MonadError Text m => ClassName -> ClassEnvironment -> m (S.Set ClassName)
 superclasses name env = case M.lookup name env of
     Just (Class supers _) -> return supers
-    Nothing -> throwError $ "No class " <> showt name <> " in the environment"
+    Nothing               -> throwError $ "No class " <> showt name <> " in the environment"
 
 -- |Get all instances of a given class
 instances :: MonadError Text m => ClassName -> ClassEnvironment -> m (S.Set ClassInstance)
 instances name env = case M.lookup name env of
     Just (Class _ insts) -> return insts
-    Nothing -> throwError $ "No class " <> showt name <> " in the environment"
+    Nothing              -> throwError $ "No class " <> showt name <> " in the environment"
 
 emptyClassEnv :: ClassEnvironment
 emptyClassEnv = M.empty
@@ -77,7 +79,7 @@ ifPThenBySuper ce p@(IsInstance classname ty) = do
 
 -- |Same as above, but getting predicates by unifying with instances of the class - if we match the head of the
 -- instance, return the qualifiers of the instance that we still need to show hold.
--- 
+--
 -- Given eg. `Ord a => Ord [a]`, `ifPThenByInstance ce (IsInstance "Ord" [(a,b)])` returns `IsInstance "Ord" (a,b)`.
 ifPThenByInstance :: MonadError Text m => ClassEnvironment -> TypePredicate -> m (Maybe (S.Set TypePredicate))
 ifPThenByInstance ce p@(IsInstance classname _) = do
@@ -86,7 +88,7 @@ ifPThenByInstance ce p@(IsInstance classname _) = do
     -- overlapping instances, there's at most one instance)
     asum <$> mapM tryMatchInstance (S.toList insts)
     where tryMatchInstance (Qualified qualifiers t) = case match t p of -- Find a substitution
-            Left _ -> return Nothing
+            Left _     -> return Nothing
             -- The new predicates are the constraints on the matching instance
             Right subs -> return $ Just $ applySub subs qualifiers
 

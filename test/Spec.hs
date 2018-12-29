@@ -1,16 +1,16 @@
 import Test.Tasty
 
-import BasicPrelude
 import AlphaEqSpec
-import Preprocessor.RenamerSpec
-import Preprocessor.DependencySpec
-import Typechecker.SubstitutionSpec
-import Typechecker.UnifierSpec
-import Typechecker.TypeTaggerSpec
-import Typechecker.TypeclassesSpec
-import Typechecker.TypecheckerSpec
 import Backend.DeoverloadSpec
 import Backend.ILASpec
+import BasicPrelude
+import Preprocessor.DependencySpec
+import Preprocessor.RenamerSpec
+import Typechecker.SubstitutionSpec
+import Typechecker.TypecheckerSpec
+import Typechecker.TypeclassesSpec
+import Typechecker.TypeTaggerSpec
+import Typechecker.UnifierSpec
 
 tests :: TestTree
 tests = testGroup "Tests"

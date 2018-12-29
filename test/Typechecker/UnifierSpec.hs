@@ -1,19 +1,19 @@
-{-# Language TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 
 module Typechecker.UnifierSpec where
 
-import BasicPrelude
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertEqual)
+import           BasicPrelude
+import           Test.Tasty               (TestTree, testGroup)
+import           Test.Tasty.HUnit         (assertEqual, testCase)
 
-import TextShow (showt)
-import Data.Text (unpack)
-import Names
-import Typechecker.Unifier (mgu, match)
-import Typechecker.Substitution (Substitution(..), subMultiple)
-import Typechecker.Types
+import           Data.Text                (unpack)
+import           Names
+import           TextShow                 (showt)
+import           Typechecker.Substitution (Substitution(..), subMultiple)
+import           Typechecker.Types
+import           Typechecker.Unifier      (match, mgu)
 
-import qualified Data.Map as M
+import qualified Data.Map                 as M
 
 test :: TestTree
 test =

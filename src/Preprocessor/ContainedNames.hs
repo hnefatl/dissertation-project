@@ -1,17 +1,17 @@
-{-# Language FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- |Utility functions for getting variable names from the parse tree
 module Preprocessor.ContainedNames where
 
-import BasicPrelude
-import TextShow (TextShow, showt)
-import Data.Text (pack)
-import Control.Monad.Except (MonadError, throwError)
-import Language.Haskell.Syntax
-import Data.Foldable (foldlM)
-import qualified Data.Set as S
+import           BasicPrelude
+import           Control.Monad.Except    (MonadError, throwError)
+import           Data.Foldable           (foldlM)
+import qualified Data.Set                as S
+import           Data.Text               (pack)
+import           Language.Haskell.Syntax
+import           TextShow                (TextShow, showt)
 
-import Names
+import           Names
 
 
 disjointUnion :: (MonadError Text m, Ord a, TextShow a) => S.Set a -> S.Set a -> m (S.Set a)
@@ -63,14 +63,14 @@ getPatsContainedNames ps = disjointUnions =<< mapM getPatContainedNames ps
 -- |Get all variable names contained within this declaration: excluding those names **bound** by the declaration.
 getDeclContainedNames :: MonadError Text m => HsDecl -> m (S.Set VariableName)
 getDeclContainedNames (HsPatBind _ _ rhs _) = getRhsContainedNames rhs
-getDeclContainedNames (HsFunBind _) = throwError "Variables in a HsMatch not supported"
-getDeclContainedNames _ = throwError "Not supported"
+getDeclContainedNames (HsFunBind _)         = throwError "Variables in a HsMatch not supported"
+getDeclContainedNames _                     = throwError "Not supported"
 getDeclsContainedNames :: MonadError Text m => [HsDecl] -> m (S.Set VariableName)
 getDeclsContainedNames ds = S.unions <$> mapM getDeclContainedNames ds
 
 getRhsContainedNames :: MonadError Text m => HsRhs -> m (S.Set VariableName)
 getRhsContainedNames (HsUnGuardedRhs e) = getExpContainedNames e
-getRhsContainedNames (HsGuardedRhss _) = throwError "Guarded rhss not supported"
+getRhsContainedNames (HsGuardedRhss _)  = throwError "Guarded rhss not supported"
 
 getExpContainedNames :: MonadError Text m => HsExp -> m (S.Set VariableName)
 getExpContainedNames (HsVar name) = return $ S.singleton $ convertName name
@@ -100,7 +100,7 @@ getAsstsContainedNames :: [HsAsst] -> S.Set TypeVariableName
 getAsstsContainedNames = S.unions . map getAsstContainedNames
 getTypeContainedNames :: HsType -> S.Set TypeVariableName
 getTypeContainedNames (HsTyFun t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
-getTypeContainedNames (HsTyTuple ts) = S.unions $ map getTypeContainedNames ts
+getTypeContainedNames (HsTyTuple ts)  = S.unions $ map getTypeContainedNames ts
 getTypeContainedNames (HsTyApp t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
-getTypeContainedNames (HsTyVar n) = S.singleton $ convertName n
-getTypeContainedNames (HsTyCon _) = S.empty
+getTypeContainedNames (HsTyVar n)     = S.singleton $ convertName n
+getTypeContainedNames (HsTyCon _)     = S.empty

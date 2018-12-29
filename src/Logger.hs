@@ -1,16 +1,19 @@
-{-# Language FlexibleInstances, MultiParamTypeClasses, GeneralizedNewtypeDeriving, UndecidableInstances #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 module Logger (MonadLogger, writeLogs, writeLog, getLogs, clearLogs, LoggerT, evalLoggerT, runLoggerT, runStateT, Logger, evalLogger, runLogger) where
 
 import BasicPrelude
-import Control.Monad.Trans (MonadTrans)
-import Control.Monad.State.Strict (MonadState, StateT, runStateT, state, modify, get, put)
-import Control.Monad.Except (MonadError, ExceptT, throwError, catchError)
-import Control.Monad.Reader (MonadReader, ReaderT, ask, local)
-import Control.Monad.Identity (IdentityT, Identity, runIdentity)
-import Data.Sequence (Seq, fromList)
-import Data.Text (Text)
-import Data.Foldable (toList)
+import Control.Monad.Except       (ExceptT, MonadError, catchError, throwError)
+import Control.Monad.Identity     (Identity, IdentityT, runIdentity)
+import Control.Monad.Reader       (MonadReader, ReaderT, ask, local)
+import Control.Monad.State.Strict (MonadState, StateT, get, modify, put, runStateT, state)
+import Control.Monad.Trans        (MonadTrans)
+import Data.Foldable              (toList)
+import Data.Sequence              (Seq, fromList)
+import Data.Text                  (Text)
 
 class Monad m => MonadLogger m where
     writeLogs :: [Text] -> m ()

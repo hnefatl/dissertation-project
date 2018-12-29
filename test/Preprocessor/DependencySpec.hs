@@ -1,26 +1,26 @@
-{-# Language OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Preprocessor.DependencySpec where
 
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertFailure, assertEqual)
+import           Test.Tasty                  (TestTree, testGroup)
+import           Test.Tasty.HUnit            (assertEqual, assertFailure, testCase)
 
-import BasicPrelude
-import TextShow (TextShow, showt)
-import Language.Haskell.Parser (parseModule, ParseResult(..))
-import Language.Haskell.Syntax
-import Control.Monad.Except (runExcept)
-import Data.Text (pack, unpack)
-import Data.Text.Lazy (toStrict)
-import Text.Pretty.Simple (pShow)
-import qualified Data.Set as S
+import           BasicPrelude
+import           Control.Monad.Except        (runExcept)
+import qualified Data.Set                    as S
+import           Data.Text                   (pack, unpack)
+import           Data.Text.Lazy              (toStrict)
+import           Language.Haskell.Parser     (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax
+import           Text.Pretty.Simple          (pShow)
+import           TextShow                    (TextShow, showt)
 
-import ExtraDefs
-import Names
-import TextShowHsSrc ()
-import NameGenerator (evalNameGeneratorT)
-import Preprocessor.Dependency (dependencyOrder)
-import Preprocessor.ContainedNames
+import           ExtraDefs
+import           NameGenerator               (evalNameGeneratorT)
+import           Names
+import           Preprocessor.ContainedNames
+import           Preprocessor.Dependency     (dependencyOrder)
+import           TextShowHsSrc               ()
 
 makeTest :: Text -> [[Text]] -> TestTree
 makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpack input) of
@@ -32,7 +32,7 @@ makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpa
                 assertFailure $ unpack $ "Lengths: " <> pretty cases <> " vs " <> pretty declOrder
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
                 case runExcept (getDeclsBoundNames actualGroup) of
-                    Left err -> assertFailure $ unpack err
+                    Left err         -> assertFailure $ unpack err
                     Right boundNames -> assertEqual "" boundNames (S.fromList $ map VariableName expectedGroup)
 
 

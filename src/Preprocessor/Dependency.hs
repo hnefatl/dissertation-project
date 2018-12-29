@@ -1,16 +1,17 @@
-{-# Language FlexibleContexts, TupleSections #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TupleSections    #-}
 
 module Preprocessor.Dependency where
 
-import BasicPrelude
-import Data.Graph (stronglyConnComp, flattenSCC)
-import qualified Data.Set as S
-import Data.List (nub)
-import Control.Monad.Except (MonadError)
-import Language.Haskell.Syntax
+import           BasicPrelude
+import           Control.Monad.Except        (MonadError)
+import           Data.Graph                  (flattenSCC, stronglyConnComp)
+import           Data.List                   (nub)
+import qualified Data.Set                    as S
+import           Language.Haskell.Syntax
 
-import NameGenerator
-import Preprocessor.ContainedNames
+import           NameGenerator
+import           Preprocessor.ContainedNames
 
 dependencyOrder :: (MonadNameGenerator m, MonadError Text m) => [HsDecl] -> m [[HsDecl]]
 dependencyOrder ds = do
@@ -22,7 +23,7 @@ dependencyOrder ds = do
             -- name and pretend this declaration binds that variable.
             bound' <- if S.null bound then S.singleton <$> freshVarName else return bound
             -- Any variables used in this declaration that are also defined in this binding group
-            boundVars <- getDeclContainedNames d 
+            boundVars <- getDeclContainedNames d
             let contained = S.intersection declBindings boundVars
             -- We make one node for each bound variable: the "node" is the declaration binding that variable, the
             -- key is the variable itself, and the dependencies are all variables used in the declaration along with

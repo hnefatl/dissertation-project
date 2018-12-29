@@ -1,16 +1,19 @@
-{-# Language FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
 
 module Typechecker.Unifier where
 
-import BasicPrelude
-import TextShow (TextShow, showt)
-import TextShow.Instances ()
-import Control.Monad.Except (MonadError, throwError)
-import Data.Either (isRight)
-import qualified Data.Set as S
+import           BasicPrelude
+import           Control.Monad.Except     (MonadError, throwError)
+import           Data.Either              (isRight)
+import qualified Data.Set                 as S
+import           TextShow                 (TextShow, showt)
+import           TextShow.Instances       ()
 
-import Typechecker.Substitution
-import Typechecker.Types
+import           Typechecker.Substitution
+import           Typechecker.Types
 
 class (Ord t, TextShow t, Substitutable t) => Unifiable t where
     -- |Most general unifier of two types
@@ -75,10 +78,10 @@ instance Unifiable t => Unifiable [t] where
             match' _ _ sub = return sub
 instance Unifiable t => Unifiable (Maybe t) where
     mgu (Just x) (Just y) = mgu x y
-    mgu _ _ = throwError "Mismatching Maybe types"
+    mgu _ _               = throwError "Mismatching Maybe types"
 
     match (Just x) (Just y) = match x y
-    match _ _ = throwError "Mismatching Maybe types"
+    match _ _               = throwError "Mismatching Maybe types"
 
 
 -- |unifyVar v t returns a substitution [t/v] like subSingle but performs additional checks

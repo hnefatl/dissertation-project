@@ -1,10 +1,10 @@
 module Typechecker.SubstitutionSpec where
 
 import BasicPrelude
-import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, assertEqual)
-import TextShow (showt)
-import Data.Text (unpack)
+import Data.Text                (unpack)
+import Test.Tasty               (TestTree, testGroup)
+import Test.Tasty.HUnit         (assertEqual, testCase)
+import TextShow                 (showt)
 
 import Names
 import Typechecker.Substitution
