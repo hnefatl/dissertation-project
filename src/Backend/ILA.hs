@@ -17,7 +17,7 @@ import Data.List (foldl', intersperse)
 import Data.Default (Default, def)
 
 import Names
-import ExtraDefs (middleText, synPrint)
+import ExtraDefs (middleText)
 import Logger
 import NameGenerator
 import Typechecker.Types (Type(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Kind)
@@ -43,7 +43,7 @@ instance TextShow Literal where
 data Alt = Alt AltConstructor [VariableName] Expr
     deriving (Eq, Ord)
 instance TextShow Alt where
-    showb (Alt con vs e) = showb con <> " " <> args <> " -> " <> showb e
+    showb (Alt con vs e) = showb con <> (if null vs then "" else " ") <> args <> " -> " <> showb e
         where args = mconcat $ intersperse " " $ map showb vs
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName | LitCon Literal | Default
