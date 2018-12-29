@@ -156,6 +156,25 @@ getPatRenamings pat = do
     renames <- M.fromList <$> mapM (\n -> (n,) <$> freshVarName) boundNames
     return (boundNames, renames)
 
+getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
+getPatVariableTypes (HsPVar v) t = return $ M.singleton (convertName v) t
+getPatVariableTypes (HsPLit _) _ = return $ M.empty
+getPatVariableTypes (HsPApp _ ps) t = do
+    (argTypes, _) <- T.unmakeFun t
+    unless (length ps /= length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
+    M.unions <$> zipWithM getPatVariableTypes ps argTypes
+getPatVariableTypes (HsPTuple ps) t = do
+    argTypes <- T.unmakeTuple t
+    unless (length ps /= length argTypes) $ throwError "Partially applied tuple in ILA lowering"
+    M.unions <$> zipWithM getPatVariableTypes ps argTypes
+getPatVariableTypes (HsPList ps) t = do
+    elementType <- T.unmakeList t
+    M.unions <$> mapM (flip getPatVariableTypes $ elementType) ps
+getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
+getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
+getPatVariableTypes HsPWildCard _ = return M.empty
+getPatVariableTypes _ _ = throwError "Unsupported pattern"
+
 -- TODO(kc506): Enforce that case expressions can only have variable names as their heads, then it's easy to restrict
 -- them to be thunks rather than whole subcomputations?
 -- ^ Think this is ANF, can wait
@@ -209,7 +228,7 @@ rhsToIla (HsGuardedRhss _) = throwError "Guarded RHS not supported"
 expToIla :: HsExp -> Converter Expr
 expToIla (HsVar v) = do
     name <- getRenamedOrDefault (convertName v)
-    Var name <$> getSimpleType name -- Get the type of the renamed variable, if the variable's been renamed
+    Var name <$> getSimpleType name
 expToIla (HsCon c) = Var name <$> getSimpleType name
     where name = convertName c
 expToIla (HsLit l) = Lit <$> litToIla l
@@ -221,11 +240,15 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
     argName <- freshVarName
     Qualified _ expType <- T.synToQualType ks t
     (argType, bodyType) <- T.unwrapFun expType
-    (_, renames) <- getPatRenamings p
     reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
-    writeLog $ "Lambda pattern: added [(" <> synPrint p <> ")/" <> showt argName <> "], " <> showt argName <> " :: " <> showt argType
+    (_, renames) <- getPatRenamings p
+    patVariableTypes <- fmap (Quantified S.empty) <$> getPatVariableTypes p argType
+    let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
+        log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
+        log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
+    writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
-    body <- local (addRenamings renames . addTypes (M.singleton argName $ Quantified S.empty argType)) $ do
+    body <- local (addRenamings renames . addTypes renamedVariableTypes) $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
         patToIla p argType (Var argName argType) nextBody
     return (Lam argName argType body)

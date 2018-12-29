@@ -126,10 +126,10 @@ mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions 
 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types
-makeList :: Type -> Type
-makeList = applyTypeFunUnsafe typeList
 makeFun :: [Type] -> Type -> Type
 makeFun args ret = foldr (applyTypeFunUnsafe . applyTypeFunUnsafe typeFun) ret args
+makeList :: Type -> Type
+makeList = applyTypeFunUnsafe typeList
 makeTuple :: [Type] -> Type
 makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
 
@@ -161,6 +161,11 @@ unmakeList t@(TypeApp t1 t2 _)
     | t1 == typeList = return t2
     | otherwise = throwError $ showt t <> " isn't a list type"
 unmakeList t = throwError $ showt t <> " isn't a list type"
+
+unmakeTuple :: MonadError Text m => Type -> m [Type]
+unmakeTuple (TypeApp (TypeCon (TypeConstant (TypeVariableName "(,)") _)) r _) = return [r]
+unmakeTuple (TypeApp l r _) = (r:) <$> unmakeTuple l
+unmakeTuple t = throwError $ showt t <> " isn't a tuple type"
 
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
