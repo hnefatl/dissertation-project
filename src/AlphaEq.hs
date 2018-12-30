@@ -214,7 +214,7 @@ instance AlphaEq ILA.AltConstructor where
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
 instance AlphaEq ILA.Expr where
     alphaEq' (ILA.Var n1 t1) (ILA.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILA.Lit l1) (ILA.Lit l2) = alphaEq' l1 l2
+    alphaEq' (ILA.Lit l1 t1) (ILA.Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
     alphaEq' (ILA.App e1a e1b) (ILA.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
     alphaEq' (ILA.Lam v1 t1 e1) (ILA.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
     alphaEq' (ILA.Let v1 t1 e1a e1b) (ILA.Let v2 t2 e2a e2b) = do
@@ -227,7 +227,7 @@ instance AlphaEq ILA.Expr where
     alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]
 instance AlphaEq ILAANF.AnfTrivial where
     alphaEq' (ILAANF.Var n1 t1) (ILAANF.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILAANF.Lit l1) (ILAANF.Lit l2) = alphaEq' l1 l2
+    alphaEq' (ILAANF.Lit l1 t1) (ILAANF.Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
     alphaEq' (ILAANF.Lam v1 t1 e1) (ILAANF.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
     alphaEq' (ILAANF.Type t1) (ILAANF.Type t2) = alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]

@@ -68,7 +68,7 @@ instance TextShow a => TextShow (Binding a) where
 
 -- |The AST of ILA
 data Expr = Var VariableName Type -- Variable/function/data constructor
-          | Lit Literal
+          | Lit Literal Type
           | App Expr Expr -- Application of terms or types
           | Lam VariableName Type Expr -- Abstraction of terms or types
           | Let VariableName Type Expr Expr
@@ -77,7 +77,7 @@ data Expr = Var VariableName Type -- Variable/function/data constructor
     deriving (Eq, Ord)
 instance TextShow Expr where
     showb (Var n t) = showb n <> " :: " <> showb t
-    showb (Lit l) = showb l
+    showb (Lit l t) = showb l <> " :: " <> showb t
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
     showb (Let v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
@@ -87,7 +87,7 @@ instance TextShow Expr where
 
 getExprType :: MonadError Text m => Expr -> m Type
 getExprType (Var _ t)                = return t
-getExprType (Lit _)                  = throwError "Not sure"
+getExprType (Lit _ t)                = return t
 getExprType (App e1 _)               = snd <$> (T.unwrapFun =<< getExprType e1)
 getExprType (Lam _ t e)              = T.makeFun [t] <$> getExprType e
 getExprType (Let _ _ _ e)            = getExprType e
@@ -137,6 +137,12 @@ getType name = reader (M.lookup name . types) >>= \case
     Just t -> return t
 getSimpleType :: VariableName -> Converter Type
 getSimpleType name = (\(Quantified _ t) -> t) <$> getType name
+getSimpleFromSynType :: HsQualType -> Converter Type
+getSimpleFromSynType t = do
+    ks <- getKinds
+    Qualified s t' <- T.synToQualType ks t
+    unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
+    return t'
 
 -- |Construct an expression representing a tuple given the expressions and types of each element
 makeTuple :: [(Expr, Type)] -> Expr
@@ -224,10 +230,7 @@ declToIla (HsPatBind _ pat rhs _) = do
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
 rhsType :: HsRhs -> Converter Type
-rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = do
-    ks             <- getKinds
-    Qualified _ t' <- T.synToQualType ks t
-    return t'
+rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = getSimpleFromSynType t
 rhsType (HsUnGuardedRhs _) = throwError "Missing explicit type sig on top-level expression in RHS"
 rhsType (HsGuardedRhss _) = throwError "Guarded RHS not supported"
 rhsToIla :: HsRhs -> Converter Expr
@@ -235,25 +238,16 @@ rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
-expToIla (HsExpTypeSig _ (HsVar v) t) = do
-    name <- getRenamedOrDefault (convertName v)
-    ks <- getKinds
-    Qualified _ t' <- T.synToQualType ks t
-    return $ Var name t'
-expToIla (HsExpTypeSig _ (HsCon c) t) = do
-    let name = convertName c
-    ks <- getKinds
-    Qualified _ t' <- T.synToQualType ks t
-    return $ Var name t'
-expToIla (HsLit l ) = Lit <$> litToIla l
+expToIla (HsExpTypeSig _ (HsVar v) t) = Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
+expToIla (HsExpTypeSig _ (HsCon c) t) = Var (convertName c) <$> getSimpleFromSynType t
+expToIla (HsExpTypeSig _ (HsLit l) t) = Lit <$> litToIla l <*> getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
 expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
-    ks <- getKinds
     argName <- freshVarName
-    Qualified _ expType <- T.synToQualType ks t
+    expType <- getSimpleFromSynType t
     (argType, bodyType) <- T.unwrapFun expType
     reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
     (_, renames) <- getPatRenamings p
@@ -268,7 +262,7 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
         patToIla p argType (Var argName argType) nextBody bodyType
     return (Lam argName argType body)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
-expToIla (HsLet _ _      ) = throwError "Let not yet supported"
+expToIla (HsLet _ _) = throwError "Let not yet supported"
 expToIla (HsIf cond e1 e2) = do
     condExp <- expToIla cond
     e1Exp   <- expToIla e1
@@ -290,11 +284,11 @@ expToIla e = throwError $ "Unsupported expression: " <> showt e
 
 
 litToIla :: HsLiteral -> Converter Literal
-litToIla (HsChar   c) = return $ LiteralChar c
+litToIla (HsChar c) = return $ LiteralChar c
 litToIla (HsString s) = return $ LiteralString s
-litToIla (HsInt    i) = return $ LiteralInt i  -- Replace with fromInteger to cast to arbitrary Num?
-litToIla (HsFrac   r) = return $ LiteralFrac r
-litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
+litToIla (HsInt i) = return $ LiteralInt i  -- Replace with fromInteger to cast to arbitrary Num?
+litToIla (HsFrac r) = return $ LiteralFrac r
+litToIla l = throwError $ "Unboxed primitives not supported: " <> showt l
 
 -- |Lowers a pattern match on a given expression with a given body expression into the core equivalent
 -- We convert a pattern match on a variable into a case statement that binds the variable to the head and always

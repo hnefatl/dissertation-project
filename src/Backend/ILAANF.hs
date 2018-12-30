@@ -16,7 +16,7 @@ import qualified Typechecker.Types    as T
 
 -- |The AST of trivial expressions in the administrative normal form of ILA
 data AnfTrivial = Var VariableName Type
-                | Lit Literal
+                | Lit Literal Type
                 | Lam VariableName Type AnfComplex
                 | Type Type
     deriving (Eq, Ord)
@@ -28,7 +28,7 @@ data AnfComplex = App AnfTrivial AnfTrivial
     deriving (Eq, Ord)
 instance TextShow AnfTrivial where
     showb (Var v t)   = showb v <> " :: " <> showb t
-    showb (Lit l)     = showb l
+    showb (Lit l t)   = showb l <> " :: " <> showb t
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
     showb (Type t)    = showb t
 instance TextShow AnfComplex where
@@ -43,7 +43,7 @@ instance TextShow AnfComplex where
 
 getAnfTrivialType :: MonadError Text m => AnfTrivial -> m Type
 getAnfTrivialType (Var _ t)   = return t
-getAnfTrivialType (Lit _)     = throwError "Not sure"
+getAnfTrivialType (Lit _ t)   = return t
 getAnfTrivialType (Lam _ t e) = T.makeFun [t] <$> getAnfComplexType e
 getAnfTrivialType (Type t)    = return t
 getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
@@ -89,7 +89,7 @@ ilaBindingToAnf (Rec m) = do
 
 ilaExpToAnf :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m ([Binding AnfComplex], AnfComplex)
 ilaExpToAnf (ILA.Var v t) = return ([], Trivial $ Var v t)
-ilaExpToAnf (ILA.Lit l) = return ([], Trivial $ Lit l)
+ilaExpToAnf (ILA.Lit l t) = return ([], Trivial $ Lit l t)
 ilaExpToAnf (ILA.Lam v t b) = do
     (bs, b') <- ilaExpToAnf b
     return (bs, Trivial $ Lam v t b')

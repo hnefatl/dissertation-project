@@ -29,7 +29,10 @@ builtinKinds = M.fromList
     , ("Int", KindStar)
     , ("Maybe", KindFun KindStar KindStar)
     , ("[]", KindFun KindStar KindStar)
-    , ("(,)", KindFun (KindFun KindStar KindStar) KindStar) ]
+    , ("(,)", KindFun (KindFun KindStar KindStar) KindStar)
+    -- Dev cheat: after deoverloading the typeclasses become type constants, add them here rather than in an extra
+    -- deoverloading step (which will be required in the end)
+    , ("Num", KindFun KindStar KindStar) ]
 
 
 builtinFunctions :: M.Map VariableName QuantifiedType

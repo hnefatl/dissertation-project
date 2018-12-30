@@ -137,9 +137,9 @@ deoverloadRhs (HsUnGuardedRhs expr) = case expr of
         -- Wrap the expression in a lambda that takes the dictionary arguments
         let outerType = deoverloadType t
             innerType = HsQualType [] simpleType
--- The original expression now has the unconstrained simple type
+            -- The original expression now has the unconstrained simple type
             innerExp  = HsExpTypeSig loc e' innerType
--- The wrapping expression is a lambda taking dictionaries around the inner expression and has modified type
+            -- The wrapping expression is a lambda taking dictionaries around the inner expression and has modified type
             outerExp = HsExpTypeSig loc (HsLambda loc funArgs innerExp) outerType
         return $ HsUnGuardedRhs $ if null constraints then innerExp else outerExp
     _ -> throwError $ "Found rhs without top-level type annotation: forgot to run type tagger?\n" <> showt expr
