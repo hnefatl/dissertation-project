@@ -5,14 +5,14 @@ import Test.Tasty.HUnit        (assertFailure, testCase)
 
 import Language.Haskell.Parser
 
-import BasicPrelude
+import BasicPrelude hiding (intercalate)
 import Control.Monad.Except    (runExcept, runExceptT)
-import Data.Text               (unpack)
+import Data.Text               (unpack, intercalate)
 import Data.Tuple.Extra (both)
 
 import AlphaEq
 import Backend.Deoverload
-import ExtraDefs               (deline, pretty, synPrint)
+import ExtraDefs               (pretty, synPrint)
 import Logger                  (runLogger, runLoggerT)
 import NameGenerator
 import Typechecker.Hardcoded
@@ -23,20 +23,19 @@ unpackEither (Left err) f = assertFailure $ unpack (f err)
 unpackEither (Right x) _  = return x
 
 makeTest :: Text -> Text -> TestTree
-makeTest sActual sExpected = testCase (unpack $ deline sActual) $
-    case both (parseModule . unpack) (sExpected, sActual) of
-        (ParseOk expected, ParseOk actualModule) -> do
-            let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
-                (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
-            (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-            let deoverload = runDeoverload (deoverloadModule taggedModule) builtinDictionaries ts builtinKinds builtinClasses
-                ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
-                expected' = stripModuleParens expected
-            actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
-            let (result, alphaLogs) = runLogger $ runExceptT $ alphaEqError expected' actual
-            unpackEither result (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint actual, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs, unlines alphaLogs])
-        (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
-        (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
+makeTest sActual sExpected = testCase (unpack sActual) $ case both (parseModule . unpack) (sExpected, sActual) of
+    (ParseOk expected, ParseOk actualModule) -> do
+        let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
+            (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
+        (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
+        let deoverload = runDeoverload (deoverloadModule taggedModule) builtinDictionaries ts builtinKinds builtinClasses
+            ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
+            expected' = stripModuleParens expected
+        actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
+        let (result, alphaLogs) = runLogger $ runExceptT $ alphaEqError expected' actual
+        unpackEither result (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint actual, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs, unlines alphaLogs])
+    (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
+    (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 
 test :: TestTree
 test = testGroup "Deoverload"
@@ -65,7 +64,7 @@ test = testGroup "Deoverload"
         "f = \\x -> x + x ; y = f (0 :: Int)"
         "f = (\\d -> (\\x -> ((((+) :: Num a -> a -> a -> a) (d :: Num a) :: a -> a -> a) (x :: a) :: a -> a) (x :: a) :: a) :: a -> a) :: Num a -> a -> a ; y = ((f :: Num Int -> Int -> Int) (dNumInt :: Num Int) :: Int -> Int) (((0 :: Int) :: Int) :: Int) :: Int"
     , let
-        input = unlines
+        input = intercalate " ; "
             [ "const = \\x _ -> x"
             , "f = \\y z -> const (y == y) (z + z)"
             , "g = f True (1 :: Int)" ]
