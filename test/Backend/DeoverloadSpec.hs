@@ -35,13 +35,10 @@ makeTest sActual sExpected =
                     addDictionaries builtinDictionaries
                     deoverloadModule taggedModule
                 ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
-                prettified m = unlines [synPrint expected', synPrint m]
-                deoverloadMsg = unlines ["Expected:", synPrint expected', "Tagged:", synPrint taggedModule, pretty taggedModule]
-                assertMsg actual = unlines ["Expected:", pretty expected', "Got:", pretty actual]
                 expected' = stripModuleParens expected
-            actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, prettified taggedModule, deoverloadMsg, pretty tState, pretty dState])
+            actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
             let (result, alphaLogs) = runLogger $ runExceptT $ alphaEqError expected' actual
-            unpackEither result (\err -> unlines [err, prettified actual, assertMsg actual, pretty dState])
+            unpackEither result (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs, unlines alphaLogs])
         (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
         (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 
@@ -73,7 +70,7 @@ test = testGroup "Deoverload"
         "f = (\\x -> x :: a) :: a -> a ; y = (f :: Bool -> Bool) (True :: Bool) :: Bool"
     , makeTest
         "f = \\x -> x + x ; y = f (0 :: Int)"
-        "f = (\\d -> (\\x -> ((((+) :: Num a -> a -> a -> a) (d :: Num a) :: a -> a -> a) ((x :: Num a -> a) (d :: Num a) :: a) :: a -> a) ((x :: Num a -> a) (d :: Num a) :: a) :: a) :: a -> a) :: Num a -> a -> a ; y = ((f :: Num Int -> Int -> Int) (dNumInt :: Num Int) :: Int -> Int) (((0 :: Int) :: Int) :: Int) :: Int"
+        "f = (\\d -> (\\x -> ((((+) :: Num a -> a -> a -> a) (d :: Num a) :: a -> a -> a) (x :: a) :: a -> a) (x :: a) :: a) :: a -> a) :: Num a -> a -> a ; y = ((f :: Num Int -> Int -> Int) (dNumInt :: Num Int) :: Int -> Int) (((0 :: Int) :: Int) :: Int) :: Int"
     , let
         a = unlines
             [ "const = \\x _ -> x"
