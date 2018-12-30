@@ -121,31 +121,31 @@ test = testGroup "ILA"
             auxBind = NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
                 [ Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool ]
         in makeTest "((x)) = (((True)))" [mainBind, auxBind]
-    --,
-    --    let a = TypeVar $ TypeVariable "a" KindStar
-    --        num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
-    --        xt = T.makeFun [numa] a
-    --        numa = TypeApp num a KindStar
-    --        plus = Var "+" $ T.makeFun [numa, a, a] a
-    --        fBody = Lam "t2" numa $ Case (Var "t2" numa) ["t3"] -- \dNuma ->
-    --            [ Alt Default [] $ Lam "t4" xt $ Case (Var "t4" xt) ["t5"] -- \x ->
-    --                [ Alt Default [] $
-    --                    App (App (App plus $ Var "t3" numa) $ -- (+) dNuma (x dNuma) (x dNuma)
-    --                        App (Var "t5" xt) (Var "t3" numa)) $
-    --                        App (Var "t5" xt) (Var "t3" numa) ]
-    --            ]
-    --        fType = T.makeFun [numa, a] a
-    --        mainBinds =
-    --            [ Rec $ M.fromList [
-    --                ( "t1"
-    --                , Case fBody ["t6"] [ Alt Default [] $ makeTuple [(Var "t6" fType, fType)] ]
-    --                ) ]
-    --            ]
-    --        auxBinds =
-    --            --[ NonRec y $ Case (Var t1) [] [ Alt tupleCon [t8] (Var t8), errAlt ]
-    --            [
-    --            ]
-    --    in makeTest "f = \\x -> x + x ; y = f 1 :: Int" (mainBinds <> auxBinds)
+    ,
+        let a = TypeVar $ TypeVariable "a" KindStar
+            num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
+            xt = T.makeFun [numa] a
+            numa = TypeApp num a KindStar
+            plus = Var "+" $ T.makeFun [numa, a, a] a
+            fBody = Lam "t2" numa $ Case (Var "t2" numa) ["t3"] -- \dNuma ->
+                [ Alt Default [] $ Lam "t4" xt $ Case (Var "t4" xt) ["t5"] -- \x ->
+                    [ Alt Default [] $
+                        App (App (App plus $ Var "t3" numa) $ -- (+) dNuma (x dNuma) (x dNuma)
+                            App (Var "t5" xt) (Var "t3" numa)) $
+                            App (Var "t5" xt) (Var "t3" numa) ]
+                ]
+            fType = T.makeFun [numa, a] a
+            mainBinds =
+                [ Rec $ M.fromList [
+                    ( "t1"
+                    , Case fBody ["t6"] [ Alt Default [] $ makeTuple [(Var "t6" fType, fType)] ]
+                    ) ]
+                ]
+            auxBinds =
+                --[ NonRec y $ Case (Var t1) [] [ Alt tupleCon [t8] (Var t8), errAlt ]
+                [
+                ]
+        in makeTest "f = \\x -> x + x ; y = f 1 :: Int" (mainBinds <> auxBinds)
     ]
     where t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = evalNameGenerator (replicateM 10 freshDummyVarName) 0
           x = VariableName "x"

@@ -200,18 +200,9 @@ deoverloadExp (HsParen e ) = HsParen <$> deoverloadExp e
 deoverloadExp (HsExpTypeSig l e (HsQualType _ t)) = HsExpTypeSig l <$> deoverloadExp e <*> pure (HsQualType [] t)
 deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " <> showt e
 
--- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> (Num a -> a) -> (Monoid b -> b) -> ()` to
--- represent the dicts.
+-- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> a -> b -> ()` to represent the dicts.
 deoverloadType :: HsQualType -> HsType
-deoverloadType (HsQualType quals t) = makeSynFun constraints t' -- Make sure the dictionaries are always at the front
-    where constraints = map deoverloadAsst quals
-          varToConstraint = M.fromListWith (<>) [ (v, [c]) | c <- constraints, v <- S.toAscList $ getTypeVars c ]
-          (args, result) = unmakeSynFun t
-          t' = makeSynFun (map helper args) result
-          helper at
-            | null cs = at
-            | otherwise = makeSynFun (nub $ concat cs) at
-            where cs = setMapIntersect (getTypeVars at) varToConstraint
+deoverloadType (HsQualType quals t) = makeSynFun (map deoverloadAsst quals) t
 deoverloadAsst :: HsAsst -> HsType
 deoverloadAsst (name, args) = foldl' HsTyApp (HsTyCon name) args
 
