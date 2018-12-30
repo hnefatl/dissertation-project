@@ -35,7 +35,7 @@ makeTest input expected = testCase (unpack $ deline input) $
     case evalNameGenerator (runLoggerT $ runExceptT foo) 0 of
         (Left err, logs) -> assertFailure $ unpack $ unlines [err, "Logs:", unlines logs]
         (Right binds, logs1) -> case runLogger $ runExceptT $ alphaEqError (S.fromList expected) (S.fromList binds) of
-            (Left err, logs2) -> assertFailure $ unpack $ unlines [err, showt expected, "vs", showt binds, "Logs:", unlines logs1, unlines logs2]
+            (Left err, logs2) -> assertFailure $ unpack $ unlines [err, unlines $ map showt expected, "vs", unlines $ map showt binds, "Logs:", unlines logs1, unlines logs2]
             _ -> return ()
     where foo = do
             m <- parse input
