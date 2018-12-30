@@ -151,8 +151,11 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleTyp
     let varName = convertName n
     writeLog $  "Deoverloading " <> showt varName <> ", with tagged type " <> synPrint t
     requiredQuals <- tryGetType varName >>= \case
-        -- Not a decl-bound name with an original type, so the tagged type must be correct. Return all constraints.
-        Nothing -> mapM (synToTypePred ks) origTagQuals
+        -- Not a decl-bound name with an original type, so we have to trust the tagged type.
+        -- The tagged type includes qualifiers though: eg. `Num a => a` for `x` in `\x -> x + x`, whereas the actual `x`
+        -- just has type `a` without the `Num a` qualifier (it's the caller's responsibility to apply any dictionaries
+        -- to the arguments). As a result, we don't need any qualifiers, just the simple type.
+        Nothing -> return []
         -- The tagged type is "fake": eg. `id :: a -> a` can be tagged with `id :: Num b => b -> b` if `Num b` holds. We
         -- need to make sure we only pass the dictionary arguments that the function/variable we're looking at *needs*.
         -- We get the "real" type of the name, unify the real simple type with the tagged simple type, apply the
