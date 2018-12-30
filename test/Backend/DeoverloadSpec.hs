@@ -13,7 +13,7 @@ import Formatting              (sformat, stext, (%))
 import AlphaEq
 import Backend.Deoverload
 import ExtraDefs               (deline, pretty, synPrint)
-import Logger                  (runLoggerT, runLogger)
+import Logger                  (runLogger, runLoggerT)
 import NameGenerator
 import Typechecker.Hardcoded
 import Typechecker.Typechecker
@@ -52,7 +52,7 @@ test = testGroup "Deoverload"
         addType = "((+) :: Num a -> a -> a -> a)"
       in makeTest
         "f = \\x -> x + x" $
-        sformat ("f = (\\d -> (\\x -> (("%stext%" (d :: Num a) :: a -> a -> a) "%stext%" :: a -> a) "%stext%" :: a) :: a -> a) :: Num a -> a -> a") addType x x
+        "f = (\\d -> (\\x -> ((" <> addType <> " (d :: Num a) :: a -> a -> a) " <> x <> " :: a -> a) " <> x <> " :: a) :: a -> a) :: Num a -> a -> a"
     , makeTest
         "x = if True then 0 else 1"
         "x = (\\d -> (if True :: Bool then 0 :: a else 1 :: a) :: a) :: Num a -> a"

@@ -210,10 +210,10 @@ declToIla (HsPatBind _ pat rhs _) = do
     -- Generate an expression that matches the patterns then returns a tuple of every variable
     let resultType  = T.makeTuple boundTypes
         resultTuple = makeTuple (zip renamedExps boundTypes)
-    ts         <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
+    ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
     resultExpr <- local (addRenamings renames . addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
-        rhst    <- rhsType rhs
+        rhst <- rhsType rhs
         patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
@@ -222,7 +222,7 @@ declToIla (HsPatBind _ pat rhs _) = do
             bindingType <- getSimpleType name -- Get the type of this bound variable
             tempNames   <- replicateM boundNameLength freshVarName -- Create temporary variables for pattern matching on
             let tempName = tempNames !! index -- Get the temporary name in the right position in the tuple
-                body     = Var tempName bindingType
+                body = Var tempName bindingType
             -- Just retrieve the specific output variable
             return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)") tempNames body , Alt Default [] (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
@@ -231,8 +231,8 @@ declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
 rhsType :: HsRhs -> Converter Type
 rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = getSimpleFromSynType t
-rhsType (HsUnGuardedRhs _) = throwError "Missing explicit type sig on top-level expression in RHS"
-rhsType (HsGuardedRhss _) = throwError "Guarded RHS not supported"
+rhsType (HsUnGuardedRhs _)                    = throwError "Missing explicit type sig on top-level expression in RHS"
+rhsType (HsGuardedRhss _)                     = throwError "Guarded RHS not supported"
 rhsToIla :: HsRhs -> Converter Expr
 rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
@@ -284,11 +284,11 @@ expToIla e = throwError $ "Unsupported expression: " <> showt e
 
 
 litToIla :: HsLiteral -> Converter Literal
-litToIla (HsChar c) = return $ LiteralChar c
+litToIla (HsChar c)   = return $ LiteralChar c
 litToIla (HsString s) = return $ LiteralString s
-litToIla (HsInt i) = return $ LiteralInt i  -- Replace with fromInteger to cast to arbitrary Num?
-litToIla (HsFrac r) = return $ LiteralFrac r
-litToIla l = throwError $ "Unboxed primitives not supported: " <> showt l
+litToIla (HsInt i)    = return $ LiteralInt i  -- Replace with fromInteger to cast to arbitrary Num?
+litToIla (HsFrac r)   = return $ LiteralFrac r
+litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
 
 -- |Lowers a pattern match on a given expression with a given body expression into the core equivalent
 -- We convert a pattern match on a variable into a case statement that binds the variable to the head and always
@@ -328,6 +328,6 @@ patToIla (HsPAsPat name pat) t head body bodyType = do
     asArgName <- getRenamed (convertName name)
     case expr of
         Case head' captures alts' -> return $ Case head' (asArgName : captures) alts'
-        _ -> throwError "@ pattern binding non-case translation"
+        _                         -> throwError "@ pattern binding non-case translation"
 patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default [] body]
 patToIla p _ _ _ _ = throwError $ "Unsupported pattern: " <> showt p

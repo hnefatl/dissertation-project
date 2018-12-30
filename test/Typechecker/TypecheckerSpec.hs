@@ -4,7 +4,7 @@ module Typechecker.TypecheckerSpec where
 
 import           BasicPrelude
 import           Test.Tasty                 (TestTree, testGroup)
-import           Test.Tasty.HUnit           (assertBool, assertFailure, testCase)
+import           Test.Tasty.HUnit           (assertBool, assertEqual, assertFailure, testCase)
 
 import           Language.Haskell.Parser    (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax
@@ -72,6 +72,11 @@ test = let
         let args = [makeMaybe ta, typeBool, typeString, tb]
             output = unmakeFun (makeFun args tc)
         in testCase "unmakeFun . makeFun" $ assertBool "" $ Right (args, tc) == output
+    ,
+        let [sa, sb, sc] = map (HsTyVar . HsIdent) ["a", "b", "c"]
+            args = [sa, HsTyApp (HsTyCon $ UnQual $ HsIdent "Maybe") sb]
+            output = unmakeSynFun (makeSynFun args sc)
+        in testCase "unmakeSynFun . makeSynFun" $ assertEqual "" (args, sc) output
     ,
         -- Simple literal type checks
         let s = "x = 5"

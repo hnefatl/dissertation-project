@@ -17,7 +17,7 @@ import           AlphaEq                 (alphaEqError)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
 import           Backend.ILA
 import           ExtraDefs
-import           Logger                  (clearLogs, runLoggerT, runLogger)
+import           Logger                  (runLogger, runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
 import           Typechecker.Hardcoded   (builtinKinds)
