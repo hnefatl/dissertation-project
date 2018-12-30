@@ -137,6 +137,8 @@ makeList :: Type -> Type
 makeList = applyTypeFunUnsafe typeList
 makeTuple :: [Type] -> Type
 makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
+makeSynFun :: [HsType] -> HsType -> HsType
+makeSynFun as e = foldr HsTyFun e as
 
 -- |Given a type representing a function, unpack it to return the arguments and return type
 unmakeFun :: MonadError Text m => Type -> m ([Type], Type)
@@ -151,6 +153,10 @@ unmakeFun t = do
 -- |Unwrapping a constructor is less restrictive than unwrapping a function: we don't necessarily need any arguments
 unmakeCon :: Type -> ([Type], Type)
 unmakeCon t = either (const ([], t)) id (unmakeFun t)
+-- |Deconstruct a Haskell AST function
+unmakeSynFun :: HsType -> ([HsType], HsType)
+unmakeSynFun (HsTyFun a e) = let (as, b) = unmakeSynFun e in (a:as, b)
+unmakeSynFun t             = ([], t)
 
 -- |Split a type representing a function into the argument and the return type
 unwrapFunMaybe :: Type -> Maybe (Type, Type)
@@ -236,3 +242,33 @@ qualTypeToSyn :: MonadError Text m => QualifiedType -> m Syntax.HsQualType
 qualTypeToSyn (Qualified quals t) = HsQualType <$> mapM typePredToSyn (S.toAscList quals) <*> typeToSyn t
 synToQualType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsQualType -> m QualifiedType
 synToQualType ks (HsQualType quals t) = Qualified <$> (S.fromList <$> mapM (synToTypePred ks) quals) <*> synToType ks t
+
+class HasTypeVars t where
+    getTypeVars :: t -> S.Set TypeVariableName
+
+instance HasTypeVars Type where
+    getTypeVars (TypeVar (TypeVariable name _)) = S.singleton name
+    getTypeVars (TypeCon _)                     = S.empty
+    getTypeVars (TypeApp t1 t2 _)               = S.union (getTypeVars t1) (getTypeVars t2)
+instance HasTypeVars TypePredicate where
+    getTypeVars (IsInstance _ t) = getTypeVars t
+instance HasTypeVars a => HasTypeVars (Qualified a) where
+    getTypeVars (Qualified ps x) = getTypeVars ps `S.union` getTypeVars x
+instance (Ord t, HasTypeVars t) => HasTypeVars (S.Set t) where
+    getTypeVars = getTypeVars . S.toList
+instance (Ord t, HasTypeVars t) => HasTypeVars (M.Map a t) where
+    getTypeVars = getTypeVars . M.elems
+instance HasTypeVars t => HasTypeVars [t] where
+    getTypeVars = S.unions . map getTypeVars
+instance HasTypeVars a => HasTypeVars (Maybe a) where
+    getTypeVars = maybe S.empty getTypeVars
+instance HasTypeVars HsType where
+    getTypeVars (HsTyVar n)     = S.singleton $ convertName n
+    getTypeVars (HsTyCon _)     = S.empty
+    getTypeVars (HsTyApp t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
+    getTypeVars (HsTyFun t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
+    getTypeVars (HsTyTuple ts)  = getTypeVars ts
+instance HasTypeVars HsAsst where
+    getTypeVars (_, ts) = S.unions $ map getTypeVars ts
+instance HasTypeVars HsQualType where
+    getTypeVars (HsQualType as t) = S.union (getTypeVars as) (getTypeVars t)

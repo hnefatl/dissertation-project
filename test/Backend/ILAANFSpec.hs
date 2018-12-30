@@ -15,10 +15,10 @@ import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
-import           Backend.ILA             hiding (Expr(..), makeList, makeTuple, makeError)
+import           Backend.ILA             hiding (Expr(..), makeError, makeList, makeTuple)
 import           Backend.ILAANF
 import           ExtraDefs
-import           Logger                  (clearLogs, runLoggerT, runLogger)
+import           Logger                  (clearLogs, runLogger, runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
 import           Typechecker.Hardcoded   (builtinKinds)
 import           Typechecker.Typechecker

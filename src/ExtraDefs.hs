@@ -41,3 +41,6 @@ deline = intercalate " \\n " . lines
 
 reverseLookup :: Ord v => v -> M.Map k v -> Maybe k
 reverseLookup x = fmap fst . find ((x ==) . snd) . M.toList
+
+setMapIntersect :: Ord a => S.Set a -> M.Map a b -> [b]
+setMapIntersect s m = M.elems $ M.intersection m (M.fromSet (const ()) s)

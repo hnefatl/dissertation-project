@@ -9,7 +9,7 @@ import           BasicPrelude               hiding (exp)
 import           Control.Monad.Except       (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
 import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT)
 import           Data.Default               (Default, def)
-import           Data.Foldable              (toList)
+import           Data.Foldable              (null, toList)
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
 import           Data.Text                  (unpack)
@@ -17,7 +17,7 @@ import           Language.Haskell.Syntax
 import           TextShow                   (showt)
 import           TextShow.TH                (deriveTextShow)
 
-import           ExtraDefs                  (synPrint)
+import           ExtraDefs                  (setMapIntersect, synPrint)
 import           Logger
 import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName)
 import           Names                      (TypeVariableName(..), VariableName(..), convertName)
@@ -81,7 +81,7 @@ addDictionaries :: M.Map TypePredicate VariableName -> Deoverload ()
 addDictionaries dicts = do
     existingDicts <- gets dictionaries
     let intersection = M.intersection dicts existingDicts
-    unless (M.null intersection) $ throwError $ "Clashing dictionary types: " <> showt intersection
+    unless (null intersection) $ throwError $ "Clashing dictionary types: " <> showt intersection
     modify (\s -> s { dictionaries = M.union existingDicts dicts })
 addScopedDictionaries :: M.Map TypePredicate VariableName -> Deoverload a -> Deoverload a
 addScopedDictionaries dicts action = do
@@ -135,7 +135,7 @@ deoverloadRhs (HsUnGuardedRhs expr) = case expr of
             funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
         HsExpTypeSig _ e' _ <- addScopedDictionaries dictArgs (deoverloadExp e)
         -- Wrap the expression in a lambda that takes the dictionary arguments
-        let outerType = deoverloadType t
+        let outerType = HsQualType [] $ deoverloadType t
             innerType = HsQualType [] simpleType
             -- The original expression now has the unconstrained simple type
             innerExp  = HsExpTypeSig loc e' innerType
@@ -176,7 +176,7 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleTyp
     writeLog $ "Required qualifiers: " <> showt requiredQuals
     synRequiredQuals <- mapM typePredToSyn requiredQuals
     -- Replace the qualifiers on the tagged type with only the required ones, then deoverload
-    let t' = deoverloadType (HsQualType synRequiredQuals origSimpleType)
+    let t' = HsQualType [] $ deoverloadType (HsQualType synRequiredQuals origSimpleType)
         e  = HsExpTypeSig l (HsVar n) t'
     -- Apply the variable to any dictionaries it needs
     addDictArgs e =<< mapM getDictionaryExp requiredQuals
@@ -188,7 +188,7 @@ deoverloadExp (HsExpTypeSig l (HsApp f e) _) = do
     eExp                      <- deoverloadExp e
     case t of
         HsQualType [] (HsTyFun _ retType) -> return $ HsExpTypeSig l (HsApp fExp eExp) (HsQualType [] retType)
-        _ -> throwError $ "Got non-function type in application: " <> showt t
+        _                                 -> throwError $ "Got non-function type in application: " <> showt t
 deoverloadExp HsInfixApp{} = throwError "Infix applications should have been replaced by the type inferrer"
 deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2
@@ -200,9 +200,18 @@ deoverloadExp (HsParen e ) = HsParen <$> deoverloadExp e
 deoverloadExp (HsExpTypeSig l e (HsQualType _ t)) = HsExpTypeSig l <$> deoverloadExp e <*> pure (HsQualType [] t)
 deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " <> showt e
 
--- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> a -> b -> ()` to represent the dicts.
-deoverloadType :: HsQualType -> HsQualType
-deoverloadType (HsQualType constraints t) = HsQualType [] $ foldr (HsTyFun . deoverloadAsst) t constraints
+-- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> (Num a -> a) -> (Monoid b -> b) -> ()` to
+-- represent the dicts.
+deoverloadType :: HsQualType -> HsType
+deoverloadType (HsQualType quals t) = makeSynFun constraints t' -- Make sure the dictionaries are always at the front
+    where constraints = map deoverloadAsst quals
+          varToConstraint = M.fromListWith (<>) [ (v, [c]) | c <- constraints, v <- S.toAscList $ getTypeVars c ]
+          (args, result) = unmakeSynFun t
+          t' = makeSynFun (map helper args) result
+          helper at
+            | null cs = at
+            | otherwise = makeSynFun (nub $ concat cs) at
+            where cs = setMapIntersect (getTypeVars at) varToConstraint
 deoverloadAsst :: HsAsst -> HsType
 deoverloadAsst (name, args) = foldl' HsTyApp (HsTyCon name) args
 

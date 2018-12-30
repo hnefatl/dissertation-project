@@ -7,10 +7,10 @@ import qualified Backend.ILA          as ILA
 import           BasicPrelude
 import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.Map.Strict      as M
+import           Data.Text            (unpack)
 import           NameGenerator        (MonadNameGenerator, freshVarName)
 import           Names
 import           TextShow             (TextShow, showb)
-import           Data.Text            (unpack)
 import           Typechecker.Types    (Type)
 import qualified Typechecker.Types    as T
 
