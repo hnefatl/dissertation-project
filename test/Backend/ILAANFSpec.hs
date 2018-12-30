@@ -20,7 +20,7 @@ import           Backend.ILAANF
 import           ExtraDefs
 import           Logger                  (clearLogs, runLogger, runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
-import           Typechecker.Hardcoded   (builtinKinds)
+import           Typechecker.Hardcoded   (builtinKinds, builtinClasses, builtinDictionaries)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
 import qualified Typechecker.Types       as T
@@ -41,7 +41,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             m <- parse input
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
             clearLogs
-            m'' <- evalDeoverload (deoverloadModule m')
+            m'' <- evalDeoverload (deoverloadModule m') builtinDictionaries ts builtinKinds builtinClasses
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             let dets = map deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types

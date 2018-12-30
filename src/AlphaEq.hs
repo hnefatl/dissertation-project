@@ -94,7 +94,7 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
             -- consider [x,y,(x,y)] and [a,b,(b,a)]. Should just be able to merge the `alphaEq' x` call with the
             -- follow-up into one action, then iterate that action? Remember to checkpoint appropriately.
             findM (alphaEqBool . checkpoint . alphaEq' x) (S.toList s2) >>= \case
-                Nothing -> throwError $ unlines ["Couldn't find an alpha-eq element to:", showt x, "in", showt s2]
+                Nothing -> throwError $ unlines ["Failed to alpha-equate the sets", showt s1, "and", showt s2]
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
 -- Maps compare in any order by converting to sets
 instance (Ord a, Ord b, AlphaEq a, AlphaEq b) => AlphaEq (M.Map a b) where

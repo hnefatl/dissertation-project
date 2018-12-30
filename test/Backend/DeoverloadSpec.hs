@@ -8,6 +8,7 @@ import Language.Haskell.Parser
 import BasicPrelude
 import Control.Monad.Except    (runExcept, runExceptT)
 import Data.Text               (unpack)
+import Data.Tuple.Extra (both)
 
 import AlphaEq
 import Backend.Deoverload
@@ -22,17 +23,13 @@ unpackEither (Left err) f = assertFailure $ unpack (f err)
 unpackEither (Right x) _  = return x
 
 makeTest :: Text -> Text -> TestTree
-makeTest sActual sExpected =
-    testCase (unpack $ deline sActual) $ case (parseModule $ unpack sExpected, parseModule $ unpack sActual) of
+makeTest sActual sExpected = testCase (unpack $ deline sActual) $
+    case both (parseModule . unpack) (sExpected, sActual) of
         (ParseOk expected, ParseOk actualModule) -> do
             let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
                 (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
             (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-            let deoverload = runDeoverload $ do
-                    addTypes ts
-                    addClassEnvironment builtinClasses
-                    addDictionaries builtinDictionaries
-                    deoverloadModule taggedModule
+            let deoverload = runDeoverload (deoverloadModule taggedModule) builtinDictionaries ts builtinKinds builtinClasses
                 ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
                 expected' = stripModuleParens expected
             actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
@@ -44,7 +41,7 @@ makeTest sActual sExpected =
 test :: TestTree
 test = testGroup "Deoverload"
     [ makeTest
-        "f = \\x -> x + x" $
+        "f = \\x -> x + x"
         "f = (\\d -> (\\x -> ((((+) :: Num a -> a -> a -> a) (d :: Num a) :: a -> a -> a) (x :: a) :: a -> a) (x :: a) :: a) :: a -> a) :: Num a -> a -> a"
     , makeTest
         "x = if True then 0 else 1"

@@ -17,7 +17,7 @@ import           Language.Haskell.Syntax
 import           TextShow                   (showt)
 import           TextShow.TH                (deriveTextShow)
 
-import           ExtraDefs                  (setMapIntersect, synPrint)
+import           ExtraDefs                  (synPrint)
 import           Logger
 import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName)
 import           Names                      (TypeVariableName(..), VariableName(..), convertName)
@@ -45,13 +45,15 @@ instance Default DeoverloadState where
         , kinds = M.empty
         , classEnvironment = M.empty }
 
-runDeoverload :: Deoverload a -> LoggerT NameGenerator (Except Text a, DeoverloadState)
-runDeoverload (Deoverload inner) = do
+runDeoverload :: Deoverload a -> M.Map TypePredicate VariableName -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
+runDeoverload action d ts ks ce = do
+    let Deoverload inner = addDictionaries d >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalDeoverload :: Deoverload a -> ExceptT Text (LoggerT NameGenerator) a
-evalDeoverload (Deoverload inner) = do
+evalDeoverload :: Deoverload a -> M.Map TypePredicate VariableName -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
+evalDeoverload action d ts ks ce = do
+    let Deoverload inner = addDictionaries d >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
 
@@ -155,7 +157,7 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleTyp
         -- The tagged type includes qualifiers though: eg. `Num a => a` for `x` in `\x -> x + x`, whereas the actual `x`
         -- just has type `a` without the `Num a` qualifier (it's the caller's responsibility to apply any dictionaries
         -- to the arguments). As a result, we don't need any qualifiers, just the simple type.
-        Nothing -> return []
+        Nothing -> writeLog ("Unbound var: " <> showt varName <> " " <> showt origSimpleType) >> return []
         -- The tagged type is "fake": eg. `id :: a -> a` can be tagged with `id :: Num b => b -> b` if `Num b` holds. We
         -- need to make sure we only pass the dictionary arguments that the function/variable we're looking at *needs*.
         -- We get the "real" type of the name, unify the real simple type with the tagged simple type, apply the

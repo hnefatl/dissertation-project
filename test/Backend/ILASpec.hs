@@ -20,7 +20,7 @@ import           ExtraDefs
 import           Logger                  (runLogger, runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
-import           Typechecker.Hardcoded   (builtinKinds)
+import           Typechecker.Hardcoded   (builtinKinds, builtinClasses, builtinDictionaries)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
 import qualified Typechecker.Types       as T
@@ -40,7 +40,7 @@ makeTest input expected = testCase (unpack $ deline input) $
     where foo = do
             m <- parse input
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            m'' <- evalDeoverload (deoverloadModule m')
+            m'' <- evalDeoverload (deoverloadModule m') builtinDictionaries ts builtinKinds builtinClasses
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             let dets = map deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
@@ -121,28 +121,30 @@ test = testGroup "ILA"
             auxBind = NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
                 [ Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool ]
         in makeTest "((x)) = (((True)))" [mainBind, auxBind]
-    --,
-    --    let a = TypeVar $ TypeVariable "a" KindStar
-    --        num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
-    --        numa = TypeApp num a KindStar
-    --        plus = Var "+" $ T.makeFun [numa, a, a] a
-    --        fBody = Lam "t2" numa $ Case (Var "t2" numa) ["t3"] -- \dNuma ->
-    --            [ Alt Default [] $ Lam "t4" a $ Case (Var "t4" a) ["t5"] -- \x ->
-    --                [ Alt Default [] $
-    --                    App (App (App plus $ Var "t3" numa) $ Var "t5" a) $ Var "t5" a ] -- (+) dNuma x x
-    --            ]
-    --        fType = T.makeFun [numa, a] a
-    --        mainBinds =
-    --            [ Rec $ M.fromList [
-    --                ( "t1"
-    --                , Case fBody ["t6"] [ Alt Default [] $ makeTuple [(Var "t6" fType, fType)] ]
-    --                ) ]
-    --            ]
-    --        auxBinds =
-    --            --[ NonRec y $ Case (Var t1) [] [ Alt tupleCon [t8] (Var t8), errAlt ]
-    --            [
-    --            ]
-    --    in makeTest "f = \\x -> x + x ; y = f 1 :: Int" (mainBinds <> auxBinds)
+    ,
+        let a = TypeVar $ TypeVariable "a" KindStar
+            num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
+            numa = TypeApp num a KindStar
+            numInt = TypeApp num typeInt KindStar
+            plus = Var "+" $ T.makeFun [numa, a, a] a
+            fBody = Lam "x2" numa $ Case (Var "x2" numa) ["x3"] -- \dNuma ->
+                [ Alt Default [] $ Lam "x4" a $ Case (Var "x4" a) ["x5"] -- \x ->
+                    [ Alt Default [] $
+                        App (App (App plus $ Var "x3" numa) $ Var "x5" a) $ Var "x5" a ] -- (+) dNuma x x
+                ]
+            fType = T.makeFun [numa, a] a
+            fTupleType = T.makeTuple [fType]
+            fIntType = T.makeFun [numInt, typeInt] typeInt
+            yBody = App (App (Var f fIntType) (Var "dNumInt" numInt)) (Lit (LiteralInt 1) typeInt)
+            yType = typeInt
+            yTupleType = T.makeTuple [yType]
+            mainBinds =
+                [ Rec $ M.fromList [("x1", Case fBody ["x6"] [Alt Default [] $ makeTuple [(Var "x6" fType, fType)]])]
+                , Rec $ M.fromList [("x7", Case yBody ["x8"] [Alt Default [] $ makeTuple [(Var "x8" yType, yType)]])] ]
+            auxBinds =
+                [ NonRec f $ Case (Var "x1" fTupleType) [] [ Alt tupleCon ["x9"] (Var "x9" fType), errAlt fType ]
+                , NonRec y $ Case (Var "x7" yTupleType) [] [ Alt tupleCon ["t10"] (Var "t10" yType), errAlt yType ] ]
+        in makeTest "f = \\x -> x + x ; y = f 1 :: Int" (mainBinds <> auxBinds)
     ]
     where t1:t2:t3:t4:t5:t6:t7:t8:t9:_ = evalNameGenerator (replicateM 10 freshDummyVarName) 0
           x = VariableName "x"
