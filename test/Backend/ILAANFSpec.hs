@@ -20,7 +20,6 @@ import           Backend.ILAANF
 import           ExtraDefs
 import           Logger                  (clearLogs, runLoggerT, runLogger)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
-import           Names
 import           Typechecker.Hardcoded   (builtinKinds)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)

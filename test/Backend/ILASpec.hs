@@ -86,8 +86,7 @@ test = testGroup "ILA"
                         [ Alt consCon [t4, t5] $ Case (Var t5 boolList) []
                             [ Alt nilCon [] $ Case (Var t4 typeBool) []
                                 [ Alt Default [] $ Case (Var t2 typeBool) []
-                                    [ Alt trueCon [] $ makeTuple' [Var t1 typeBool] typeBool
-                                    , err ]
+                                    [ Alt trueCon [] $ makeTuple [(Var t1 boolList, boolList)] , err ]
                                 ]
                             , err ]
                         , err ]
@@ -104,14 +103,14 @@ test = testGroup "ILA"
                     [ Alt Default [] $ Lam t4 b $ Case (Var t4 b) [t5]
                         [ Alt Default [] $ Var t3 a] ]
             mainBind = Rec $ M.fromList
-                [ (t6 , Case lambdaBody [t1] [ Alt Default [] $ makeTuple' [Var t1 fType] fType ]) ]
+                [ (t6 , Case lambdaBody [t1] [ Alt Default [] $ makeTuple [(Var t1 fType, fType)] ]) ]
             auxBind = NonRec f (Case (Var t6 $ T.makeTuple [fType]) [] [Alt tupleCon [t7] (Var t7 fType), errAlt fType])
         in makeTest "f = \\x y -> x" [mainBind, auxBind]
     ,
         let head = Case (Var x typeBool) [] [Alt trueCon [] true, Alt falseCon [] false]
             mainBinds =
-                [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple' [Var t1 typeBool] typeBool ]) ]
-                , Rec $ M.fromList [ (t5, Case head [t4] [ Alt Default [] $ makeTuple' [Var t4 typeBool] typeBool ]) ] ]
+                [ Rec $ M.fromList [ (t2, Case true [t1] [ Alt Default [] $ makeTuple [(Var t1 typeBool, typeBool)] ]) ]
+                , Rec $ M.fromList [ (t5, Case head [t4] [ Alt Default [] $ makeTuple [(Var t4 typeBool, typeBool)] ]) ] ]
             auxBinds =
                 [ NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
                     [Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool]
@@ -120,7 +119,7 @@ test = testGroup "ILA"
         in makeTest "x = True ; y = if x then True else False" (mainBinds <> auxBinds)
     ,
         let mainBind = Rec $ M.fromList
-                [ (t2, Case true [t1] [Alt Default [] $ makeTuple' [Var t1 typeBool] typeBool]) ]
+                [ (t2, Case true [t1] [Alt Default [] $ makeTuple [(Var t1 typeBool, typeBool)]]) ]
             auxBind = NonRec x $ Case (Var t2 $ T.makeTuple [typeBool]) []
                 [ Alt tupleCon [t3] (Var t3 typeBool), errAlt typeBool ]
         in makeTest "((x)) = (((True)))" [mainBind, auxBind]

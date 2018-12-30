@@ -208,7 +208,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     resultExpr <- local (addRenamings renames . addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst    <- rhsType rhs
-        patToIla pat rhst rhsExpr resultTuple
+        patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
     -- For each bound name, generate a binding that extracts the variable from the result tuple
@@ -245,19 +245,19 @@ expToIla (HsExpTypeSig _ (HsCon c) t) = do
     ks <- getKinds
     Qualified _ t' <- T.synToQualType ks t
     return $ Var name t'
-expToIla (HsLit l    ) = Lit <$> litToIla l
+expToIla (HsLit l ) = Lit <$> litToIla l
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
-expToIla (HsLambda     _ []                         e) = expToIla e
+expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
-expToIla (HsExpTypeSig l (HsLambda l' (p : pats) e) t) = do
-    ks                  <- getKinds
-    argName             <- freshVarName
+expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
+    ks <- getKinds
+    argName <- freshVarName
     Qualified _ expType <- T.synToQualType ks t
     (argType, bodyType) <- T.unwrapFun expType
-    reducedType         <- T.qualTypeToSyn $ Qualified S.empty bodyType
-    (_, renames)        <- getPatRenamings p
-    patVariableTypes    <- fmap (Quantified S.empty) <$> getPatVariableTypes p argType
+    reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
+    (_, renames) <- getPatRenamings p
+    patVariableTypes <- fmap (Quantified S.empty) <$> getPatVariableTypes p argType
     let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
         log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
@@ -265,7 +265,7 @@ expToIla (HsExpTypeSig l (HsLambda l' (p : pats) e) t) = do
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addRenamings renames . addTypes renamedVariableTypes) $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
-        patToIla p argType (Var argName argType) nextBody
+        patToIla p argType (Var argName argType) nextBody bodyType
     return (Lam argName argType body)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 expToIla (HsLet _ _      ) = throwError "Let not yet supported"
@@ -303,35 +303,37 @@ litToIla l            = throwError $ "Unboxed primitives not supported: " <> sho
 -- matching this data constructor.
 -- The result is a massive mess of case statements. They are composable though, which is useful for building larger
 -- expressions, and we can prune redundant/overly complicated substructures in an optimisation pass if necessary.
-patToIla :: HsPat -> Type -> Expr -> Expr -> Converter Expr
-patToIla (HsPVar n) _ head body = do
+patToIla :: HsPat -> Type -> Expr -> Expr -> Type -> Converter Expr
+patToIla (HsPVar n) _ head body _ = do
     renamedVar <- getRenamed $ convertName n
     return $ Case head [renamedVar] [Alt Default [] body]
-patToIla (HsPLit l) _ head body = throwError "Need to figure out dictionary passing before literals"
-patToIla (HsPApp con args) _ head body = do
-    argNames            <- replicateM (length args) freshVarName
-    (argTypes, expType) <- T.unmakeCon <$> getSimpleType (convertName con)
-    let argExpTypes = zipWith3 (\p n t -> (p, Var n t, t)) args argNames argTypes
-    body' <- foldM (\body' (pat, head', t) -> patToIla pat t head' body') body argExpTypes
-    return $ Case head [] [ Alt (DataCon $ convertName con) argNames body' , Alt Default [] $ makeError expType ]
-patToIla (HsPTuple pats) t head body =
-    patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body
-patToIla (HsPList []) t head body = return
-    $ Case head [] [Alt nilCon [] body, Alt Default [] $ makeError t]
+patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
+patToIla (HsPApp con args) t head body bodyType = do
+    argNames <- replicateM (length args) freshVarName
+    let (argTypes, _) = T.unmakeCon t
+        argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
+    body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
+    return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]
+patToIla (HsPTuple pats) t head body bodyType = do
+    ts <- T.unmakeTuple t
+    let t' = T.makeFun ts t -- The type of the tuple constructor is the elements types to the tuple type
+    patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t' head body bodyType
+patToIla (HsPList []) _ head body bodyType =
+    return $ Case head [] [Alt nilCon [] body, Alt Default [] $ makeError bodyType ]
     where nilCon = DataCon "[]"
-patToIla (HsPList (p : ps)) listType head body = do
+patToIla (HsPList (p:ps)) listType head body bodyType = do
     elementType <- T.unmakeList listType
-    headName    <- freshVarName
-    tailName    <- freshVarName
-    headExpr    <- patToIla p elementType (Var headName elementType) body
-    tailExpr <- patToIla (HsPList ps) listType (Var tailName listType) headExpr
-    return $ Case head [] [ Alt (DataCon ":") [headName, tailName] tailExpr , Alt Default [] $ makeError listType ]
-patToIla (HsPParen pat     ) t head body = patToIla pat t head body
-patToIla (HsPAsPat name pat) t head body = do
-    expr      <- patToIla pat t head body
+    headName <- freshVarName
+    tailName <- freshVarName
+    headExpr <- patToIla p elementType (Var headName elementType) body bodyType
+    tailExpr <- patToIla (HsPList ps) listType (Var tailName listType) headExpr bodyType
+    return $ Case head [] [ Alt (DataCon ":") [headName, tailName] tailExpr , Alt Default [] $ makeError bodyType ]
+patToIla (HsPParen pat) t head body bodyType = patToIla pat t head body bodyType
+patToIla (HsPAsPat name pat) t head body bodyType = do
+    expr <- patToIla pat t head body bodyType
     asArgName <- getRenamed (convertName name)
     case expr of
         Case head' captures alts' -> return $ Case head' (asArgName : captures) alts'
-        _                         -> throwError "@ pattern binding non-case translation"
-patToIla HsPWildCard _ head body = return $ Case head [] [Alt Default [] body]
-patToIla p _ _ _ = throwError $ "Unsupported pattern: " <> showt p
+        _ -> throwError "@ pattern binding non-case translation"
+patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default [] body]
+patToIla p _ _ _ _ = throwError $ "Unsupported pattern: " <> showt p
