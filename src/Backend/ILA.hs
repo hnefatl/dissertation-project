@@ -91,7 +91,7 @@ getExprType (Lit _ t)                = return t
 getExprType (App e1 _)               = snd <$> (T.unwrapFun =<< getExprType e1)
 getExprType (Lam _ t e)              = T.makeFun [t] <$> getExprType e
 getExprType (Let _ _ _ e)            = getExprType e
-getExprType (Case _ _ [])            = throwError $ "No alts in case"
+getExprType (Case _ _ [])            = throwError "No alts in case"
 getExprType (Case _ _ (Alt _ _ e:_)) = getExprType e
 getExprType (Type t)                 = return t
 
@@ -194,6 +194,13 @@ getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
 getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
 getPatVariableTypes HsPWildCard _ = return M.empty
 getPatVariableTypes _           _ = throwError "Unsupported pattern"
+
+-- |Given an ILA expression representing an application of a term x to a number of argument terms ys, return (x, ys).
+unmakeApplication :: MonadError Text m => Expr -> m (Expr, [Expr])
+unmakeApplication f@App{} = return $ helper f
+    where helper (App e1 e2) = let (b, as) = helper e1 in (b, e2:as)
+          helper e           = (e, [])
+unmakeApplication e = throwError $ "Expected ILA application, got " <> showt e
 
 toIla :: HsModule -> Converter [Binding Expr]
 toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls

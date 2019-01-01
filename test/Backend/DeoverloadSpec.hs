@@ -5,10 +5,10 @@ import Test.Tasty.HUnit        (assertFailure, testCase)
 
 import Language.Haskell.Parser
 
-import BasicPrelude hiding (intercalate)
+import BasicPrelude            hiding (intercalate)
 import Control.Monad.Except    (runExcept, runExceptT)
-import Data.Text               (unpack, intercalate)
-import Data.Tuple.Extra (both)
+import Data.Text               (intercalate, unpack)
+import Data.Tuple.Extra        (both)
 
 import AlphaEq
 import Backend.Deoverload

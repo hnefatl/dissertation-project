@@ -228,11 +228,13 @@ instance AlphaEq ILA.Expr where
 instance AlphaEq ILAANF.AnfTrivial where
     alphaEq' (ILAANF.Var n1 t1) (ILAANF.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (ILAANF.Lit l1 t1) (ILAANF.Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
-    alphaEq' (ILAANF.Lam v1 t1 e1) (ILAANF.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
     alphaEq' (ILAANF.Type t1) (ILAANF.Type t2) = alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq ILAANF.AnfComplex where
+instance AlphaEq ILAANF.AnfApplication where
     alphaEq' (ILAANF.App e1a e1b) (ILAANF.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (ILAANF.TrivApp e1) (ILAANF.TrivApp e2) = alphaEq' e1 e2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfApplication mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq ILAANF.AnfComplex where
     alphaEq' (ILAANF.Let v1 t1 e1a e1b) (ILAANF.Let v2 t2 e2a e2b) = do
         alphaEq' v1 v2
         alphaEq' t1 t2
@@ -240,7 +242,12 @@ instance AlphaEq ILAANF.AnfComplex where
         alphaEq' e1b e2b
     alphaEq' (ILAANF.Case e1 vs1 as1) (ILAANF.Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
     alphaEq' (ILAANF.Trivial e1) (ILAANF.Trivial e2) = alphaEq' e1 e2
+    alphaEq' (ILAANF.CompApp e1) (ILAANF.CompApp e2) = alphaEq' e1 e2
     alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq ILAANF.AnfRhs where
+    alphaEq' (ILAANF.Lam v1 t1 e1) (ILAANF.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (ILAANF.Complex c1) (ILAANF.Complex c2) = alphaEq' c1 c2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]
 
 
 stripModuleParens :: HsModule -> HsModule

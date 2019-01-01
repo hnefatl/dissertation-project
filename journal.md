@@ -10,6 +10,8 @@ Quick notes on milestones/features/problems/bugs during implementation.
 - Ambiguity check.
 - Check each use of `zip`/`zipWith`/`zipWithM` to make absolutely sure that the two lists being different lengths is
   acceptable: we might want to check they're the same length.
+- Polymorphic type applications in Core........ completely forgot about it, not run into any issues without it yet.
+  Can maybe get away without it unless we want to type-check core?
 
 ## Preprocessing
 
@@ -85,3 +87,15 @@ Lots of example edge cases to demonstrate this is actually **hard**.
 
 Basically GHC's core but without the fancy stuff needed for GADTs. Compiling pattern matching down is complicated, need
 deeply nested case statements.
+
+
+Administrative Normal Form: https://en.wikipedia.org/wiki/A-normal_form,
+https://www.microsoft.com/en-us/research/wp-content/uploads/2016/08/tacc-hs09.pdf figure 7.
+Description at top of file of what tasks GHC's transform does: https://github.com/ghc/ghc/blob/master/compiler/coreSyn/CorePrep.hs
+
+STG: Language description on https://hackage.haskell.org/package/stgi is good.
+https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/StgSynType
+Very good overview, wish I'd found sooner: http://www.scs.stanford.edu/11au-cs240h/notes/ghc-slides.html
+
+Given that Case is evaluation, is using cases for all patterns appropriate? How far do arguments get evaluated?
+Hopefully just to one level.

@@ -1,3 +1,5 @@
+{-# Language TupleSections #-}
+
 module ExtraDefs where
 
 import           BasicPrelude            hiding (intercalate)
@@ -25,6 +27,9 @@ synPrint = pack . prettyPrint
 
 middleText :: (TextShow a, TextShow b) => Text -> a -> b -> Text
 middleText m l r = showt l <> m <> showt r
+
+secondM :: Applicative f => (b -> f c) -> (a, b) -> f (a, c)
+secondM f (x, y) = (x,) <$> f y
 
 -- |Check if the given function holds for each element in the same index in the given lists. Returns `False` if the
 -- lists are different lengths.

@@ -20,7 +20,7 @@ import           ExtraDefs
 import           Logger                  (runLogger, runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
-import           Typechecker.Hardcoded   (builtinKinds, builtinClasses, builtinDictionaries)
+import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
 import qualified Typechecker.Types       as T

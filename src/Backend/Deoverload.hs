@@ -148,7 +148,7 @@ deoverloadRhs (HsUnGuardedRhs expr) = case expr of
 deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 
 deoverloadExp :: HsExp -> Deoverload HsExp
-deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleType)) = do
+deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType _ origSimpleType)) = do
     ks <- getKinds
     let varName = convertName n
     writeLog $  "Deoverloading " <> showt varName <> ", with tagged type " <> synPrint t
@@ -157,7 +157,9 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType origTagQuals origSimpleTyp
         -- The tagged type includes qualifiers though: eg. `Num a => a` for `x` in `\x -> x + x`, whereas the actual `x`
         -- just has type `a` without the `Num a` qualifier (it's the caller's responsibility to apply any dictionaries
         -- to the arguments). As a result, we don't need any qualifiers, just the simple type.
-        Nothing -> writeLog ("Unbound var: " <> showt varName <> " " <> showt origSimpleType) >> return []
+        Nothing -> do
+            writeLog ("Unbound var: " <> showt varName <> " " <> showt origSimpleType)
+            return []
         -- The tagged type is "fake": eg. `id :: a -> a` can be tagged with `id :: Num b => b -> b` if `Num b` holds. We
         -- need to make sure we only pass the dictionary arguments that the function/variable we're looking at *needs*.
         -- We get the "real" type of the name, unify the real simple type with the tagged simple type, apply the
