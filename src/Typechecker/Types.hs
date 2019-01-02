@@ -20,10 +20,10 @@ import           Names
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
-data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord)
+data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord, Show)
 
-data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord)
-data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord)
+data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord, Show)
+data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord, Show)
 
 -- |The type of a Haskell expression.
 -- A TypeVar is a type variable, a TypeCon is a type constant, and a TypeApp is the application of one type to another
@@ -31,7 +31,7 @@ data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord)
 data Type = TypeVar !TypeVariable
           | TypeCon !TypeConstant
           | TypeApp !Type !Type !Kind
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
 applyTypeFun :: MonadError Text m => Type -> Type -> m Type
@@ -52,19 +52,19 @@ applyTypeFunUnsafe t1 t2 = case applyTypeFun t1 t2 of
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord)
+data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord, Show)
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
 -- UninstantiatedType`.
-data Qualified a = Qualified !(S.Set TypePredicate) !a deriving (Eq, Ord)
+data Qualified a = Qualified !(S.Set TypePredicate) !a deriving (Eq, Ord, Show)
 -- |Some common applications of Qualified
 type QualifiedType = Qualified Type
 -- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
 type ClassInstance = Qualified TypePredicate
 
 -- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
-data Quantified a = Quantified !(S.Set TypeVariable) !a deriving (Eq, Ord)
+data Quantified a = Quantified !(S.Set TypeVariable) !a deriving (Eq, Ord, Show)
 type QuantifiedType = Quantified QualifiedType
 type QuantifiedSimpleType = Quantified Type
 

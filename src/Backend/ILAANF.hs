@@ -26,7 +26,7 @@ data AnfApplication = App AnfApplication AnfTrivial
                     | TrivApp AnfTrivial
     deriving (Eq, Ord)
 -- |Complex ANF expressions are the bread-and-butter: let expressions, case expressions.
--- Like GHC's Core, in ILA-ANF Case expressions are the only points of *evaluation*, and Let expressions are points of
+-- Like GHC's STG, in ILA-ANF Case expressions are the only points of *evaluation*, and Let expressions are points of
 -- *allocation* (but not the only points of allocation).
 data AnfComplex = Let VariableName Type AnfRhs AnfComplex
                 | Case AnfComplex [VariableName] [Alt AnfComplex]

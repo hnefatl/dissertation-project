@@ -1,7 +1,6 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE TemplateHaskell            #-}
 
 module Backend.Deoverload where
 
@@ -14,8 +13,7 @@ import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
 import           Data.Text                  (unpack)
 import           Language.Haskell.Syntax
-import           TextShow                   (showt)
-import           TextShow.TH                (deriveTextShow)
+import           TextShow                   (TextShow, showb, showt)
 
 import           ExtraDefs                  (synPrint)
 import           Logger
@@ -36,8 +34,9 @@ data DeoverloadState = DeoverloadState
     , types            :: M.Map VariableName QuantifiedType
     , kinds            :: M.Map TypeVariableName Kind
     , classEnvironment :: ClassEnvironment }
-    deriving (Eq)
-deriveTextShow ''DeoverloadState
+    deriving (Eq, Show)
+instance TextShow DeoverloadState where
+    showb = fromString . show
 instance Default DeoverloadState where
     def = DeoverloadState
         { dictionaries = M.empty

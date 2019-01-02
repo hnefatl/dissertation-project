@@ -4,10 +4,12 @@ Quick notes on milestones/features/problems/bugs during implementation.
 
 ## TODO
 
-- Mutually recursive typechecking.
-- Rewrite to use `Text` instead of `String` (can make some nicer instance declarations after that, String's a List).
-- Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
+- ILA-ANF: data constructors need to be saturated.
+- Check all Alts in a case expression are the same type (data, literal etc).
+- Pattern matching in ILA needs to obey strictness stuff: don't `case` an argument unless it's strict. Probably need to
+  make `patToIla` return a `Maybe`.
 - Ambiguity check.
+- Support for `where` clauses: the random `[HsDecl]`s at the end of a lot of the declaration patterns.
 - Check each use of `zip`/`zipWith`/`zipWithM` to make absolutely sure that the two lists being different lengths is
   acceptable: we might want to check they're the same length.
 - Polymorphic type applications in Core........ completely forgot about it, not run into any issues without it yet.

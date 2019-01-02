@@ -12,7 +12,6 @@ import TextShow                (TextShow, fromText, showb)
 
 newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
-newtype TypeConstantName = TypeConstantName Text deriving (Eq, Ord, Hashable)
 -- Unique variants are only used within the renamer
 newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable)
 newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable)

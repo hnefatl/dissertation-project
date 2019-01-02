@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 
 module Typechecker.Typechecker where
@@ -17,9 +16,8 @@ import qualified Data.Map                    as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import           Language.Haskell.Syntax     as Syntax
-import           TextShow                    (showt)
+import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
-import           TextShow.TH                 (deriveTextShow)
 
 import           AlphaEq
 import           ExtraDefs
@@ -49,7 +47,7 @@ data InferrerState = InferrerState
     , kinds            :: M.Map TypeVariableName Kind
     , typePredicates   :: M.Map TypeVariableName (S.Set ClassName)
     , variableCounter  :: Int }
-deriveTextShow ''InferrerState
+    deriving (Eq, Show)
 
 instance Default InferrerState where
     def = InferrerState
@@ -60,6 +58,8 @@ instance Default InferrerState where
             , kinds = M.empty
             , typePredicates = M.empty
             , variableCounter = 0 }
+instance TextShow InferrerState where
+    showb = fromString . show
 
 -- |A TypeInferrer handles mutable state and error reporting
 newtype TypeInferrer a = TypeInferrer (ExceptT Text (StateT InferrerState (LoggerT NameGenerator)) a)

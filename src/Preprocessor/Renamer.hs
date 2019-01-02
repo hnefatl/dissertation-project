@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 
 module Preprocessor.Renamer where
@@ -16,9 +15,8 @@ import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import           Data.Tuple                  ()
 import           Language.Haskell.Syntax
-import           TextShow                    (TextShow, showt)
+import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
-import           TextShow.TH                 (deriveTextShow)
 
 import           NameGenerator
 import           Names
@@ -34,6 +32,9 @@ data RenamerState = RenamerState
     -- Analogous to the above but for type variables
     , typeVariableBindings       :: M.Map TypeVariableName [UniqueTypeVariableName]
     , typeVariableReverseMapping :: M.Map UniqueTypeVariableName TypeVariableName }
+    deriving (Eq, Show)
+instance TextShow RenamerState where
+    showb = fromString . show
 instance Default RenamerState where
     def = RenamerState
             { variableCounter = 0
@@ -41,7 +42,6 @@ instance Default RenamerState where
             , variableReverseMapping = M.empty
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }
-deriveTextShow ''RenamerState -- instance TextShow RenamerState where ...
 
 newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState NameGenerator) a)
     deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadNameGenerator)

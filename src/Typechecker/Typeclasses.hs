@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
-{-# LANGUAGE TemplateHaskell  #-}
 
 module Typechecker.Typeclasses where
 
@@ -9,8 +8,7 @@ import           Control.Monad.Except     (MonadError, throwError)
 import           Data.Either              (isRight)
 import qualified Data.Map.Strict          as M
 import qualified Data.Set                 as S
-import           TextShow                 (showt)
-import           TextShow.TH              (deriveTextShow)
+import           TextShow                 (TextShow, showb, showt)
 
 import           ExtraDefs
 import           Names
@@ -22,8 +20,9 @@ type ClassName = TypeVariableName
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
-data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq)
-deriveTextShow ''TypeClass
+data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show)
+instance TextShow TypeClass where
+    showb = fromString . show
 
 -- |Qualified types need to match the same global unique names to the predicates as it does the head
 type ClassEnvironment = M.Map ClassName TypeClass
