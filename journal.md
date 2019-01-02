@@ -14,6 +14,7 @@ Quick notes on milestones/features/problems/bugs during implementation.
   acceptable: we might want to check they're the same length.
 - Polymorphic type applications in Core........ completely forgot about it, not run into any issues without it yet.
   Can maybe get away without it unless we want to type-check core?
+- `hs-java` now hosted https://github.com/portnov/hs-java.
 
 ## Preprocessing
 
@@ -101,3 +102,5 @@ Very good overview, wish I'd found sooner: http://www.scs.stanford.edu/11au-cs24
 
 Given that Case is evaluation, is using cases for all patterns appropriate? How far do arguments get evaluated?
 Hopefully just to one level.
+
+

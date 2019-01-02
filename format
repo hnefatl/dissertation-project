@@ -1,0 +1,3 @@
+#!/bin/bash
+
+stack exec stylish-haskell -- --inplace src/**/*.hs test/**/*.hs
