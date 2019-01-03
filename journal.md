@@ -91,10 +91,13 @@ Lots of example edge cases to demonstrate this is actually **hard**.
 Basically GHC's core but without the fancy stuff needed for GADTs. Compiling pattern matching down is complicated, need
 deeply nested case statements.
 
+### ILA-ANF
 
 Administrative Normal Form: https://en.wikipedia.org/wiki/A-normal_form,
 https://www.microsoft.com/en-us/research/wp-content/uploads/2016/08/tacc-hs09.pdf figure 7.
 Description at top of file of what tasks GHC's transform does: https://github.com/ghc/ghc/blob/master/compiler/coreSyn/CorePrep.hs
+
+### ILB
 
 STG: Language description on https://hackage.haskell.org/package/stgi is good.
 https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/StgSynType
@@ -103,4 +106,6 @@ Very good overview, wish I'd found sooner: http://www.scs.stanford.edu/11au-cs24
 Given that Case is evaluation, is using cases for all patterns appropriate? How far do arguments get evaluated?
 Hopefully just to one level.
 
+### Bytecode
 
+Requires `libzip-dev` on debian, otherwise get a weird crash message.
