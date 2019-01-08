@@ -5,6 +5,17 @@ import java.util.function.BiFunction;
 
 abstract class HeapObject {
     public abstract HeapObject enter();
+
+    // Hacky not-sure-if-we-need method: iterates calling enter until we reach a fixed point (should be normal form?)
+    public HeapObject force() {
+        HeapObject last = null;
+        HeapObject current = this;
+        while (last != current) {
+            last = current;
+            current = current.enter();
+        }
+        return current;
+    }
 }
 class Function extends HeapObject {
     private BiFunction<HeapObject[], HeapObject[], HeapObject> inner;
@@ -46,20 +57,14 @@ class Function extends HeapObject {
 // result without calling the function again.
 class Thunk extends HeapObject {
     protected HeapObject contained;
-    protected Boolean entered;
 
     public Thunk(HeapObject contained) {
         this.contained = contained;
-        this.entered = false;
     }
 
     @Override
     public HeapObject enter() {
-        // Inefficient branch: don't think there's a way around though.
-        if (!entered) {
-            contained = contained.enter();
-            entered = true;
-        }
+        contained = contained.enter();
         return contained;
     }
 }
@@ -103,7 +108,7 @@ class _Maybe extends BoxedData {
 }
 // Typeclass class: provides the publicly visible function that extracts the implementation function from the dictionary
 class _Num {
-    public static HeapObject _make2B() {
+    public static Function _make2B() {
         return new Function(_Num::_2BImpl, 3, new HeapObject[0]);
     }
     private static HeapObject _2BImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
@@ -134,25 +139,37 @@ class _NumInt extends BoxedData {
 }
 public class foo {
     public static void main(String[] args) {
-        //_Maybe m1 = _Maybe._makeNothing();
-        //_Maybe m2 = _Maybe._makeJust(x);
-        HeapObject x = new Thunk(_Int._makeInt(5));
+        // Pretend let-bound variables
+        //HeapObject x = new Thunk(_Maybe._makeNothing());
+        HeapObject x = new Thunk(_Maybe._makeJust(new Thunk(_Int._makeInt(5))));
         HeapObject y = new Thunk(_Int._makeInt(6));
         HeapObject dNumInt = new Thunk(_NumInt._makeNumInt());
-        Function f = (Function)foo._makeExampleFunction(x, dNumInt).enter();
+
+        // Invoke function
+        Function f = foo._makeExampleFunction(x, dNumInt);
         f.addArgument(y);
         HeapObject result = f.enter();
-        System.out.println(result);
+        System.out.println(result.force());
     }
-    public static HeapObject _makeExampleFunction(HeapObject x, HeapObject dNumInt) {
+    public static Function _makeExampleFunction(HeapObject x, HeapObject dNumInt) {
         return new Function(foo::_exampleFunctionImpl, 1, new HeapObject[] { x, dNumInt });
     }
+    // exampleFunction y = case x of
+    //     Nothing -> Nothing
+    //     Just x' -> Just (x' + y)
     private static HeapObject _exampleFunctionImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
-        Function f = (Function)_Num._make2B().enter();
-        f.addArgument(freeVariables[1]); // dNumInt
-        f.addArgument(freeVariables[0]); // x
-        f.addArgument(arguments[0]); // y
-        return f.enter();
+        BoxedData d = (BoxedData)freeVariables[0].enter(); // Evaluation
+        switch (d.branch) {
+            case 0:
+                return new Thunk(_Maybe._makeNothing()); // Nothing
+            case 1:
+                Function f = _Num._make2B();
+                f.addArgument(freeVariables[1]); // dNumInt
+                f.addArgument(d.data[0]); // x
+                f.addArgument(arguments[0]); // y
+                return new Thunk(f);
+            default: throw new RuntimeException("Invalid data branch");
+        }
     }
 }
 // Wrap everything in thunks: they auto-update their value once evaluated.

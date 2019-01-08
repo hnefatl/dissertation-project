@@ -5,26 +5,20 @@ module Main where
 
 import BasicPrelude
 import qualified Data.ByteString.Lazy as B
-import Control.Exception.Safe.Checked
-import Control.Monad.State
 
 import JVM.Assembler
 import JVM.Builder
 import JVM.Converter
 import JVM.ClassFile
-import JVM.Exceptions
 import qualified Java.Lang
 import qualified Java.IO
 
 main :: IO ()
 main = do
-    testClass <- generateIO [] "Test" $ catchUnexpectedEndMethod makeTestClass
+    testClass <- generateIO [] "Test" makeTestClass
     B.writeFile "Test.class" $ encodeClass testClass
 
-catchUnexpectedEndMethod :: MonadCatch m => (Throws UnexpectedEndMethod => m a) -> m a
-catchUnexpectedEndMethod x = catch x (error . show :: UnexpectedEndMethod -> a)
-
-makeTestClass :: (Throws UnexpectedEndMethod, MonadIO m, MonadThrow m, MonadState GState m) => m ()
+makeTestClass :: GeneratorIO ()
 makeTestClass = do
     foo <- newMethod [ACC_PUBLIC, ACC_STATIC] "foo" [] (Returns IntType) $ do
         getStaticField Java.Lang.system Java.IO.out
