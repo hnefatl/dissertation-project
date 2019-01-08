@@ -170,7 +170,7 @@ makeError = Var "error"
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
-    boundNames <- S.toAscList <$> getPatContainedNames pat
+    boundNames <- S.toAscList <$> getBoundVariables pat
     renames    <- M.fromList <$> mapM (\n -> (n, ) <$> freshVarName) boundNames
     return (boundNames, renames)
 

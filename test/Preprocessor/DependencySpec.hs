@@ -29,7 +29,7 @@ makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpa
             | length declOrder /= length cases ->
                 assertFailure $ unpack $ "Lengths: " <> pretty cases <> " vs " <> pretty declOrder
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
-                case runExcept (getDeclsBoundNames actualGroup) of
+                case runExcept (getBoundVariables actualGroup) of
                     Left err         -> assertFailure $ unpack err
                     Right boundNames -> assertEqual "" boundNames (S.fromList expectedGroup)
 

@@ -1,4 +1,5 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# Language FlexibleContexts #-}
+{-# Language FlexibleInstances #-}
 
 -- |Utility functions for getting variable names from the parse tree
 module Preprocessor.ContainedNames where
@@ -21,86 +22,70 @@ disjointUnion s1 s2 = if S.null inter then return (S.union s1 s2) else throwErro
 disjointUnions :: (MonadError Text m, Foldable f, Ord a, TextShow a) => f (S.Set a) -> m (S.Set a)
 disjointUnions = foldlM disjointUnion S.empty
 
--- |Get all variable names top-level bound by this declaration, **not recursively**. Eg. for the pattern binding:
--- > x = y
--- >   where y = 5
--- we return `x` but not `y`, as `x` is visible to horizontally defined bindings, whereas y is not.
--- We care about what variables are bound rather than contained for eg. typechecking mutually recursive statements.
-getDeclBoundNames :: MonadError Text m => HsDecl -> m (S.Set VariableName)
-getDeclBoundNames (HsPatBind _ pat _ _) = getPatContainedNames pat
-getDeclBoundNames (HsFunBind matches) = do
-    let names = map (\(HsMatch _ name _ _ _) -> convertName name) matches
-        funName = head names
-        allNamesMatch = all (== funName) names
-    if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
-getDeclBoundNames _ = throwError "Declaration not supported"
-getDeclsBoundNames :: MonadError Text m => [HsDecl] -> m (S.Set VariableName)
-getDeclsBoundNames ds = disjointUnions =<< mapM getDeclBoundNames ds
+class HasBoundVariables a where
+    getBoundVariables :: MonadError Text m => a -> m (S.Set VariableName)
+class HasFreeVariables a where
+    getFreeVariables :: MonadError Text m => a -> m (S.Set VariableName)
+class HasFreeTypeVariables a where
+    getFreeTypeVariables :: a -> S.Set TypeVariableName
 
+instance (Traversable t, HasBoundVariables a) => HasBoundVariables (t a) where
+    getBoundVariables = disjointUnions <=< mapM getBoundVariables
+instance (Traversable t, HasFreeVariables a) => HasFreeVariables (t a) where
+    getFreeVariables = fmap S.unions . mapM getFreeVariables
+instance (Functor f, Foldable f, HasFreeTypeVariables a) => HasFreeTypeVariables (f a) where
+    getFreeTypeVariables = S.unions . fmap getFreeTypeVariables
 
--- |Return all variable names contained in this pattern (recursively)
-getPatContainedNames :: MonadError Text m => HsPat -> m (S.Set VariableName)
-getPatContainedNames (HsPVar v) = return $ S.singleton (convertName v)
-getPatContainedNames (HsPLit _) = return S.empty
-getPatContainedNames HsPWildCard = return S.empty
-getPatContainedNames (HsPNeg p) = getPatContainedNames p
-getPatContainedNames (HsPParen p) = getPatContainedNames p
-getPatContainedNames (HsPIrrPat p) = getPatContainedNames p
-getPatContainedNames (HsPAsPat v p) = disjointUnion (S.singleton $ convertName v) =<< getPatContainedNames p
-getPatContainedNames (HsPInfixApp p1 _ p2) = do
-    ns1 <- getPatContainedNames p1
-    ns2 <- getPatContainedNames p2
-    disjointUnion ns1 ns2
-getPatContainedNames (HsPApp _ ps) = disjointUnions =<< mapM getPatContainedNames ps
-getPatContainedNames (HsPTuple ps) = disjointUnions =<< mapM getPatContainedNames ps
-getPatContainedNames (HsPList ps) = disjointUnions =<< mapM getPatContainedNames ps
-getPatContainedNames (HsPRec _ _) = throwError "Pattern records not supported"
--- |Get all variable names bound in this list of patterns
-getPatsContainedNames :: MonadError Text m => [HsPat] -> m (S.Set VariableName)
-getPatsContainedNames ps = disjointUnions =<< mapM getPatContainedNames ps
+instance HasBoundVariables HsDecl where
+    getBoundVariables (HsPatBind _ pat _ _) = getBoundVariables pat
+    getBoundVariables (HsFunBind matches) = do
+        let names = map (\(HsMatch _ name _ _ _) -> convertName name) matches
+            funName = head names
+            allNamesMatch = all (== funName) names
+        if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
+    getBoundVariables _ = throwError "Declaration not supported"
+instance HasBoundVariables HsPat where
+    getBoundVariables (HsPVar v) = return $ S.singleton (convertName v)
+    getBoundVariables (HsPLit _) = return S.empty
+    getBoundVariables HsPWildCard = return S.empty
+    getBoundVariables (HsPNeg p) = getBoundVariables p
+    getBoundVariables (HsPParen p) = getBoundVariables p
+    getBoundVariables (HsPIrrPat p) = getBoundVariables p
+    getBoundVariables (HsPAsPat v p) = disjointUnion (S.singleton $ convertName v) =<< getBoundVariables p
+    getBoundVariables (HsPInfixApp p1 _ p2) = getBoundVariables [p1, p2]
+    getBoundVariables (HsPApp _ ps) = getBoundVariables ps
+    getBoundVariables (HsPTuple ps) = getBoundVariables ps
+    getBoundVariables (HsPList ps) = getBoundVariables ps
+    getBoundVariables (HsPRec _ _) = throwError "Pattern records not supported"
 
+instance HasFreeVariables HsDecl where
+    getFreeVariables (HsPatBind _ _ rhs _) = getFreeVariables rhs
+    getFreeVariables (HsFunBind _)         = throwError "Variables in a HsMatch not supported"
+    getFreeVariables _                     = throwError "Not supported"
+instance HasFreeVariables HsRhs where
+    getFreeVariables (HsUnGuardedRhs e) = getFreeVariables e
+    getFreeVariables (HsGuardedRhss _)  = throwError "Guarded rhss not supported"
+instance HasFreeVariables HsExp where
+    getFreeVariables (HsVar name) = return $ S.singleton $ convertName name
+    getFreeVariables (HsCon _) = return S.empty
+    getFreeVariables (HsLit _) = return S.empty
+    getFreeVariables (HsInfixApp e1 op e2) = S.insert (convertName op) <$> getFreeVariables [e1, e2]
+    getFreeVariables (HsApp e1 e2) = S.union <$> getFreeVariables e1 <*> getFreeVariables e2
+    getFreeVariables (HsNegApp e) = getFreeVariables e
+    getFreeVariables (HsLambda _ pats e) = S.difference <$> getFreeVariables e <*> getBoundVariables pats
+    getFreeVariables (HsLet ds e) = S.union <$> getFreeVariables ds <*> getFreeVariables e
+    getFreeVariables (HsIf e1 e2 e3) = getFreeVariables [e1, e2, e3]
+    getFreeVariables (HsTuple es) = getFreeVariables es
+    getFreeVariables (HsList es) = getFreeVariables es
+    getFreeVariables (HsParen e) = getFreeVariables e
+    getFreeVariables (HsExpTypeSig _ e _) = getFreeVariables e
+    getFreeVariables e = throwError $ pack $ "Unsupported expression " <> show e
 
--- |Get all variable names contained within this declaration: excluding those names **bound** by the declaration.
-getDeclContainedNames :: MonadError Text m => HsDecl -> m (S.Set VariableName)
-getDeclContainedNames (HsPatBind _ _ rhs _) = getRhsContainedNames rhs
-getDeclContainedNames (HsFunBind _)         = throwError "Variables in a HsMatch not supported"
-getDeclContainedNames _                     = throwError "Not supported"
-getDeclsContainedNames :: MonadError Text m => [HsDecl] -> m (S.Set VariableName)
-getDeclsContainedNames ds = S.unions <$> mapM getDeclContainedNames ds
-
-getRhsContainedNames :: MonadError Text m => HsRhs -> m (S.Set VariableName)
-getRhsContainedNames (HsUnGuardedRhs e) = getExpContainedNames e
-getRhsContainedNames (HsGuardedRhss _)  = throwError "Guarded rhss not supported"
-
-getExpContainedNames :: MonadError Text m => HsExp -> m (S.Set VariableName)
-getExpContainedNames (HsVar name) = return $ S.singleton $ convertName name
-getExpContainedNames (HsCon _) = return S.empty
-getExpContainedNames (HsLit _) = return S.empty
-getExpContainedNames (HsInfixApp e1 op e2) = do
-    let opNames = S.singleton $ convertName op
-    e1Names <- getExpContainedNames e1
-    e2Names <- getExpContainedNames e2
-    return $ S.unions [opNames, e1Names, e2Names]
-getExpContainedNames (HsApp e1 e2) = S.union <$> getExpContainedNames e1 <*> getExpContainedNames e2
-getExpContainedNames (HsNegApp e) = getExpContainedNames e
-getExpContainedNames (HsLambda _ pats e) = S.union <$> getPatsContainedNames pats <*> getExpContainedNames e
-getExpContainedNames (HsLet ds e) = S.union <$> getDeclsContainedNames ds <*> getExpContainedNames e
-getExpContainedNames (HsIf e1 e2 e3) = S.unions <$> mapM getExpContainedNames [e1, e2, e3]
-getExpContainedNames (HsTuple es) = S.unions <$> mapM getExpContainedNames es
-getExpContainedNames (HsList es) = S.unions <$> mapM getExpContainedNames es
-getExpContainedNames (HsParen e) = getExpContainedNames e
-getExpContainedNames (HsExpTypeSig _ e _) = getExpContainedNames e
-getExpContainedNames e = throwError $ pack $ "Unsupported expression " <> show e
-
-getQualTypeContainedNames :: HsQualType -> S.Set TypeVariableName
-getQualTypeContainedNames (HsQualType quals t) = S.union (getAsstsContainedNames quals) (getTypeContainedNames t)
-getAsstContainedNames :: HsAsst -> S.Set TypeVariableName
-getAsstContainedNames (_, ts) = S.unions $ map getTypeContainedNames ts
-getAsstsContainedNames :: [HsAsst] -> S.Set TypeVariableName
-getAsstsContainedNames = S.unions . map getAsstContainedNames
-getTypeContainedNames :: HsType -> S.Set TypeVariableName
-getTypeContainedNames (HsTyFun t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
-getTypeContainedNames (HsTyTuple ts)  = S.unions $ map getTypeContainedNames ts
-getTypeContainedNames (HsTyApp t1 t2) = S.union (getTypeContainedNames t1) (getTypeContainedNames t2)
-getTypeContainedNames (HsTyVar n)     = S.singleton $ convertName n
-getTypeContainedNames (HsTyCon _)     = S.empty
+instance HasFreeTypeVariables HsQualType where
+    getFreeTypeVariables (HsQualType quals t) = S.union (getFreeTypeVariables quals) (getFreeTypeVariables t)
+instance HasFreeTypeVariables HsType where
+    getFreeTypeVariables (HsTyFun t1 t2) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
+    getFreeTypeVariables (HsTyTuple ts)  = getFreeTypeVariables ts
+    getFreeTypeVariables (HsTyApp t1 t2) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
+    getFreeTypeVariables (HsTyVar n)     = S.singleton $ convertName n
+    getFreeTypeVariables (HsTyCon _)     = S.empty

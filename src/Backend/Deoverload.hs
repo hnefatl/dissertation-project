@@ -134,7 +134,9 @@ deoverloadRhs (HsUnGuardedRhs expr) = case expr of
         args <- mapM makeDictName constraints
         let dictArgs = M.fromList $ zip constraints args
             funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
-        HsExpTypeSig _ e' _ <- addScopedDictionaries dictArgs (deoverloadExp e)
+        e' <- addScopedDictionaries dictArgs (deoverloadExp e) >>= \case
+            HsExpTypeSig _ e' _ -> return e'
+            _ -> throwError "Got untagged expression from adding dictionaries"
         -- Wrap the expression in a lambda that takes the dictionary arguments
         let outerType = HsQualType [] $ deoverloadType t
             innerType = HsQualType [] simpleType
@@ -189,12 +191,13 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType _ origSimpleType)) = do
 -- We don't need to deoverload the constructor name, as constructors can't be qualified in Haskell 98.
 deoverloadExp c@(HsCon _) = return c
 deoverloadExp (HsExpTypeSig l lit@(HsLit _) (HsQualType _ t)) = return $ HsExpTypeSig l lit (HsQualType [] t)
-deoverloadExp (HsExpTypeSig l (HsApp f e) _) = do
-    fExp@(HsExpTypeSig _ _ t) <- deoverloadExp f
-    eExp                      <- deoverloadExp e
-    case t of
-        HsQualType [] (HsTyFun _ retType) -> return $ HsExpTypeSig l (HsApp fExp eExp) (HsQualType [] retType)
-        _                                 -> throwError $ "Got non-function type in application: " <> showt t
+deoverloadExp (HsExpTypeSig l (HsApp f e) _) = deoverloadExp f >>= \case
+    fExp@(HsExpTypeSig _ _ t) -> case t of
+        HsQualType [] (HsTyFun _ retType) -> do
+            eExp <- deoverloadExp e
+            return $ HsExpTypeSig l (HsApp fExp eExp) (HsQualType [] retType)
+        _ -> throwError $ "Got non-function type in application: " <> showt t
+    _ -> throwError "Got non-tagged function in application"
 deoverloadExp HsInfixApp{} = throwError "Infix applications should have been replaced by the type inferrer"
 deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2

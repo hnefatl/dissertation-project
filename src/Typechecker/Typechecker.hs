@@ -24,7 +24,7 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (getDeclsBoundNames)
+import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.Dependency
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
@@ -432,7 +432,7 @@ inferDecl _ = throwError "Declaration not yet supported"
 
 inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDecls ds = do
-    names <- getDeclsBoundNames ds
+    names <- getBoundVariables ds
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ "Adding " <> showt typeVarMapping <> " to environment for declaration group"
     addVariableTypes typeVarMapping
@@ -445,8 +445,8 @@ inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
     declExps <- forM dependencyGroups $ \group -> do
-        boundNames <- S.toList <$> getDeclsBoundNames group
-        writeLog $ "Processing binding group {" <> (mconcat $ intersperse "," $ map showt boundNames) <> "}"
+        boundNames <- S.toList <$> getBoundVariables group
+        writeLog $ "Processing binding group {" <> mconcat (intersperse "," $ map showt boundNames) <> "}"
         inferDecls group
     return $ concat declExps
 

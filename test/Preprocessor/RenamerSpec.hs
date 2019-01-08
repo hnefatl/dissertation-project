@@ -15,7 +15,7 @@ import TextShow                (TextShow, showt)
 import AlphaEq                 (alphaEq)
 import ExtraDefs               (deline)
 import NameGenerator           (evalNameGenerator)
-import Preprocessor.Renamer    (renameModule, runRenamer)
+import Preprocessor.Renamer    (rename, runRenamer)
 
 pretty :: TextShow a => a -> Text
 pretty = toStrict . pString . unpack . showt
@@ -27,7 +27,7 @@ makeTest input expected =
             case runExcept renamedInput of
                 Right actual -> assertBool (unpack $ pretty state) (alphaEq expected' actual)
                 Left err     -> assertFailure $ unpack $ unlines [err, pretty state]
-            where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
+            where (renamedInput, state) = evalNameGenerator (runRenamer $ rename input') 0
         ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
 
 test :: TestTree
