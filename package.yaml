@@ -25,6 +25,7 @@ dependencies:
 - text-show
 - text-show-instances
 - formatting
+- bytestring
 - containers
 - unordered-containers
 - hashable
@@ -34,6 +35,7 @@ dependencies:
 - data-default
 - haskell-src
 - hs-java # Provided from custom repo, see stack.yaml extra-deps
+- safe-exceptions-checked
 
 library:
   source-dirs: src

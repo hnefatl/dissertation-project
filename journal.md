@@ -109,3 +109,34 @@ Hopefully just to one level.
 ### Bytecode
 
 Requires `libzip-dev` on debian, otherwise get a weird crash message.
+
+eval-apply pdf is good background. "3.1 Heap Objects".
+https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage/HeapObjects has a brilliant description of various heap
+objects.
+
+Java is restrictive about what you can define. All functions have a fixed number of arguments, so can't just store a
+pointer to a function, push "the right number" of arguments onto the stack, then jump. Maybe should've used C-- (portal
+assembly language with GC).
+
+Convert each lambda to a class? Anonymous class? Keep free variables as members, maybe also keep arguments as members?
+Would allow us to skip having Function/FunctionApplication and just have instances of the specific function class with a
+varying number of their members set to non-null. Using arrays makes names a bit harder (not much: Map VariableName Int
+for indices into the array?) but makes calculating arity of a partially applied function much easier (arity =
+originalarity + numfreevariables - len(args)).
+
+Scala makes an anonymous class for each lambda:
+https://stackoverflow.com/questions/11657676/how-does-scala-maintains-the-values-of-variable-when-the-closure-was-defined
+
+The RTS keeps each expression (thunk, function, data etc) at WHNF by virtue of having been ANF. Functions evaluate as
+soon as you apply the last argument.
+What drives the program? What "pulls" the Chars out of the String from a print? What forces IO actions to be executed?
+Bind notation forcing WHNF? So does it just fall out from a gradual descent to a raw IO()? Would be nice...
+
+Don't need to worry about known/unknown (arity) calls as per
+https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/HaskellExecution/FunctionCalls as our Function just takes single
+arguments at a time and evaluates when ready.
+
+
+Would be nice to have an equivalent to GHC's primops: a way of representing primitive operations like unboxed + in
+haskell-land, not just in the final lowering pass. Means we could do unboxing optimisations in Core rather than eg. as a
+peephole.

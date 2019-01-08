@@ -1,25 +1,41 @@
+{-# Language FlexibleContexts #-}
+{-# Language Rank2Types #-}
+
 module Main where
 
 import BasicPrelude
-import Data.Text               (pack, unpack)
-import Language.Haskell.Parser (ParseMode(..), ParseResult(..), parseModuleWithMode)
-import Language.Haskell.Syntax (SrcLoc(..))
-import Text.Pretty.Simple
-import TextShow                (showt)
+import qualified Data.ByteString.Lazy as B
+import Control.Exception.Safe.Checked
+import Control.Monad.State
+
+import JVM.Assembler
+import JVM.Builder
+import JVM.Converter
+import JVM.ClassFile
+import JVM.Exceptions
+import qualified Java.Lang
+import qualified Java.IO
 
 main :: IO ()
 main = do
-    files <- getArgs
-    forM_ files (compileFile . unpack)
+    testClass <- generateIO [] "Test" $ catchUnexpectedEndMethod makeTestClass
+    B.writeFile "Test.class" $ encodeClass testClass
 
-printParseError :: SrcLoc -> Text -> IO ()
-printParseError (SrcLoc file line col) msg =
-    putStrLn $ "File \"" <> showt file <> "\", line " <> showt line <> ", column " <> showt col ++ ": " <> msg
+catchUnexpectedEndMethod :: MonadCatch m => (Throws UnexpectedEndMethod => m a) -> m a
+catchUnexpectedEndMethod x = catch x (error . show :: UnexpectedEndMethod -> a)
 
-compileFile :: FilePath -> IO ()
-compileFile path = do
-    contents <- readFile path
-    let mode = ParseMode { parseFilename = path }
-    case parseModuleWithMode mode (unpack contents) of
-        ParseFailed loc msg -> printParseError loc (pack msg)
-        ParseOk moduledef   -> pPrint moduledef
+makeTestClass :: (Throws UnexpectedEndMethod, MonadIO m, MonadThrow m, MonadState GState m) => m ()
+makeTestClass = do
+    foo <- newMethod [ACC_PUBLIC, ACC_STATIC] "foo" [] (Returns IntType) $ do
+        getStaticField Java.Lang.system Java.IO.out
+        loadString "Hello World"
+        invokeVirtual Java.IO.printStream Java.IO.println
+        iconst_1
+        dup
+        iadd
+        i0 IRETURN
+    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
+        invokeStatic "Test" foo
+        invokeVirtual Java.IO.printStream Java.IO.println
+        i0 RETURN
+    return ()
