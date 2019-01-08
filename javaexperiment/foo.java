@@ -1,17 +1,22 @@
 // https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage/HeapObjects
 
 import java.util.ArrayList;
+import java.util.function.BiFunction;
 
 abstract class HeapObject {
     public abstract HeapObject enter();
 }
-abstract class Function extends HeapObject {
-    protected HeapObject[] freeVariables;
+class Function extends HeapObject {
+    private BiFunction<HeapObject[], HeapObject[], HeapObject> inner;
+    private HeapObject[] freeVariables;
     // We can be given more arguments than we expect: eg. `(\x -> x) (\x -> x) 1`.
-    protected ArrayList<HeapObject> arguments;
-    protected int arity = 0; // The arity of this function
+    private ArrayList<HeapObject> arguments;
+    private int arity = 0; // The arity of this function
 
-    protected Function() {
+    public Function(BiFunction<HeapObject[], HeapObject[], HeapObject> inner, int arity, HeapObject[] freeVariables) {
+        this.inner = inner;
+        this.arity = arity;
+        this.freeVariables = freeVariables;
         arguments = new ArrayList<>();
     }
 
@@ -21,17 +26,15 @@ abstract class Function extends HeapObject {
             return this; // If we're not fully applied, we get a partially applied function
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
-            Function result = (Function)evaluate().enter();
+            Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables);
             for (HeapObject arg : arguments.subList(arity, arguments.size()))
                 result.addArgument(arg);
             return result;
         }
         else { // Perfect number of arguments
-            return evaluate();
+            return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
         }
     }
-
-    protected abstract HeapObject evaluate();
 
     public void addArgument(HeapObject arg) {
         arguments.add(arg);
@@ -73,12 +76,6 @@ abstract class BoxedData extends Data {
     public int branch; // Which constructor of the datatype
     public HeapObject[] data;
 }
-class TooManyArguments extends RuntimeException {
-    static final long serialVersionUID = 0;
-}
-class NotEnoughArguments extends RuntimeException {
-    static final long serialVersionUID = 0;
-}
 
 // This is a special primitive, as it subclasses Data instead of BoxedData
 class _Int extends Data {
@@ -104,36 +101,17 @@ class _Maybe extends BoxedData {
         return m;
     }
 }
-class _2B extends Function { // Addition function: 2B is hex UTF-8 for +.
-    public static _2B _make2B() {
-        _2B n = new _2B();
-        n.freeVariables = new HeapObject[0];
-        n.arity = 3;
-        return n;
+// Typeclass class: provides the publicly visible function that extracts the implementation function from the dictionary
+class _Num {
+    public static HeapObject _make2B() {
+        return new Function(_Num::_2BImpl, 3, new HeapObject[0]);
     }
-
-    @Override
-    public HeapObject evaluate() {
-        BoxedData d = (BoxedData)arguments.get(0).enter();
+    private static HeapObject _2BImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
+        BoxedData d = (BoxedData)arguments[0].enter();
         Function f = (Function)d.data[0].enter();
-        f.addArgument(arguments.get(1));
-        f.addArgument(arguments.get(2));
+        f.addArgument(arguments[1]);
+        f.addArgument(arguments[2]);
         return f.enter();
-    }
-}
-class _NumInt2B extends Function { // Implementation of addition for the Num Int instance
-    public static _NumInt2B _makeNumInt2B() {
-        _NumInt2B n = new _NumInt2B();
-        n.freeVariables = new HeapObject[0];
-        n.arity = 2;
-        return n;
-    }
-
-    @Override
-    public HeapObject evaluate() {
-        int x = ((_Int)arguments.get(0).enter()).value;
-        int y = ((_Int)arguments.get(1).enter()).value;
-        return _Int._makeInt(x + y);
     }
 }
 class _NumInt extends BoxedData {
@@ -141,28 +119,14 @@ class _NumInt extends BoxedData {
         _NumInt n = new _NumInt();
         n.branch = 0;
         n.data = new HeapObject[1];
-        n.data[0] = _NumInt2B._makeNumInt2B();
+        n.data[0] = new Function(_NumInt::_NumInt2BImpl, 2, new HeapObject[0]);
         return n;
     }
-}
-class _ExampleFunction extends Function { // Implementation of `\y -> x + y :: Int`
-    public static _ExampleFunction _makeExampleFunction(HeapObject x) {
-        _ExampleFunction f = new _ExampleFunction();
-        f.freeVariables = new HeapObject[] { x }; // x is free, passed in as an argument
-        f.arity = 1;
-        return f;
-    }
 
-    @Override
-    protected HeapObject evaluate() {
-        // This would be a free variable allocated in a let statement...
-        HeapObject d = new Thunk(_NumInt._makeNumInt());
-        Function f = _2B._make2B();
-        // This is stateful: safe? We're modifying the function application
-        f.addArgument(d);
-        f.addArgument(freeVariables[0]);
-        f.addArgument(arguments.get(0));
-        return f.enter();
+    private static HeapObject _NumInt2BImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
+        int x = ((_Int)arguments[0].enter()).value;
+        int y = ((_Int)arguments[1].enter()).value;
+        return _Int._makeInt(x + y);
     }
 }
 public class foo {
@@ -171,10 +135,21 @@ public class foo {
         //_Maybe m2 = _Maybe._makeJust(x);
         HeapObject x = new Thunk(_Int._makeInt(5));
         HeapObject y = new Thunk(_Int._makeInt(6));
-        _ExampleFunction f = _ExampleFunction._makeExampleFunction(x); // x is free
+        HeapObject dNumInt = new Thunk(_NumInt._makeNumInt());
+        Function f = (Function)foo._makeExampleFunction(x, dNumInt).enter();
         f.addArgument(y);
         HeapObject result = f.enter();
         System.out.println(result);
+    }
+    public static HeapObject _makeExampleFunction(HeapObject x, HeapObject dNumInt) {
+        return new Function(foo::_exampleFunctionImpl, 1, new HeapObject[] { x, dNumInt });
+    }
+    private static HeapObject _exampleFunctionImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
+        Function f = (Function)_Num._make2B().enter();
+        f.addArgument(freeVariables[1]); // dNumInt
+        f.addArgument(freeVariables[0]); // x
+        f.addArgument(arguments[0]); // y
+        return f.enter();
     }
 }
 // Wrap everything in thunks: they auto-update their value once evaluated.
