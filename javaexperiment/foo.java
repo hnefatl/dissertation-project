@@ -119,10 +119,13 @@ class _NumInt extends BoxedData {
         _NumInt n = new _NumInt();
         n.branch = 0;
         n.data = new HeapObject[1];
-        n.data[0] = new Function(_NumInt::_NumInt2BImpl, 2, new HeapObject[0]);
+        n.data[0] = _makeNumInt2B();
         return n;
     }
-
+    // Implementation of superclass methods
+    public static Function _makeNumInt2B() {
+        return new Function(_NumInt::_NumInt2BImpl, 2, new HeapObject[0]);
+    }
     private static HeapObject _NumInt2BImpl(HeapObject[] arguments, HeapObject[] freeVariables) {
         int x = ((_Int)arguments[0].enter()).value;
         int y = ((_Int)arguments[1].enter()).value;
