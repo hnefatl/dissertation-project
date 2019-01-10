@@ -222,7 +222,7 @@ sortAlts alts@((Alt (DataCon con) _ _):_) = do
     case find (con `elem`) (map (\(Datatype _ bs) -> bs) $ M.elems ds) of
         Nothing -> throwTextError "Unknown data constructor"
         Just branches -> do
-            let getDataCon (Alt (DataCon con) _ _) = con
+            let getDataCon (Alt (DataCon c) _ _) = c
                 getDataCon _ = error "Compiler error: can only have datacons here"
                 okay = all ((`elem` branches) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
