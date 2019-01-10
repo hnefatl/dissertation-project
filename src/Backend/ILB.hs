@@ -5,18 +5,18 @@
 
 module Backend.ILB where
 
-import           Backend.ILA          (Alt(..), Binding(..), Literal(..))
-import qualified Backend.ILAANF       as ANF
+import           Backend.ILA                 (Alt(..), Binding(..), Literal(..))
+import qualified Backend.ILAANF              as ANF
 import           BasicPrelude
-import           Control.Monad.Except (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
-import           Control.Monad.Extra  (ifM)
-import           Control.Monad.Reader (Reader, asks, runReader)
-import qualified Data.Map.Strict      as M
-import qualified Data.Set             as S
-import           ExtraDefs            (secondM)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
+import           Control.Monad.Extra         (ifM)
+import           Control.Monad.Reader        (Reader, asks, runReader)
+import qualified Data.Map.Strict             as M
+import qualified Data.Set                    as S
+import           ExtraDefs                   (secondM)
 import           Names
-import           TextShow             (TextShow, showb, showt)
-import Preprocessor.ContainedNames
+import           Preprocessor.ContainedNames
+import           TextShow                    (TextShow, showb, showt)
 
 -- Datatypes inspired by STG:
 -- https://github.com/ghc/ghc/blob/6353efc7694ba8ec86c091918e02595662169ae2/compiler/stgSyn/StgSyn.hs
@@ -77,7 +77,7 @@ anfComplexToIlbExp :: ANF.AnfComplex -> Converter Exp
 anfComplexToIlbExp (ANF.Let v _ r b)  = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
 anfComplexToIlbExp (ANF.Case s bs as) = ExpCase <$> anfComplexToIlbExp s <*> pure bs <*> mapM anfAltToIlbAlt as
 anfComplexToIlbExp (ANF.CompApp a)    = anfComplexToIlbApp a
-anfComplexToIlbExp (ANF.Trivial t) = maybe (throwError "Unexpected type in expression") return (anfTrivialToExp t)
+anfComplexToIlbExp (ANF.Trivial t)    = maybe (throwError "Unexpected type in expression") return (anfTrivialToExp t)
 
 anfComplexToIlbApp :: ANF.AnfApplication -> Converter Exp
 anfComplexToIlbApp (ANF.TrivApp a) = case a of
@@ -103,17 +103,15 @@ anfAltToIlbAlt :: Alt ANF.AnfComplex -> Converter (Alt Exp)
 anfAltToIlbAlt (Alt c vs e) = Alt c vs <$> anfComplexToIlbExp e
 
 
---instance HasFreeVariables Arg where
---    getFreeVariables ArgLit{} = return S.empty
---    getFreeVariables (ArgVar v) = return $ S.singleton v
---instance HasFreeVariables Exp where
---    getFreeVariables ExpLit{} = return S.empty
---    getFreeVariables (ExpApp v as) = S.insert v <$> getFreeVariables as
---    getFreeVariables (ExpConApp _ as) = getFreeVariables as
---    getFreeVariables (ExpCase s vs cs) = S.difference <$> (S.union <$> getFreeVariables s <*> getFreeVariables cs) <*> pure (S.fromList vs)
---    getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)
---instance HasFreeVariables a => HasFreeVariables (Alt a) where
---    getFreeVariables (Alt _ vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
---instance HasFreeVariables Rhs where
---    getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
+instance HasFreeVariables Arg where
+    getFreeVariables ArgLit{}   = return S.empty
+    getFreeVariables (ArgVar v) = return $ S.singleton v
+instance HasFreeVariables Exp where
+    getFreeVariables ExpLit{} = return S.empty
+    getFreeVariables (ExpApp v as) = S.insert v <$> getFreeVariables as
+    getFreeVariables (ExpConApp _ as) = getFreeVariables as
+    getFreeVariables (ExpCase s vs cs) = S.difference <$> (S.union <$> getFreeVariables s <*> getFreeVariables cs) <*> pure (S.fromList vs)
+    getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)
+instance HasFreeVariables Rhs where
+    getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
 --instance HasFreeVariables a => HasFreeVariables (Binding a) where

@@ -140,3 +140,17 @@ arguments at a time and evaluates when ready.
 Would be nice to have an equivalent to GHC's primops: a way of representing primitive operations like unboxed + in
 haskell-land, not just in the final lowering pass. Means we could do unboxing optimisations in Core rather than eg. as a
 peephole.
+
+
+Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
+handlers.
+Remove String literals: ILA can convert them into constructions of \[Char\]s. Same for Rationals, are a datatype.
+
+hs-java generator monad uses a list internally and keeps appending (ew). Replace with a seq, see if we get a speedup?
+
+Check we can compile eg:
+    case x of
+        Just 0
+        Just 1
+        Nothing
+where we use the same data constructor multiple times in the same case.

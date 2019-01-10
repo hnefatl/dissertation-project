@@ -23,7 +23,7 @@ import           ExtraDefs                   (middleText)
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames
+import           Preprocessor.ContainedNames (HasBoundVariables, HasFreeVariables, getBoundVariables, getFreeVariables)
 import           Typechecker.Types           (Kind, Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..))
 import qualified Typechecker.Types           as T
 
@@ -48,6 +48,8 @@ data Alt a = Alt AltConstructor [VariableName] a
 instance TextShow a => TextShow (Alt a) where
     showb (Alt con vs e) = showb con <> (if null vs then "" else " ") <> args <> " -> " <> showb e
         where args = mconcat $ intersperse " " $ map showb vs
+getAltConstructor :: Alt a -> AltConstructor
+getAltConstructor (Alt c _ _) = c
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName | LitCon Literal | Default
     deriving (Eq, Ord)
@@ -55,6 +57,15 @@ instance TextShow AltConstructor where
     showb (DataCon n) = showb n
     showb (LitCon l)  = showb l
     showb Default     = "default"
+isDefaultAlt :: Alt a -> Bool
+isDefaultAlt (Alt Default _ _) = True
+isDefaultAlt _ = False
+isDataAlt :: Alt a -> Bool
+isDataAlt (Alt (DataCon _) _ _) = True
+isDataAlt _ = False
+isLiteralAlt :: Alt a -> Bool
+isLiteralAlt (Alt (LitCon _) _ _) = True
+isLiteralAlt _ = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
@@ -338,3 +349,14 @@ patToIla (HsPAsPat name pat) t head body bodyType = do
         _                         -> throwError "@ pattern binding non-case translation"
 patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default [] body]
 patToIla p _ _ _ _ = throwError $ "Unsupported pattern: " <> showt p
+
+instance HasFreeVariables a => HasFreeVariables (Alt a) where
+    getFreeVariables (Alt _ vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
+instance HasBoundVariables (Alt a) where
+    getBoundVariables (Alt _ vs _) = return $ S.fromList vs
+instance HasBoundVariables (Binding a) where
+    getBoundVariables (NonRec v _) = return $ S.singleton v
+    getBoundVariables (Rec m)      = return $ M.keysSet m
+instance HasFreeVariables a => HasFreeVariables (Binding a) where
+    getFreeVariables (NonRec v e) = S.delete v <$> getFreeVariables e
+    getFreeVariables (Rec m)      = fmap S.unions $ forM (M.toList m) $ \(v, e) -> S.delete v <$> getFreeVariables e

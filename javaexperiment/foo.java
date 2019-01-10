@@ -106,6 +106,21 @@ class _Maybe extends BoxedData {
         return m;
     }
 }
+// These classes are mock generated code.
+class _Bool extends BoxedData {
+    public static _Bool _makeFalse() {
+        _Bool m = new _Bool();
+        m.branch = 0;
+        m.data = new HeapObject[] {};
+        return m;
+    }
+    public static _Bool _makeTrue() {
+        _Bool m = new _Bool();
+        m.branch = 1;
+        m.data = new HeapObject[] {};
+        return m;
+    }
+}
 // Typeclass class: provides the publicly visible function that extracts the implementation function from the dictionary
 class _Num {
     public static Function _make2B() {

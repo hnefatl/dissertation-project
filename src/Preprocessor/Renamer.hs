@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE FlexibleInstances           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}

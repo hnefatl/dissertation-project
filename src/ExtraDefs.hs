@@ -31,6 +31,13 @@ middleText m l r = showt l <> m <> showt r
 secondM :: Applicative f => (b -> f c) -> (a, b) -> f (a, c)
 secondM f (x, y) = (x,) <$> f y
 
+-- |zipWithM with a different arguemnt order
+zipOverM :: Applicative f => [a] -> [b] -> (a -> b -> f c) -> f [c]
+zipOverM xs ys f = zipWithM f xs ys
+-- |zipWithM_ with a different arguemnt order
+zipOverM_ :: Applicative f => [a] -> [b] -> (a -> b -> f c) -> f ()
+zipOverM_ xs ys f = zipWithM_ f xs ys
+
 -- |Check if the given function holds for each element in the same index in the given lists. Returns `False` if the
 -- lists are different lengths.
 pairwiseAndM :: Applicative f => (a -> b -> f Bool) -> [a] -> [b] -> f Bool

@@ -43,7 +43,7 @@ extra-deps:
 - text-show-3.7.5
 - text-show-instances-3.7
 - github: hnefatl/hs-java
-  commit: 98b245f49a0aed055eb250643a4357723cc382d4
+  commit: 15a815e0bd77d4cb7abeba25de702131fe4308d5
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

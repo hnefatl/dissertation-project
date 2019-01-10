@@ -14,6 +14,7 @@ import Control.Monad.Trans        (MonadTrans)
 import Data.Foldable              (toList)
 import Data.Sequence              (Seq, fromList)
 import Data.Text                  (Text)
+import JVM.Builder.Monad
 
 class Monad m => MonadLogger m where
     writeLogs :: [Text] -> m ()
@@ -57,6 +58,11 @@ instance MonadLogger m => MonadLogger (IdentityT m) where
     writeLogs = lift . writeLogs
     getLogs = lift getLogs
     clearLogs = lift clearLogs
+instance MonadLogger m => MonadLogger (GeneratorT m) where
+    writeLogs = lift . writeLogs
+    getLogs = lift getLogs
+    clearLogs = lift clearLogs
+
 
 instance MonadError e m => MonadError e (LoggerT m) where
     throwError = lift . throwError
@@ -66,5 +72,9 @@ instance MonadState s m => MonadState s (LoggerT m) where
 instance MonadReader s m => MonadReader s (LoggerT m) where
     ask = lift ask
     local f (LoggerT x) = LoggerT $ local f x
+instance MonadGenerator m => MonadGenerator (LoggerT m) where
+    getGState = lift getGState
+    putGState = lift . putGState
+    throwG = lift . throwG
 instance MonadIO m => MonadIO (LoggerT m) where
     liftIO = lift . liftIO
