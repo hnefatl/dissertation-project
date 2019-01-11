@@ -167,6 +167,7 @@ public class foo {
         System.out.println(result.force());
     }
     public static Function _makeExampleFunction(HeapObject x, HeapObject dNumInt) {
+        x = new Function(foo::_exampleFunctionImpl2, 2, new HeapObject[] { x, dNumInt });
         return new Function(foo::_exampleFunctionImpl, 1, new HeapObject[] { x, dNumInt });
     }
     // exampleFunction y = case x of
@@ -185,6 +186,10 @@ public class foo {
                 return new Thunk(f);
             default: throw new RuntimeException("Invalid data branch");
         }
+    }
+
+    private static HeapObject _exampleFunctionImpl2(HeapObject[] arguments, HeapObject[] freeVariables) {
+        return null;
     }
 }
 // Wrap everything in thunks: they auto-update their value once evaluated.

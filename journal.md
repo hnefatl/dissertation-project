@@ -142,6 +142,10 @@ haskell-land, not just in the final lowering pass. Means we could do unboxing op
 peephole.
 
 
+For the record: spent ages rewriting bits of hs-java and tweaking stuff to try to get invokeDynamic to work correctly.
+Need to generate bootstrap methods and stuff...
+
+
 Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
 handlers.
 Remove String literals: ILA can convert them into constructions of \[Char\]s. Same for Rationals, are a datatype.

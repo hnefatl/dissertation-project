@@ -42,8 +42,10 @@ extra-deps:
 - binary-state-0.1.1
 - text-show-3.7.5
 - text-show-instances-3.7
-- github: hnefatl/hs-java
-  commit: 15a815e0bd77d4cb7abeba25de702131fe4308d5
+# TODO(kc506): Temporary until we get hs-java stuff working
+- ../hs-java
+#- github: hnefatl/hs-java
+#  commit: 4466b44229ea58258899160c2ff7838caf422a0d
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

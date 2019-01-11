@@ -35,7 +35,7 @@ dependencies:
 - data-default
 - haskell-src
 - hs-java # Provided from custom repo, see stack.yaml extra-deps
-- binary-state
+- binary
 - filepath
 
 library:

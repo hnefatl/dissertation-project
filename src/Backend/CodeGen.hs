@@ -7,27 +7,29 @@ module Backend.CodeGen where
 
 import           BasicPrelude                hiding (encodeUtf8, head)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, runExcept, runExceptT, throwError)
-import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, gets, modify, state, get)
+import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, execStateT, gets, modify, get)
 import qualified Data.ByteString.Lazy        as B
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack, pack)
-import           Data.Text.Lazy              (fromStrict)
+import           Data.Text.Lazy              (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding     (encodeUtf8)
 import           Data.Word                   (Word16)
 import           System.FilePath             ((<.>), (</>))
 import           TextShow                    (TextShow, showb, showt)
 import           Data.Default                (Default, def)
 import           Data.Maybe                  (fromJust)
+import qualified Data.Sequence               as Seq
 
 import           Java.ClassPath
 import           JVM.Assembler
 import           JVM.Builder
-import           JVM.Builder.Monad           (execGeneratorT, encodedCodeLength, classPath)
+import           JVM.Builder.Monad           (runGeneratorT, execGeneratorT, encodedCodeLength, classPath)
 import qualified JVM.ClassFile               as ClassFile
+import           JVM.ClassFile               hiding (Class, Method)
 import           JVM.Converter
 
-import           Backend.ILA                 (Alt(..), Binding(..), Literal(..), AltConstructor(..), isDefaultAlt, isDataAlt, isLiteralAlt, getAltConstructor)
+import           Backend.ILA                 (Alt(..), Binding(..), Literal(..), AltConstructor(..), isDefaultAlt, isDataAlt, isLiteralAlt)
 import           Backend.ILB                 hiding (Converter, ConverterState)
 import           NameGenerator
 import           Names                       (VariableName, TypeVariableName, convertName)
@@ -35,15 +37,16 @@ import           Preprocessor.ContainedNames
 import           ExtraDefs                   (zipOverM_)
 
 type Class = ClassFile.Class ClassFile.Direct
+type OutputClass = ClassFile.Class ClassFile.File
 type Method = ClassFile.Method ClassFile.Direct
 
-data NamedClass = NamedClass Text Class
+data NamedClass = NamedClass Text OutputClass
     deriving (Eq, Show)
 instance TextShow NamedClass where
     showb = fromString . show
 
-writeClass :: FilePath -> NamedClass -> IO ()
-writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encodeClass c)
+--writeClass :: FilePath -> NamedClass -> IO ()
+--writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encodeClass c)
 
 
 -- TODO(kc506): Move somewhere more appropriate for when we generate this information
@@ -58,7 +61,9 @@ data ConverterState = ConverterState
     , -- Which JVM local variable we're up to
       localVarCounter :: Word16
     , -- Map from datatype constructor name to branch number, eg. {False:0, True:1} or {Nothing:0, Just:1}
-      datatypes :: M.Map TypeVariableName Datatype }
+      datatypes :: M.Map TypeVariableName Datatype
+    , -- Which methods we're using an invokeDynamic instruction on, so we need to add bootstrap methods for
+      dynamicMethods :: Seq.Seq Text  }
 instance Default ConverterState where
     def = ConverterState
         { variablePushers = M.empty
@@ -66,7 +71,8 @@ instance Default ConverterState where
         -- TODO(kc506): Cheatily hardcoded for now, fill in given more datatype information
         , datatypes = M.fromList
             [ ("Bool", Datatype "Bool" ["False", "True"])
-            , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ] }
+            , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ]
+        , dynamicMethods = Seq.empty }
 
 -- A `Converter Method` action represents a computation that compiles a method: the ConverterState should be reset
 -- inbetween method compilations
@@ -103,29 +109,61 @@ pushVariable v = gets (M.lookup v . variablePushers) >>= \case
     Just pusher -> pusher
     Nothing -> throwTextError $ "No pusher for variable " <> showt v
 
+addDynamicMethod :: Text -> Converter Word16
+addDynamicMethod m = do
+    methods <- gets dynamicMethods
+    modify (\s -> s { dynamicMethods = dynamicMethods s Seq.|> m })
+    return $ fromIntegral $ Seq.length methods
+
 loadPrimitiveClasses :: FilePath -> Converter ()
 loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>)) classes
     where classes = ["HeapObject", "Function"]
 
+-- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
+-- bootstrap method for each function we create.
+-- This should be called at the end of the generation of a class file
+addBootstrapMethods :: Converter () -> B.ByteString -> ExceptT Text (NameGeneratorT IO) OutputClass
+addBootstrapMethods (Converter x) classname = do
+    let y = generateT [] classname $ do
+            converterState <- execStateT x def
+            let methods = dynamicMethods converterState
+            forM_ methods $ \method -> do
+                --addToPool
+                undefined
+    ((), classDirect) <- either (throwError . pack . show) return =<< runExceptT y
+    let classFile = classDirect2File classDirect
+        bootstrapMethodsAttribute = undefined
+    return $ classFile
+        { classAttributesCount = classAttributesCount classFile + 1
+        , classAttributes = AP $ bootstrapMethodsAttribute:attributesList (classAttributes classFile) }
+
+-- https://docs.oracle.com/javase/8/docs/technotes/guides/vm/multiple-language-support.html#using_invokedynamic
+-- https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.23
+-- https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.4.10 
+
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk :: IsString s => s
+heapObject, function, thunk, bifunction :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
-heapObjectClass, functionClass, thunkClass :: ClassFile.FieldType
-heapObjectClass = ClassFile.ObjectType heapObject
-functionClass = ClassFile.ObjectType function
-thunkClass = ClassFile.ObjectType thunk
-addArgument :: ClassFile.NameType Method
-addArgument = ClassFile.NameType "addArgument" $ ClassFile.MethodSignature [heapObjectClass] ClassFile.ReturnsVoid
-enter :: ClassFile.NameType Method
-enter = ClassFile.NameType "enter" $ ClassFile.MethodSignature [] (ClassFile.Returns heapObjectClass)
-thunkInit :: ClassFile.NameType Method
-thunkInit = ClassFile.NameType "<init>" $ ClassFile.MethodSignature [heapObjectClass] ClassFile.ReturnsVoid
+bifunction = "java/util/function/BiFunction"
+heapObjectClass, functionClass, thunkClass, bifunctionClass :: FieldType
+heapObjectClass = ObjectType heapObject
+functionClass = ObjectType function
+thunkClass = ObjectType thunk
+bifunctionClass = ObjectType bifunction
+addArgument :: NameType Method
+addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
+enter :: NameType Method
+enter = NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
+thunkInit :: NameType Method
+thunkInit = NameType "<init>" $ MethodSignature [heapObjectClass] ReturnsVoid
+bifunctionApply :: NameType Method
+bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
 
 -- TODO: Given that each `Converter Method` instance should be for compiling a full module, maybe do the unwrapping
 -- inside here and return just an `ExceptT Text (NameGeneratorT IO) a`?
-compileStaticMethod :: VariableName -> Rhs -> Converter Method
+compileStaticMethod :: VariableName -> Rhs -> Converter ()
 compileStaticMethod name (RhsClosure args body) = do
     setLocalVarCounter 2 -- The first two local variables (0 and 1) are reserved for the function arguments
     freeVariables <- liftErrorText $ getFreeVariables body
@@ -138,16 +176,26 @@ compileStaticMethod name (RhsClosure args body) = do
         iconst_0
         pushInt n
         aaload
-    let -- The actual implementation of the function
-        implName = encodeUtf8 $ "_" <> fromStrict (convertName name) <> "Impl"
+    let implName = "_" <> fromStrict (convertName name) <> "Impl"
         implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
-        implAccs = [ClassFile.ACC_PRIVATE, ClassFile.ACC_STATIC]
-    implMethod <- newMethod implAccs implName implArgs (ClassFile.Returns heapObjectClass) $ do
-        undefined
+        implAccs = [ACC_PRIVATE, ACC_STATIC]
+    -- The actual implementation of the function
+    _ <- newMethod implAccs (encodeUtf8 implName) implArgs (Returns heapObjectClass) $ do
+        compileExp body
+        i0 ARETURN
+    -- Reset some state before making the other function
+    modify (\s -> s { localVarCounter = undefined, variablePushers = M.empty })
+    let wrapperName = encodeUtf8 $ "_make" <> fromStrict (convertName name)
+        wrapperArgs = replicate (S.size freeVariables) (arrayOf heapObjectClass)
+        wrapperAccs = [ACC_PUBLIC, ACC_STATIC]
     -- The wrapper function to construct an application instance of the function
-    instanceMethod <- undefined
-    return instanceMethod
-
+    _ <- newMethod wrapperAccs wrapperName wrapperArgs (Returns functionClass) $ do
+        methodIndex <- addDynamicMethod (toStrict implName) -- Record that we're using this dynamic function invocation
+        new function
+        dup
+        invokeDynamic methodIndex bifunctionApply
+        pushInt (S.size freeVariables) -- Arity
+    return ()
 compileExp :: Exp -> Converter ()
 compileExp (ExpLit l) = compileLit l
 compileExp (ExpApp fun args) = do
@@ -172,7 +220,13 @@ compileExp (ExpCase head vs alts) = do
         storeLocal localVar -- Store it locally
         addVariablePusher var $ loadLocal localVar -- Remember where we stored the variable
     compileCase alts
-compileExp (ExpLet var exp body) = undefined
+compileExp (ExpLet var rhs body) = do
+    localVar <- getFreshLocalVar
+    -- TODO(kc506): Replace `Converter $ lift` with something more generic
+    _ <- Converter $ lift $ evalConverter (compileStaticMethod var rhs) def
+    -- TODO(kc560): Need to construct a Thunk here?
+    storeLocal localVar
+    compileExp body
 
 compileCase :: [Alt Exp] -> Converter ()
 compileCase as = do
@@ -213,9 +267,10 @@ compileCase as = do
     sequence_ altGenerators
 
 
-sortAlts :: Integral i => [Alt a] -> Converter [(i, Alt a)]
+-- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
+sortAlts :: [Alt a] -> Converter [(Word32, Alt a)]
 sortAlts [] = throwTextError "Empty alts not allowed"
-sortAlts alts@((Alt (DataCon con) _ _):_) = do
+sortAlts alts@(Alt (DataCon con) _ _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
@@ -231,7 +286,7 @@ sortAlts alts@((Alt (DataCon con) _ _):_) = do
 sortAlts alts@((Alt (LitCon _) _ _):_) = do
     unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"
     throwTextError "Need to refactor literals to only be int/char before doing this"
-sortAlts ((Alt Default _ _):_) = throwTextError "Can't have Default constructor"
+sortAlts (Alt Default _ _:_) = throwTextError "Can't have Default constructor"
 
 
 compileArg :: Arg -> Converter ()
@@ -261,11 +316,11 @@ pushInt i
 storeLocal :: Word16 -> Converter ()
 storeLocal i
     | i < 256 = astore_ $ fromIntegral i
-    | otherwise = wide ASTORE $ ClassFile.CInteger (fromIntegral i)
+    | otherwise = wide ASTORE $ CInteger (fromIntegral i)
 
 loadLocal :: Word16 -> Converter ()
 loadLocal 0 = aload_ I0
 loadLocal 1 = aload_ I1
 loadLocal 2 = aload_ I2
 loadLocal 3 = aload_ I3
-loadLocal i = aload $ ClassFile.CInteger $ fromIntegral i
+loadLocal i = aload $ CInteger $ fromIntegral i
