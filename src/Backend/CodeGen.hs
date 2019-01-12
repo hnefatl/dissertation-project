@@ -20,6 +20,8 @@ import           TextShow                    (TextShow, showb, showt)
 import           Data.Default                (Default, def)
 import           Data.Maybe                  (fromJust)
 import qualified Data.Sequence               as Seq
+import qualified Data.Binary                 as Binary
+import           Data.Foldable               (toList)
 
 import           Java.ClassPath
 import           JVM.Assembler
@@ -79,6 +81,16 @@ instance Default ConverterState where
 newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text (NameGeneratorT IO))) a)
     deriving (Functor, Applicative, Monad, MonadState ConverterState, MonadGenerator, MonadNameGenerator, MonadIO)
 
+-- |`convert` takes a class name, a path to the primitive java classes, and a list of ILB bindings and produces a class
+-- file
+convert :: Text -> FilePath -> [Binding Rhs] -> ExceptT Text (NameGeneratorT IO) OutputClass
+convert classname primitiveClassDir bs = addBootstrapMethods inner (encodeUtf8 $ fromStrict classname)
+    where processBinding (NonRec v (RhsClosure vs body)) = compileStaticMethod v vs body
+          processBinding (Rec m) = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
+          inner = do
+            loadPrimitiveClasses primitiveClassDir
+            mapM_ processBinding bs
+
 evalConverter :: Converter a -> ConverterState -> GeneratorT (ExceptT Text (NameGeneratorT IO)) a
 evalConverter (Converter x) = evalStateT x
 
@@ -123,23 +135,47 @@ loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>))
 -- bootstrap method for each function we create.
 -- This should be called at the end of the generation of a class file
 addBootstrapMethods :: Converter () -> B.ByteString -> ExceptT Text (NameGeneratorT IO) OutputClass
-addBootstrapMethods (Converter x) classname = do
-    let y = generateT [] classname $ do
-            converterState <- execStateT x def
-            let methods = dynamicMethods converterState
-            forM_ methods $ \method -> do
-                --addToPool
-                undefined
-    ((), classDirect) <- either (throwError . pack . show) return =<< runExceptT y
-    let classFile = classDirect2File classDirect
-        bootstrapMethodsAttribute = undefined
-    return $ classFile
-        { classAttributesCount = classAttributesCount classFile + 1
-        , classAttributes = AP $ bootstrapMethodsAttribute:attributesList (classAttributes classFile) }
-
--- https://docs.oracle.com/javase/8/docs/technotes/guides/vm/multiple-language-support.html#using_invokedynamic
--- https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.7.23
--- https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-4.html#jvms-4.4.10 
+addBootstrapMethods x classname = runExceptT (generateT [] classname $ addBootstrapPoolItems x classname) >>= \case
+    Left err -> throwError $ pack $ show err
+    Right ((bootstrapMethodStringIndex, metafactoryIndex, arg1, arg2s, arg3), classDirect) -> do
+        let classFile = classDirect2File classDirect -- Convert the "direct" in-memory class into a class file structure
+            bootstrapMethods = [ BootstrapMethod { bootstrapMethodRef = metafactoryIndex, bootstrapArguments = [ arg1, arg2, arg3 ] } | arg2 <- arg2s ]
+            bootstrapMethodsAttribute = toAttribute $ BootstrapMethodsAttribute
+                { attributeNameIndex = bootstrapMethodStringIndex
+                , attributeMethods = bootstrapMethods }
+        return $ classFile
+            { classAttributesCount = classAttributesCount classFile + 1
+            , classAttributes = AP $ bootstrapMethodsAttribute:attributesList (classAttributes classFile) }
+addBootstrapPoolItems :: Converter () -> B.ByteString -> GeneratorT (ExceptT Text (NameGeneratorT IO)) (Word16, Word16, Word16, [Word16], Word16)
+addBootstrapPoolItems (Converter x) classname = do
+    converterState <- execStateT x def
+    -- Add the LambdaMetafactory metafactory method to the pool (used to get lambdas from static functions)
+    let metafactoryArgs = map ObjectType
+            ["java/lang/invoke/MethodHandles$Lookup", "java/lang/String", "java/lang/invoke/MethodType", "java/lang/invoke/MethodType", "java/lang/invoke/MethodHandle", "java/lang/invoke/MethodType" ]
+        metafactorySig = MethodSignature metafactoryArgs (Returns $ ObjectType "java/lang/invoke/CallSite")
+        metafactoryMethod = ClassFile.Method
+            { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
+            , methodName = "metafactory"
+            , methodSignature = metafactorySig
+            , methodAttributesCount = 0
+            , methodAttributes = AR M.empty
+            }
+    mfIndex <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
+    -- Add some constants to the pool that we'll need later, when we're creating the bootstrap method attribute
+    arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+    arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
+    let methods = dynamicMethods converterState
+    arg2s <- forM (toList methods) $ \name -> do
+        let sig = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
+            method = ClassFile.Method
+                { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
+                , methodName = encodeUtf8 $ fromStrict name
+                , methodSignature = sig
+                , methodAttributesCount = 0
+                , methodAttributes = AR M.empty }
+        addToPool (CMethodHandle InvokeStatic classname method)
+    bmIndex <- addToPool (CUTF8 "BootstrapMethods")
+    return (bmIndex, mfIndex, arg1, arg2s, arg3)
 
 -- The support classes written in Java and used by the Haskell translation
 heapObject, function, thunk, bifunction :: IsString s => s
@@ -165,8 +201,15 @@ bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass
 
 -- TODO: Given that each `Converter Method` instance should be for compiling a full module, maybe do the unwrapping
 -- inside here and return just an `ExceptT Text (NameGeneratorT IO) a`?
-compileStaticMethod :: VariableName -> Rhs -> Converter ()
-compileStaticMethod name (RhsClosure args body) = do
+-- |Compile a function binding into bytecode. It's a bit complicated:
+-- To compile a function `f` with free variables `fv` and arguments `as`, we create two functions.
+-- - `_fImpl`, which takes two arrays of heap objects (first contains arguments, second contains free variables) and
+--   returns a heap object containing the result of the application.
+-- - `_makef`, which takes `|fv|` arguments matching the free variables, and returns a `Function` object.
+-- To pass the `Bifunction` argument to the `Function` constructor, we need to perform an invokeDynamic instruction to
+-- get a lambda from a static function.
+compileStaticMethod :: VariableName -> [VariableName] -> Exp -> Converter ()
+compileStaticMethod name args body = do
     setLocalVarCounter 2 -- The first two local variables (0 and 1) are reserved for the function arguments
     freeVariables <- liftErrorText $ getFreeVariables body
     -- Map each variable name to a pusher that pushes it onto the stack
@@ -185,18 +228,36 @@ compileStaticMethod name (RhsClosure args body) = do
     _ <- newMethod implAccs (encodeUtf8 implName) implArgs (Returns heapObjectClass) $ do
         compileExp body
         i0 ARETURN
-    -- Reset some state before making the other function
+    -- Reset some state before making the wrapper function
     modify (\s -> s { localVarCounter = undefined, variablePushers = M.empty })
     let wrapperName = encodeUtf8 $ "_make" <> fromStrict (convertName name)
-        wrapperArgs = replicate (S.size freeVariables) (arrayOf heapObjectClass)
+        numFreeVars = S.size freeVariables
+        arity = length args
+        wrapperArgs = replicate numFreeVars heapObjectClass
         wrapperAccs = [ACC_PUBLIC, ACC_STATIC]
     -- The wrapper function to construct an application instance of the function
     _ <- newMethod wrapperAccs wrapperName wrapperArgs (Returns functionClass) $ do
-        methodIndex <- addDynamicMethod (toStrict implName) -- Record that we're using this dynamic function invocation
+        -- Record that we're using a dynamic function invocation, remember the implementation function's name
+        methodIndex <- addDynamicMethod (toStrict implName)
+        -- This is the function we're going to return at the end
         new function
         dup
+        -- Invoke the bootstrap method for this dynamic call site to create our BiFunction instance
         invokeDynamic methodIndex bifunctionApply
-        pushInt (S.size freeVariables) -- Arity
+        -- Push the arity of the function
+        pushInt arity
+        -- Create an array of HeapObjects holding the free variables we were given as arguments
+        pushInt numFreeVars
+        allocNewArray heapObject
+        forM_ [0..numFreeVars - 1] $ \fv -> do
+            -- For each free variable argument, push it into the same index in the array
+            dup
+            pushInt fv
+            loadLocal (fromIntegral fv)
+            aastore
+        -- Call the Function constructor with the bifunction, the arity, and the free variable array
+        invokeSpecial function functionInit
+        i0 ARETURN
     return ()
 compileExp :: Exp -> Converter ()
 compileExp (ExpLit l) = compileLit l
@@ -222,10 +283,10 @@ compileExp (ExpCase head vs alts) = do
         storeLocal localVar -- Store it locally
         addVariablePusher var $ loadLocal localVar -- Remember where we stored the variable
     compileCase alts
-compileExp (ExpLet var rhs body) = do
+compileExp (ExpLet var (RhsClosure args body') body) = do
     localVar <- getFreshLocalVar
     -- TODO(kc506): Replace `Converter $ lift` with something more generic
-    _ <- Converter $ lift $ evalConverter (compileStaticMethod var rhs) def
+    _ <- Converter $ lift $ evalConverter (compileStaticMethod var args body') def
     -- TODO(kc560): Need to construct a Thunk here?
     storeLocal localVar
     compileExp body

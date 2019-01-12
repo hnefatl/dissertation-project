@@ -7,8 +7,8 @@ import BasicPrelude
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
-import Data.Binary
 import Text.Pretty.Simple
+import Data.Binary (encode)
 
 import JVM.Assembler
 import JVM.Builder
@@ -21,19 +21,6 @@ import qualified Java.IO
 import Backend.CodeGen
 import Data.Word ()
 
-data BootstrapMethod = BootstrapMethod
-    { bootstrapMethodRef :: Word16
-    , bootstrapArguments :: [Word16] }
-instance Binary BootstrapMethod where
-    put m = do
-        put $ bootstrapMethodRef m
-        put $ (fromIntegral $ length $ bootstrapArguments m :: Word16)
-        forM_ (bootstrapArguments m) put -- Don't use the default list instance as it prepends the length
-    get = do
-        ref <- get
-        numArgs <- get :: Get Word16
-        args <- replicateM (fromIntegral numArgs) get
-        return $ BootstrapMethod { bootstrapMethodRef = ref, bootstrapArguments = args }
 
 main :: IO ()
 main = do
@@ -66,14 +53,12 @@ main = do
             addToPool (CMethodHandle InvokeStatic classname method)
         return (ani, lamMethHandle, arg1, arg2s, arg3)
     let classFile = classDirect2File testClass
-        newAttributes =
+        bootstrapMethods =
             [ BootstrapMethod { bootstrapMethodRef = funIndex, bootstrapArguments = [ arg1, arg2, arg3 ] }
             | arg2 <- arg2s ]
-        payload = encode (genericLength newAttributes :: Word16) <> mconcat (map encode newAttributes)
-        bootstrapAttribute = Attribute
-            { attributeName = ani
-            , attributeLength = fromIntegral $ B.length payload
-            , attributeValue = payload }
+        bootstrapAttribute = toAttribute $ BootstrapMethodsAttribute
+                { attributeNameIndex = ani
+                , attributeMethods = bootstrapMethods }
         classFile' = classFile
             { classAttributesCount = classAttributesCount classFile + 1
             , classAttributes = AP $ bootstrapAttribute:attributesList (classAttributes classFile) }
