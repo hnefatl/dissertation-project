@@ -55,7 +55,7 @@ main = do
         lamMethHandle <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
         arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
         arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
-        let methods = [ "foo" ]
+        let methods = [ "_fooImpl" ]
         arg2s <- forM methods $ \name -> do
             let method = Method
                     { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
@@ -85,23 +85,52 @@ makeTestClass :: GeneratorIO ()
 makeTestClass = do
     withClassPath $ addDirectory "/home/keith/project/compiler/javaexperiment/"
     let args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
-    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "foo" args (Returns heapObjectClass) $ do
-        iconst_2
-        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
+    -- foo = \x = y
+    _ <- newMethod [ACC_PRIVATE, ACC_STATIC] "_fooImpl" args (Returns heapObjectClass) $ do
+        -- Load the free variable array from first arg
+        aload_ I1
+        -- Fetch the 1st free variable
+        iconst_0
+        aaload
+        -- Return it
+        i0 ARETURN
+    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "_makeFoo" [heapObjectClass] (Returns functionClass) $ do
+        new function -- Create the function object we're going to return
+        dup
+        -- Create the bifunction
+        invokeDynamic 0 bifunctionApply
+        -- Arity
+        iconst_1
+        -- Free variables: create array of size 1 of HeapObjects
+        iconst_1
+        allocNewArray heapObject
+        -- Store the free variable we were given as an argument
+        dup
+        iconst_0 -- Index 0
+        aload_ I0 -- Argument 0
+        aastore
+        -- Call function constructor with the bifunction+arity+free variable array now on the stack
+        invokeSpecial function functionInit
         i0 ARETURN
     _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
-        getStaticField Java.Lang.system Java.IO.out
-        -- Start making the function
-        new heapObject
+        -- Weirdly ordered: should generate code using local variables instead
+        -- Create free variable (y)
+        iconst_5
+        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
+        -- Create function
+        invokeStatic "Test" $ NameType "_makeFoo" $ MethodSignature [heapObjectClass] (Returns functionClass)
         dup
-        -- Make the bifunction for foo
-        invokeDynamic 0 bifunctionApply
-        -- Make an array of size 1
+        -- Create argument (x)
         iconst_1
-        allocNewArray bifunction
-        -- Store the bifunction
-        dup 
-        -- Print the function
-        invokeVirtual Java.IO.printStream $ NameType "println" $ MethodSignature [heapObjectClass] ReturnsVoid
+        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
+        -- Add argument
+        invokeVirtual "Function" $ NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
+        -- Enter
+        invokeVirtual "Function" $ NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
+        invokeVirtual "HeapObject" $ NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
+        -- Print result (should be the free variable y), so an _Int with value 5
+        getStaticField Java.Lang.system Java.IO.out
+        i0 SWAP
+        invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
     return ()

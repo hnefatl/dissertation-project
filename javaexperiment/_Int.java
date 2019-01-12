@@ -6,4 +6,9 @@ public class _Int extends Data {
         i.value = x;
         return i;
     }
+
+    @Override
+    public String toString() {
+        return "Int: " + value;
+    }
 }

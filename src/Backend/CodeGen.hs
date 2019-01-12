@@ -156,6 +156,8 @@ addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
 enter = NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
+functionInit :: NameType Method
+functionInit = NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf heapObjectClass] ReturnsVoid
 thunkInit :: NameType Method
 thunkInit = NameType "<init>" $ MethodSignature [heapObjectClass] ReturnsVoid
 bifunctionApply :: NameType Method
