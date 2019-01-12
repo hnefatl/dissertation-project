@@ -1,126 +1,7 @@
 // https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage/HeapObjects
 
-import java.util.ArrayList;
-import java.util.function.BiFunction;
 
-abstract class HeapObject {
-    public abstract HeapObject enter();
-
-    // Hacky not-sure-if-we-need method: iterates calling enter until we reach a fixed point (should be normal form?)
-    public HeapObject force() {
-        HeapObject last = null;
-        HeapObject current = this;
-        while (last != current) {
-            last = current;
-            current = current.enter();
-        }
-        return current;
-    }
-}
-class Function extends HeapObject {
-    private BiFunction<HeapObject[], HeapObject[], HeapObject> inner;
-    private HeapObject[] freeVariables;
-    // We can be given more arguments than we expect: eg. `(\x -> x) (\x -> x) 1`.
-    private ArrayList<HeapObject> arguments;
-    private int arity = 0; // The arity of this function
-
-    public Function(BiFunction<HeapObject[], HeapObject[], HeapObject> inner, int arity, HeapObject[] freeVariables) {
-        this.inner = inner;
-        this.arity = arity;
-        this.freeVariables = freeVariables;
-        arguments = new ArrayList<>();
-    }
-
-    @Override
-    public HeapObject enter() {
-        if (arguments.size() < arity) {
-            return this; // If we're not fully applied, we get a partially applied function
-        }
-        else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
-            Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables);
-            for (HeapObject arg : arguments.subList(arity, arguments.size()))
-                result.addArgument(arg);
-            return result;
-        }
-        else { // Perfect number of arguments
-            return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
-        }
-    }
-
-    public void addArgument(HeapObject arg) {
-        arguments.add(arg);
-    }
-}
-// Wrapper around another object, basically memoises it.
-// Consider a thunk wrapped around a function: we call enter on the thunk to evaluate it, which evaluates the function
-// and updates the thunk to point to the results of the function call. Next time we evaluate the thunk, we just get the
-// result without calling the function again.
-class Thunk extends HeapObject {
-    protected HeapObject contained;
-
-    public Thunk(HeapObject contained) {
-        this.contained = contained;
-    }
-
-    @Override
-    public HeapObject enter() {
-        contained = contained.enter();
-        return contained;
-    }
-}
-// Direct non-abstract subclasses of Data are builtin primitives like integers.
-abstract class Data extends HeapObject {
-    @Override
-    public HeapObject enter() {
-        // No-op. A data constructor is terminal.
-        return this;
-    }
-}
-// Subclasses of BoxedData are standard "data"-defined datatypes.
-abstract class BoxedData extends Data {
-    public int branch; // Which constructor of the datatype
-    public HeapObject[] data;
-}
-
-// This is a special primitive, as it subclasses Data instead of BoxedData
-class _Int extends Data {
-    public int value;
-    public static _Int _makeInt(int x) {
-        _Int i = new _Int();
-        i.value = x;
-        return i;
-    }
-}
 // These classes are mock generated code.
-class _Maybe extends BoxedData {
-    public static _Maybe _makeNothing() {
-        _Maybe m = new _Maybe();
-        m.branch = 0;
-        m.data = new HeapObject[] {};
-        return m;
-    }
-    public static _Maybe _makeJust(HeapObject x) {
-        _Maybe m = new _Maybe();
-        m.branch = 1;
-        m.data = new HeapObject[] { x };
-        return m;
-    }
-}
-// These classes are mock generated code.
-class _Bool extends BoxedData {
-    public static _Bool _makeFalse() {
-        _Bool m = new _Bool();
-        m.branch = 0;
-        m.data = new HeapObject[] {};
-        return m;
-    }
-    public static _Bool _makeTrue() {
-        _Bool m = new _Bool();
-        m.branch = 1;
-        m.data = new HeapObject[] {};
-        return m;
-    }
-}
 // Typeclass class: provides the publicly visible function that extracts the implementation function from the dictionary
 class _Num {
     public static Function _make2B() {
@@ -167,7 +48,6 @@ public class foo {
         System.out.println(result.force());
     }
     public static Function _makeExampleFunction(HeapObject x, HeapObject dNumInt) {
-        x = new Function(foo::_exampleFunctionImpl2, 2, new HeapObject[] { x, dNumInt });
         return new Function(foo::_exampleFunctionImpl, 1, new HeapObject[] { x, dNumInt });
     }
     // exampleFunction y = case x of
@@ -186,10 +66,6 @@ public class foo {
                 return new Thunk(f);
             default: throw new RuntimeException("Invalid data branch");
         }
-    }
-
-    private static HeapObject _exampleFunctionImpl2(HeapObject[] arguments, HeapObject[] freeVariables) {
-        return null;
     }
 }
 // Wrap everything in thunks: they auto-update their value once evaluated.

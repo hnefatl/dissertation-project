@@ -14,6 +14,7 @@ import JVM.Assembler
 import JVM.Builder
 import JVM.Converter
 import JVM.ClassFile
+import Java.ClassPath
 import qualified Java.Lang
 import qualified Java.IO
 
@@ -51,7 +52,7 @@ main = do
                 , methodAttributes = AR M.empty
                 }
         ani <- addToPool (CUTF8 "BootstrapMethods")
-        lamMethHandle <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetaFactory" metafactoryMethod)
+        lamMethHandle <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
         arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
         arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
         let methods = [ "foo" ]
@@ -59,7 +60,7 @@ main = do
             let method = Method
                     { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
                     , methodName = name
-                    , methodSignature = MethodSignature [heapObjectClass, heapObjectClass] (Returns heapObjectClass)
+                    , methodSignature = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
                     , methodAttributesCount = 0
                     , methodAttributes = AR M.empty }
             addToPool (CMethodHandle InvokeStatic classname method)
@@ -76,20 +77,31 @@ main = do
         classFile' = classFile
             { classAttributesCount = classAttributesCount classFile + 1
             , classAttributes = AP $ bootstrapAttribute:attributesList (classAttributes classFile) }
-    pPrint classFile'
-    putStrLn ""
-    print funIndex
+    --pPrint classFile'
+    --putStrLn ""
     B.writeFile "Test.class" $ encode classFile'
 
 makeTestClass :: GeneratorIO ()
 makeTestClass = do
-    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "foo" [Java.Lang.objectClass] ReturnsVoid $ do
-        i0 RETURN
+    withClassPath $ addDirectory "/home/keith/project/compiler/javaexperiment/"
+    let args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
+    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "foo" args (Returns heapObjectClass) $ do
+        iconst_2
+        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
+        i0 ARETURN
     _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
-        new bifunction
+        getStaticField Java.Lang.system Java.IO.out
+        -- Start making the function
+        new heapObject
         dup
+        -- Make the bifunction for foo
         invokeDynamic 0 bifunctionApply
-        --getStaticField Java.Lang.system Java.IO.out
-        --invokeVirtual Java.IO.printStream Java.IO.println
+        -- Make an array of size 1
+        iconst_1
+        allocNewArray bifunction
+        -- Store the bifunction
+        dup 
+        -- Print the function
+        invokeVirtual Java.IO.printStream $ NameType "println" $ MethodSignature [heapObjectClass] ReturnsVoid
         i0 RETURN
     return ()
