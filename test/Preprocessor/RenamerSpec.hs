@@ -37,6 +37,9 @@ test = testGroup "Renamer"
         "x = 5 ; y = x"
         "v0 = 5 ; v1 = v0"
     , makeTest
+        "x = 1 + 2"
+        "v0 = 1 + 2"
+    , makeTest
         "x = y ; y = x"
         "v0 = v1 ; v1 = v0"
     , makeTest

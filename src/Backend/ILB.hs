@@ -45,7 +45,7 @@ instance TextShow Exp where
     showb (ExpCase s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> intercalate " ; " (map showb as) <> " }"
     showb (ExpLet v r e) = "let " <> showb v <> " = " <> showb r <> " in " <> showb e
 instance TextShow Rhs where
-    showb (RhsClosure vs e) = showb vs <> " " <> showb e
+    showb (RhsClosure vs e) = "\\" <> showb vs <> " -> " <> showb e
 
 data ConverterState = ConverterState
     { constructors :: S.Set VariableName }
@@ -55,8 +55,8 @@ instance TextShow ConverterState where
 newtype Converter a = Converter (ExceptT Text (Reader ConverterState) a)
     deriving (Functor, Applicative, Monad, MonadError Text)
 
-runConverter :: Converter a -> ConverterState -> Except Text a
-runConverter (Converter inner) s = liftEither $ runReader (runExceptT inner) s
+runConverter :: Converter a -> S.Set VariableName -> Except Text a
+runConverter (Converter inner) s = liftEither $ runReader (runExceptT inner) (ConverterState s)
 
 isConstructor :: VariableName -> Converter Bool
 isConstructor n = Converter $ asks (S.member n . constructors)

@@ -36,6 +36,9 @@ runNameGenerator x i = runIdentity (runNameGeneratorT x i)
 evalNameGenerator :: NameGenerator a -> NameGeneratorCounter -> a
 evalNameGenerator x i = runIdentity (evalNameGeneratorT x i)
 
+embedNG :: Monad m => NameGenerator a -> NameGeneratorT m a
+embedNG x = NameGeneratorT $ StS.state $ \i -> let (y, c) = runNameGenerator x i in (y, c+i)
+
 instance Monad m => MonadNameGenerator (NameGeneratorT m) where
     freshName = NameGeneratorT $ StS.state (\i -> (showt i, i+1))
 freshVarName :: MonadNameGenerator m => m VariableName

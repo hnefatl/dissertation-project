@@ -1,121 +1,85 @@
 {-# Language FlexibleContexts #-}
-{-# Language Rank2Types #-}
+{-# Language LambdaCase #-}
 
 module Main where
 
 import BasicPrelude
-import qualified Data.ByteString.Lazy as B
-import qualified Data.Set as S
-import qualified Data.Map.Strict as M
-import Text.Pretty.Simple
+import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError, liftEither, withExceptT)
+import TextShow (TextShow, showt)
+import Data.Text (unpack, pack)
 import Data.Binary (encode)
+import qualified Data.ByteString.Lazy as B
+import qualified Data.Map as M
 
-import JVM.Assembler
-import JVM.Builder
-import JVM.Converter
-import JVM.ClassFile
-import Java.ClassPath
-import qualified Java.Lang
-import qualified Java.IO
+import NameGenerator (NameGenerator, NameGeneratorT, evalNameGeneratorT, embedNG)
+import Logger (LoggerT, evalLoggerT)
+import Typechecker.Hardcoded
 
-import Backend.CodeGen
-import Data.Word ()
+import Language.Haskell.Syntax (HsModule)
+import Language.Haskell.Parser (parseModule, ParseResult(..))
+import Preprocessor.Renamer (renameModule)
+import Typechecker.Typechecker (evalTypeInferrer, inferModuleWithBuiltins)
+import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
+import qualified Backend.ILA as ILA (evalConverter, toIla)
+import qualified Backend.ILAANF as ILAANF (ilaToAnf)
+import qualified Backend.ILB as ILB (runConverter, anfToIlb)
+import qualified Backend.CodeGen as CodeGen (convert)
 
 
 main :: IO ()
 main = do
-    let classname = "Test"
-    ((ani, funIndex, arg1, arg2s, arg3), testClass) <- generateIO [] classname $ do
-        -- Create the class
-        makeTestClass
-        -- Create a reference to the lambda creation method, for use in the bootstrap method
-        let sigArgs = map ObjectType
-                ["java/lang/invoke/MethodHandles$Lookup", "java/lang/String", "java/lang/invoke/MethodType", "java/lang/invoke/MethodType", "java/lang/invoke/MethodHandle", "java/lang/invoke/MethodType" ]
-            metafactoryMethod = Method
-                { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
-                , methodName = "metafactory"
-                , methodSignature = MethodSignature sigArgs (Returns $ ObjectType "java/lang/invoke/CallSite")
-                , methodAttributesCount = 0
-                , methodAttributes = AR M.empty
-                }
-        ani <- addToPool (CUTF8 "BootstrapMethods")
-        lamMethHandle <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
-        arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
-        arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
-        let methods = [ "_fooImpl" ]
-        arg2s <- forM methods $ \name -> do
-            let method = Method
-                    { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
-                    , methodName = name
-                    , methodSignature = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
-                    , methodAttributesCount = 0
-                    , methodAttributes = AR M.empty }
-            addToPool (CMethodHandle InvokeStatic classname method)
-        return (ani, lamMethHandle, arg1, arg2s, arg3)
-    let classFile = classDirect2File testClass
-        bootstrapMethods =
-            [ BootstrapMethod { bootstrapMethodRef = funIndex, bootstrapArguments = [ arg1, arg2, arg3 ] }
-            | arg2 <- arg2s ]
-        bootstrapAttribute = toAttribute $ BootstrapMethodsAttribute
-                { attributeNameIndex = ani
-                , attributeMethods = bootstrapMethods }
-        classFile' = classFile
-            { classAttributesCount = classAttributesCount classFile + 1
-            , classAttributes = AP $ bootstrapAttribute:attributesList (classAttributes classFile) }
-    --pPrint classFile'
-    --putStrLn ""
-    B.writeFile "Test.class" $ encode classFile'
+    inputFile <- getArgs
+    let usageMsg = "Usage: compiler-exe <input file>"
+    case inputFile of
+        [] -> putStrLn usageMsg
+        [f] -> compile $ unpack f
+        _ -> putStrLn usageMsg
 
-makeTestClass :: GeneratorIO ()
-makeTestClass = do
-    withClassPath $ addDirectory "/home/keith/project/compiler/javaexperiment/"
-    let args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
-    -- foo = \x = y
-    _ <- newMethod [ACC_PRIVATE, ACC_STATIC] "_fooImpl" args (Returns heapObjectClass) $ do
-        -- Load the free variable array from first arg
-        aload_ I1
-        -- Fetch the 1st free variable
-        iconst_0
-        aaload
-        -- Return it
-        i0 ARETURN
-    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "_makeFoo" [heapObjectClass] (Returns functionClass) $ do
-        new function -- Create the function object we're going to return
-        dup
-        -- Create the bifunction
-        invokeDynamic 0 bifunctionApply
-        -- Arity
-        iconst_1
-        -- Free variables: create array of size 1 of HeapObjects
-        iconst_1
-        allocNewArray heapObject
-        -- Store the free variable we were given as an argument
-        dup
-        iconst_0 -- Index 0
-        aload_ I0 -- Argument 0
-        aastore
-        -- Call function constructor with the bifunction+arity+free variable array now on the stack
-        invokeSpecial function functionInit
-        i0 ARETURN
-    _ <- newMethod [ACC_PUBLIC, ACC_STATIC] "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
-        -- Weirdly ordered: should generate code using local variables instead
-        -- Create free variable (y)
-        iconst_5
-        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
-        -- Create function
-        invokeStatic "Test" $ NameType "_makeFoo" $ MethodSignature [heapObjectClass] (Returns functionClass)
-        dup
-        -- Create argument (x)
-        iconst_1
-        invokeStatic "_Int" $ NameType "_makeInt" $ MethodSignature [IntType] (Returns $ ObjectType "_Int")
-        -- Add argument
-        invokeVirtual "Function" $ NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
-        -- Enter
-        invokeVirtual "Function" $ NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
-        invokeVirtual "HeapObject" $ NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
-        -- Print result (should be the free variable y), so an _Int with value 5
-        getStaticField Java.Lang.system Java.IO.out
-        i0 SWAP
-        invokeVirtual Java.IO.printStream Java.IO.println
-        i0 RETURN
-    return ()
+parse :: FilePath -> ExceptT Text IO HsModule
+parse f = do
+    s <- readFile f
+    case parseModule (unpack s) of
+        ParseFailed loc err -> throwError $ "Parse failed at " <> showt loc <> " with error:\n" <> pack err
+        ParseOk m -> return m
+
+
+compile :: FilePath -> IO ()
+compile f = evalNameGeneratorT (runExceptT x) 0 >>= \case
+    Left err -> putStrLn err
+    Right () -> return ()
+    where x = do
+            m <- embedExceptIOIntoExceptNGIO $ parse f
+            renamedModule <- embedExceptNGIntoExceptNGIO $ renameModule m
+            (taggedModule, types) <- exceptLoggerNGToExceptNGIO $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
+            deoverloadedModule <- exceptLoggerNGToExceptNGIO $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
+            let deoverloadedTypes = map deoverloadQuantType types
+            ila <- exceptLoggerNGToExceptNGIO $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
+            ilb <- catchAdd ilaanf $ embedExceptIntoExceptNGIO $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb
+            lift $ lift $ B.writeFile "Output.class" (encode compiled)
+
+catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
+catchAdd x = withExceptT (\e -> unlines [e, showt x])
+
+-- Utility functions for converting between various monad transformer stacks...
+embedExceptIOIntoExceptNGIO :: ExceptT e IO a -> ExceptT e (NameGeneratorT IO) a
+embedExceptIOIntoExceptNGIO x = do
+    y <- lift $ lift $ runExceptT x
+    either throwError return y
+
+embedExceptNGIntoExceptNGIO :: ExceptT e NameGenerator a -> ExceptT e (NameGeneratorT IO) a
+embedExceptNGIntoExceptNGIO x = do
+    y <- lift $ embedNG $ runExceptT x
+    either throwError return y
+
+embedExceptIntoExceptNGIO :: Except e a -> ExceptT e (NameGeneratorT IO) a
+embedExceptIntoExceptNGIO = either throwError return . runExcept
+
+discardLoggerFromExceptLoggerNG :: ExceptT e (LoggerT NameGenerator) a -> ExceptT e NameGenerator a
+discardLoggerFromExceptLoggerNG x = do
+    y <- lift $ evalLoggerT $ runExceptT x
+    liftEither y
+
+exceptLoggerNGToExceptNGIO :: ExceptT e (LoggerT NameGenerator) a -> ExceptT e (NameGeneratorT IO) a
+exceptLoggerNGToExceptNGIO = embedExceptNGIntoExceptNGIO . discardLoggerFromExceptLoggerNG

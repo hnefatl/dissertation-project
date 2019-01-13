@@ -22,6 +22,7 @@ import           TextShow.Instances          ()
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames
+import           Typechecker.Hardcoded
 
 data RenamerState = RenamerState
       -- Used to generate unique variable names
@@ -43,6 +44,9 @@ instance Default RenamerState where
             , variableReverseMapping = M.empty
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }
+
+renameModule :: HsModule -> ExceptT Text NameGenerator HsModule
+renameModule = evalRenamer . rename
 
 newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState NameGenerator) a)
     deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadNameGenerator)
@@ -119,7 +123,11 @@ renameTypeVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueS
 renameTypeVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 
 instance Renameable HsModule where
-    rename (HsModule a b c d e) = HsModule a b c d <$> rename e
+    rename (HsModule a b c d e) = do
+        -- TODO(kc506): Remove when we get rid of hardcoded variables
+        let fs = M.fromSet (\(VariableName n) -> [UniqueVariableName n]) (M.keysSet builtinFunctions)
+        modify (\s -> s { variableBindings = M.union fs (variableBindings s) })
+        HsModule a b c d <$> rename e
 instance Renameable HsQName where
     rename (Qual m n)  = Qual m <$> renameVariable n
     rename (UnQual n)  = UnQual <$> renameVariable n

@@ -69,12 +69,17 @@ newtype TypeInferrer a = TypeInferrer (ExceptT Text (StateT InferrerState (Logge
 runTypeInferrer :: TypeInferrer a -> LoggerT NameGenerator (Except Text a, InferrerState)
 runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
-    return (liftEither y, s)
+    let z = case y of
+            Left err -> throwError $ unlines [err, showt s]
+            Right w -> return w
+    return (z, s)
 
 evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
 evalTypeInferrer (TypeInferrer x) = do
-    y <- lift $ evalStateT (runExceptT x) def
-    liftEither y
+    (y, s) <- lift $ runStateT (runExceptT x) def
+    case y of
+        Left err -> throwError $ unlines [err, showt s]
+        Right z -> return z
 
 
 nameToType :: TypeVariableName -> TypeInferrer Type

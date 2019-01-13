@@ -6,7 +6,7 @@
 module Backend.CodeGen where
 
 import           BasicPrelude                hiding (encodeUtf8, head)
-import           Control.Monad.Except        (Except, ExceptT, MonadError, runExcept, runExceptT, throwError)
+import           Control.Monad.Except        (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, execStateT, gets, modify, get)
 import qualified Data.ByteString.Lazy        as B
 import qualified Data.Map.Strict             as M
@@ -84,8 +84,9 @@ newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text
 -- |`convert` takes a class name, a path to the primitive java classes, and a list of ILB bindings and produces a class
 -- file
 convert :: Text -> FilePath -> [Binding Rhs] -> ExceptT Text (NameGeneratorT IO) OutputClass
-convert classname primitiveClassDir bs = addBootstrapMethods inner (encodeUtf8 $ fromStrict classname)
-    where processBinding (NonRec v (RhsClosure vs body)) = compileStaticMethod v vs body
+convert classname primitiveClassDir bs = withExceptT (\e -> unlines [e, showt bs]) action
+    where action = addBootstrapMethods inner (encodeUtf8 $ fromStrict classname)
+          processBinding (NonRec v (RhsClosure vs body)) = compileStaticMethod v vs body
           processBinding (Rec m) = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
           inner = do
             loadPrimitiveClasses primitiveClassDir
@@ -259,6 +260,7 @@ compileStaticMethod name args body = do
         invokeSpecial function functionInit
         i0 ARETURN
     return ()
+
 compileExp :: Exp -> Converter ()
 compileExp (ExpLit l) = compileLit l
 compileExp (ExpApp fun args) = do
@@ -286,6 +288,7 @@ compileExp (ExpCase head vs alts) = do
 compileExp (ExpLet var (RhsClosure args body') body) = do
     localVar <- getFreshLocalVar
     -- TODO(kc506): Replace `Converter $ lift` with something more generic
+    -- How to "get a function"? Use the _makef function, remember everything's a heapobject
     _ <- Converter $ lift $ evalConverter (compileStaticMethod var args body') def
     -- TODO(kc560): Need to construct a Thunk here?
     storeLocal localVar
@@ -332,7 +335,7 @@ compileCase as = do
 
 -- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
 sortAlts :: [Alt a] -> Converter [(Word32, Alt a)]
-sortAlts [] = throwTextError "Empty alts not allowed"
+sortAlts [] = return []
 sortAlts alts@(Alt (DataCon con) _ _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
     ds <- gets datatypes
@@ -346,7 +349,7 @@ sortAlts alts@(Alt (DataCon con) _ _:_) = do
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
             let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` branches, a)) alts
             return $ sortOn fst alts'
-sortAlts alts@((Alt (LitCon _) _ _):_) = do
+sortAlts alts@(Alt (LitCon _) _ _:_) = do
     unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"
     throwTextError "Need to refactor literals to only be int/char before doing this"
 sortAlts (Alt Default _ _:_) = throwTextError "Can't have Default constructor"
