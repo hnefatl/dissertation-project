@@ -184,8 +184,11 @@ makeError = Var "error"
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
+    let renamer v@(VariableName n) = do
+            val <- freshVal
+            return (v, VariableName $ n <> showt val)
     boundNames <- S.toAscList <$> getBoundVariables pat
-    renames    <- M.fromList <$> mapM (\n -> (n, ) <$> freshVarName) boundNames
+    renames    <- M.fromList <$> mapM renamer boundNames
     return (boundNames, renames)
 
 getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
@@ -241,7 +244,7 @@ declToIla (HsPatBind _ pat rhs _) = do
         rhst <- rhsType rhs
         patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
-    resultName <- freshVarName
+    resultName <- VariableName . ((concat $ map (\(VariableName n) -> n) boundNames) <>) . showt <$> freshVal
     -- For each bound name, generate a binding that extracts the variable from the result tuple
     let extractorMap (name, index) = do
             bindingType <- getSimpleType name -- Get the type of this bound variable

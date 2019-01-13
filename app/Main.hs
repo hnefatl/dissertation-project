@@ -26,9 +26,9 @@ import qualified Backend.ILAANF as ILAANF (ilaToAnf)
 import qualified Backend.ILB as ILB (runConverter, anfToIlb)
 import qualified Backend.CodeGen as CodeGen (convert)
 
---import qualified Data.Set as S
---import Typechecker.Types
---import Backend.ILA
+import qualified Data.Set as S
+import Typechecker.Types
+import Backend.ILA
 
 data Flags = Flags
     { verbose :: Bool }
@@ -58,26 +58,30 @@ printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
 
 compile :: Flags -> FilePath -> IO ()
 compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
-    (Left err, logs) -> putStrLn err >> printLogsIfVerbose flags logs
+    (Left err, logs) -> putStrLn "Error" >> putStrLn err >> printLogsIfVerbose flags logs
     (Right (), logs) -> printLogsIfVerbose flags logs
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
-            m <- embedExceptIOIntoResult $ parse f
-            renamedModule <- embedExceptNGIntoResult $ renameModule m
-            (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
-            deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
-            let deoverloadedTypes = map deoverloadQuantType types
-            ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
-            --let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
-            --    [ta, tb] = [ TypeVar y | y <- [a, b] ]
-            --    plusType = makeFun [tb, tb] tb
-            --    fType = makeFun [h]
-            --    ila =
-            --        [ NonRec "x" $ Lit (LiteralInt 1) ta
-            --        , NonRec "f" $ Lam "y" tb $ App (App (Var "+" plusType) (Var "x" tb)) (Var "y" tb)
-            --        , NonRec "z" $ App (Var "f" ) ]
+            --m <- embedExceptIOIntoResult $ parse f
+            --renamedModule <- embedExceptNGIntoResult $ renameModule m
+            --(taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
+            --deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
+            --let deoverloadedTypes = map deoverloadQuantType types
+            --ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
+                [ta, tb] = [ TypeVar y | y <- [a, b] ]
+                numb = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) tb KindStar
+                numInt = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) typeInt KindStar
+                plusType = makeFun [tb, tb] tb
+                --fType = makeFun [numb, tb, tb] tb
+                fType = makeFun [numInt, typeInt, typeInt] typeInt
+                ila =
+                    [ NonRec "x" $ Lit (LiteralInt 1) ta
+                    , NonRec "f" $ Lam "y" tb $ App (App (Var "+" plusType) (Var "x" tb)) (Var "y" tb)
+                    , NonRec "z" $ App (Var "f" fType) (Lit (LiteralInt 2) typeInt) ]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
+            putStrLn $ showt ilb
             compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb
             lift $ lift $ lift $ B.writeFile "Output.class" (encode compiled)
 

@@ -150,6 +150,10 @@ Add "before+after" stack comments to the definitions in CodeGen.
 Rename symbol names like `+`, `(,)` to something representable by java identifiers. Probably Unicode descriptive strings
 or hex?
 
+Replace VariableName etc with a datastructure containing a variable name and a unique int. Lets us keep variable names
+the same and only replace a non-visible part of the structure. This is actually important, because we can get variable
+clashes (eg. `v` renamed to `v11` by adding 11 and `v1` gets renamed to `v11` by adding a single one).
+
 Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
 handlers.
 Remove String literals: ILA can convert them into constructions of \[Char\]s. Same for Rationals, are a datatype.

@@ -73,7 +73,10 @@ getUniqueScopedTypeVariableName = getUniqueScopedName typeVariableBindings
 
 bindVariableForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindVariableForScope names action = do
-    mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueVarName) (S.toList names)
+    let renamer v@(VariableName n) = do
+            val <- freshVal
+            return (v, UniqueVariableName $ n <> showt val)
+    mapping <- M.fromList <$> mapM renamer (S.toList names)
     -- Add new bindings to scope
     modify (\s -> s { variableBindings = M.unionWith (++) (M.map pure mapping) (variableBindings s) })
     -- Add reverse mappings

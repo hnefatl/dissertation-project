@@ -21,6 +21,7 @@ import Names
 type NameGeneratorCounter = Int
 class Monad m => MonadNameGenerator m where
     -- |Should generate a new unique name each time it's run
+    freshVal :: m Int
     freshName :: m Text
 
 newtype NameGeneratorT m a = NameGeneratorT (StS.StateT Int m a)
@@ -40,7 +41,8 @@ embedNG :: Monad m => NameGenerator a -> NameGeneratorT m a
 embedNG x = NameGeneratorT $ StS.state $ \i -> let (y, c) = runNameGenerator x i in (y, c+i)
 
 instance Monad m => MonadNameGenerator (NameGeneratorT m) where
-    freshName = NameGeneratorT $ StS.state (\i -> (showt i, i+1))
+    freshVal = NameGeneratorT $ StS.state (\i -> (i, i+1))
+    freshName = showt <$> freshVal
 freshVarName :: MonadNameGenerator m => m VariableName
 freshVarName = VariableName . ("v" <>) <$> freshName
 freshUniqueVarName :: MonadNameGenerator m => m UniqueVariableName
@@ -55,18 +57,25 @@ freshDummyTypeVarName :: MonadNameGenerator m => m TypeVariableName
 freshDummyTypeVarName = TypeVariableName . ("zt" <>) <$> freshName
 
 instance MonadNameGenerator m => MonadNameGenerator (ExceptT e m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (ReaderT e m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (StL.StateT e m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (StS.StateT e m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (LoggerT m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (IdentityT m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 instance MonadNameGenerator m => MonadNameGenerator (GeneratorT m) where
+    freshVal = lift freshVal
     freshName = lift freshName
 
 instance MonadError e m => MonadError e (NameGeneratorT m) where

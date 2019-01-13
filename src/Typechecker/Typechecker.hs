@@ -8,9 +8,8 @@ module Typechecker.Typechecker where
 
 import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
-import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, liftEither, runExceptT,
-                                              throwError)
-import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, gets, modify, runStateT)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
+import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
