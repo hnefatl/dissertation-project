@@ -26,6 +26,10 @@ import qualified Backend.ILAANF as ILAANF (ilaToAnf)
 import qualified Backend.ILB as ILB (runConverter, anfToIlb)
 import qualified Backend.CodeGen as CodeGen (convert)
 
+--import qualified Data.Set as S
+--import Typechecker.Types
+--import Backend.ILA
+
 data Flags = Flags
     { verbose :: Bool }
 instance Default Flags where
@@ -64,6 +68,14 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             let deoverloadedTypes = map deoverloadQuantType types
             ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            --let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
+            --    [ta, tb] = [ TypeVar y | y <- [a, b] ]
+            --    plusType = makeFun [tb, tb] tb
+            --    fType = makeFun [h]
+            --    ila =
+            --        [ NonRec "x" $ Lit (LiteralInt 1) ta
+            --        , NonRec "f" $ Lam "y" tb $ App (App (Var "+" plusType) (Var "x" tb)) (Var "y" tb)
+            --        , NonRec "z" $ App (Var "f" ) ]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb

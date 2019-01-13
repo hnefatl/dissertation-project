@@ -27,9 +27,10 @@ import           JVM.Assembler
 import           JVM.Builder                 hiding (locals)
 import           JVM.Builder.Monad           (execGeneratorT, encodedCodeLength, classPath)
 import qualified JVM.ClassFile               as ClassFile
-import           JVM.ClassFile               hiding (Class, Method, Field)
+import           JVM.ClassFile               hiding (Class, Method, Field, toString)
 import           JVM.Converter
 import qualified Java.Lang
+import qualified Java.IO
 
 import           Backend.ILA                 (Alt(..), Binding(..), Literal(..), AltConstructor(..), isDefaultAlt, isDataAlt, isLiteralAlt, getBindingVariables)
 import           Backend.ILB                 hiding (Converter, ConverterState)
@@ -102,6 +103,7 @@ convert cname primitiveClassDir bs = do
           inner = do
             loadPrimitiveClasses primitiveClassDir
             mapM_ processBinding bs
+            addMainMethod
 
 throwTextError :: Text -> Converter a
 throwTextError = liftErrorText . throwError
@@ -167,6 +169,16 @@ addDynamicMethod m = do
 loadPrimitiveClasses :: FilePath -> Converter ()
 loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>)) classes
     where classes = ["HeapObject", "Function"]
+
+addMainMethod :: Converter ()
+addMainMethod = do
+    let access = [ ACC_PUBLIC, ACC_STATIC ]
+    void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
+        getStaticField Java.Lang.system Java.IO.out
+        pushSymbol "_main"
+        invokeVirtual heapObject toString
+        invokeVirtual Java.IO.printStream Java.IO.println
+        i0 RETURN
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
@@ -237,6 +249,8 @@ bifunctionApply :: NameType Method
 bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
 functionClone :: NameType Method
 functionClone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
+toString :: NameType Method
+toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 
 publicStaticField :: Text -> ClassFile.NameType Field
 publicStaticField name = NameType

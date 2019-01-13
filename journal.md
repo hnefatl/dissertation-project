@@ -147,6 +147,8 @@ Need to generate bootstrap methods and stuff...
 
 Add "before+after" stack comments to the definitions in CodeGen.
 
+Rename symbol names like `+`, `(,)` to something representable by java identifiers. Probably Unicode descriptive strings
+or hex?
 
 Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
 handlers.
