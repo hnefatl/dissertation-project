@@ -118,6 +118,9 @@ makeDictName (IsInstance (TypeVariableName cl) t) = do
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
 deoverloadModule (HsModule a b c d decls) = do
+    writeLog "----------------"
+    writeLog "- Deoverloader -"
+    writeLog "----------------"
     addKinds builtinKinds
     HsModule a b c d <$> deoverloadDecls decls
 

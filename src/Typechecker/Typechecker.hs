@@ -458,6 +458,9 @@ inferDeclGroup ds = do
 -- TODO(kc506): Take advantage of explicit type hints
 inferModule :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModule (HsModule a b c d decls) = do
+    writeLog "-----------------"
+    writeLog "- Type Inferrer -"
+    writeLog "-----------------"
     m <- HsModule a b c d <$> inferDeclGroup decls
     ts <- getBoundVariableTypes
     m' <- updateModuleTypeTags m

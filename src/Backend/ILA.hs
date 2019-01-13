@@ -76,6 +76,9 @@ instance TextShow a => TextShow (Binding a) where
         where (v1, e1):bs = M.toList m
               headline =    "Rec: " <> showb v1 <> " = " <> showb e1
               bodylines = [ "     " <> showb v  <> " = " <> showb e | (v, e) <- bs ]
+getBindingVariables :: Binding a -> S.Set VariableName
+getBindingVariables (NonRec v _) = S.singleton v
+getBindingVariables (Rec m) = M.keysSet m
 
 -- |The AST of ILA
 data Expr = Var VariableName Type -- Variable/function/data constructor
@@ -214,7 +217,11 @@ unmakeApplication f@App{} = return $ helper f
 unmakeApplication e = throwError $ "Expected ILA application, got " <> showt e
 
 toIla :: HsModule -> Converter [Binding Expr]
-toIla (HsModule _ _ _ _ decls) = concat <$> mapM declToIla decls
+toIla (HsModule _ _ _ _ decls) = do
+    writeLog "-------"
+    writeLog "- ILA -"
+    writeLog "-------"
+    concat <$> mapM declToIla decls
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do

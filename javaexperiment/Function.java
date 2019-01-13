@@ -34,4 +34,12 @@ public class Function extends HeapObject {
     public void addArgument(HeapObject arg) {
         arguments.add(arg);
     }
+
+    @Override
+    public Object clone() {
+        // Return a Function with all the same references
+        Function f = new Function(inner, arity, freeVariables);
+        f.arguments = arguments;
+        return f;
+    }
 }

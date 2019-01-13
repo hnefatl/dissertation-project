@@ -145,6 +145,8 @@ peephole.
 For the record: spent ages rewriting bits of hs-java and tweaking stuff to try to get invokeDynamic to work correctly.
 Need to generate bootstrap methods and stuff...
 
+Add "before+after" stack comments to the definitions in CodeGen.
+
 
 Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
 handlers.
