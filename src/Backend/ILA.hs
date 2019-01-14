@@ -244,7 +244,7 @@ declToIla (HsPatBind _ pat rhs _) = do
         rhst <- rhsType rhs
         patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
-    resultName <- VariableName . ((concat $ map (\(VariableName n) -> n) boundNames) <>) . showt <$> freshVal
+    resultName <- freshVarName
     -- For each bound name, generate a binding that extracts the variable from the result tuple
     let extractorMap (name, index) = do
             bindingType <- getSimpleType name -- Get the type of this bound variable

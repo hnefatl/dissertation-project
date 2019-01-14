@@ -39,6 +39,7 @@ import           Names                       (VariableName, TypeVariableName, co
 import qualified Preprocessor.ContainedNames as ContainedNames
 import           ExtraDefs                   (zipOverM_)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
+import           Typechecker.Hardcoded       (builtinFunctions)
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File
@@ -157,8 +158,13 @@ inScope action = do
         , localSymbols = localSymbols s }
     return res
 
-freeVariables :: ContainedNames.HasFreeVariables a => a -> Converter (S.Set VariableName)
-freeVariables x = S.difference <$> liftErrorText (ContainedNames.getFreeVariables x) <*> gets topLevelSymbols
+freeVariables :: ContainedNames.HasFreeVariables a => VariableName -> [VariableName] -> a -> Converter (S.Set VariableName)
+freeVariables name args x = do
+    fvs <- liftErrorText $ ContainedNames.getFreeVariables x
+    tls <- gets topLevelSymbols
+    -- TODO(kc506): remove these when we remove hardcoded stuff
+    let bfs = M.keysSet builtinFunctions
+    return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls, bfs])
 
 addDynamicMethod :: Text -> Converter Word16
 addDynamicMethod m = do
@@ -267,10 +273,10 @@ compileGlobalClosure v (RhsClosure [] body) = do
     let field = publicStaticField $ convertName v
     putStaticField cname field
     return field
-compileGlobalClosure v c@(RhsClosure args body) = do
+compileGlobalClosure v (RhsClosure args body) = do
     -- We're compiling a global function, so it shouldn't have any non top-level free variables
-    fvs <- freeVariables c
-    unless (null fvs) $ throwTextError $ "Top-level function has free variables: " <> showt v <> "\n" <> showt body
+    fvs <- freeVariables v args body
+    unless (null fvs) $ throwTextError $ unlines ["Top-level function has free variables: " <> showt v, showt fvs, showt args, showt body]
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
     -- Get a function instance using f, then store it as a static field
@@ -285,10 +291,10 @@ compileLocalClosure v (RhsClosure [] body) = do
     -- Same as the global closure, but storing in a local variable rather than a static field
     compileThunk body
     storeLocal v
-compileLocalClosure v c@(RhsClosure args body) = do
+compileLocalClosure v (RhsClosure args body) = do
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
-    fvs <- freeVariables c
+    fvs <- freeVariables v args body
     -- Push each free variable used in the function onto the stack
     forM_ (S.toAscList fvs) pushLocalSymbol
     -- Consume the free variables to produce a Function object, then store it as a local variable
@@ -313,7 +319,7 @@ compileThunk body = do
 -- get a lambda from a static function.
 compileFunction :: VariableName -> [VariableName] -> Exp -> Converter (ClassFile.NameType Method)
 compileFunction name args body = do
-    freeVars <- freeVariables (RhsClosure args body)
+    freeVars <- freeVariables name args body
     let implName = "_" <> fromStrict (convertName name) <> "Impl"
         implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
         implAccs = [ACC_PRIVATE, ACC_STATIC]

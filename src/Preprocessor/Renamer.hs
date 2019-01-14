@@ -73,10 +73,7 @@ getUniqueScopedTypeVariableName = getUniqueScopedName typeVariableBindings
 
 bindVariableForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindVariableForScope names action = do
-    let renamer v@(VariableName n) = do
-            val <- freshVal
-            return (v, UniqueVariableName $ n <> showt val)
-    mapping <- M.fromList <$> mapM renamer (S.toList names)
+    mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueVarName) (S.toList names)
     -- Add new bindings to scope
     modify (\s -> s { variableBindings = M.unionWith (++) (M.map pure mapping) (variableBindings s) })
     -- Add reverse mappings
@@ -92,6 +89,7 @@ bindVariableForScope names action = do
             Just []     -> throwError $ "Variable " <> showt name <> " is not in scope."
             Just (_:bs) -> modify (\s -> s { variableBindings = M.insert name bs bindings' }) -- Pop the first binding
     return result
+
 -- We need to duplicate the code :( We can't parametrise on record fields like `typeVariableBindings`. Could use
 -- lenses...
 bindTypeVariableForScope :: S.Set TypeVariableName -> Renamer a -> Renamer a
