@@ -70,7 +70,7 @@ runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
     let z = case y of
             Left err -> throwError $ unlines [err, showt s]
-            Right w -> return w
+            Right w  -> return w
     return (z, s)
 
 evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
@@ -78,7 +78,7 @@ evalTypeInferrer (TypeInferrer x) = do
     (y, s) <- lift $ runStateT (runExceptT x) def
     case y of
         Left err -> throwError $ unlines [err, showt s]
-        Right z -> return z
+        Right z  -> return z
 
 
 nameToType :: TypeVariableName -> TypeInferrer Type

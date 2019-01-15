@@ -137,6 +137,14 @@ instance AlphaEq HsName where
     alphaEq' n1 n2 = alphaEq' (convertName n1 :: Text) (convertName n2)
 instance AlphaEq HsQName where
     alphaEq' n1 n2 = alphaEq' (convertName n1 :: Text) (convertName n2)
+instance AlphaEq HsOp where
+    alphaEq' (HsVarOp n1) (HsVarOp n2) = alphaEq' n1 n2
+    alphaEq' (HsConOp n1) (HsConOp n2) = unless (n1 == n2) $ throwError $ "HsConOp mismatch" <> showt n1 <> showt n2
+    alphaEq' op1 op2 = throwError $ "HsOp mismatch: " <> showt op1 <> showt op2
+instance AlphaEq HsQOp where
+    alphaEq' (HsQVarOp n1) (HsQVarOp n2) = alphaEq' n1 n2
+    alphaEq' (HsQConOp n1) (HsQConOp n2) = unless (n1 == n2) $ throwError $ "HsQConOp mismatch" <> showt n1 <> showt n2
+    alphaEq' op1 op2 = throwError $ "HsQOp mismatch: " <> showt op1 <> showt op2
 instance AlphaEq HsModule where
     alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEq' ds1 ds2
 instance AlphaEq HsDecl where
@@ -169,6 +177,7 @@ instance AlphaEq HsExp where
     alphaEq' (HsLit l1) (HsLit l2) =
         unless (l1 == l2) $ throwError $ "Literal exp mismatch: " <> synPrint l1 <> " " <> synPrint l2
     alphaEq' (HsApp e1a e1b) (HsApp e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (HsInfixApp e1a op1 e1b) (HsInfixApp e2a op2 e2b) = alphaEq' e1a e2a >> alphaEq' op1 op2 >> alphaEq' e1b e2b
     alphaEq' (HsNegApp e1) (HsNegApp e2) = alphaEq' e1 e2
     alphaEq' (HsLambda _ ps1 e1) (HsLambda _ ps2 e2) = alphaEq' ps1 ps2 >> alphaEq' e1 e2
     alphaEq' (HsLet ds1 e1) (HsLet ds2 e2) = alphaEq' ds1 ds2 >> alphaEq' e1 e2

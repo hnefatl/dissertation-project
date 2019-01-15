@@ -4,6 +4,7 @@
 module Main where
 
 import BasicPrelude
+import System.Exit
 import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import TextShow (TextShow, showt)
 import Data.Text (unpack, pack)
@@ -18,7 +19,7 @@ import Typechecker.Hardcoded
 
 import Language.Haskell.Syntax (HsModule)
 import Language.Haskell.Parser (parseModule, ParseResult(..))
-import Preprocessor.Renamer (renameModule)
+import Preprocessor.Renamer (evalRenamer, renameModule)
 import Typechecker.Typechecker (evalTypeInferrer, inferModuleWithBuiltins)
 import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
 import qualified Backend.ILA as ILA (evalConverter, toIla)
@@ -58,31 +59,39 @@ printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
 
 compile :: Flags -> FilePath -> IO ()
 compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
-    (Left err, logs) -> putStrLn "Error" >> putStrLn err >> printLogsIfVerbose flags logs
+    (Left err, logs) -> putStrLn "Error" >> putStrLn err >> printLogsIfVerbose flags logs >> exitFailure
     (Right (), logs) -> printLogsIfVerbose flags logs
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
             --m <- embedExceptIOIntoResult $ parse f
-            --renamedModule <- embedExceptNGIntoResult $ renameModule m
+            --(renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
             --(taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
             --deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             --let deoverloadedTypes = map deoverloadQuantType types
             --ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
             let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
                 [ta, tb] = [ TypeVar y | y <- [a, b] ]
+                numa = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) ta KindStar
                 numb = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) tb KindStar
                 numInt = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) typeInt KindStar
                 plusType = makeFun [tb, tb] tb
-                --fType = makeFun [numb, tb, tb] tb
                 fType = makeFun [numInt, typeInt, typeInt] typeInt
+                -- x = 1 :: Num a -> a
+                -- f = \d -> \y -> (+) d x y :: Num b -> b -> b
+                -- z = f dNumInt 2 :: Int
+                -- _main = z
                 ila =
-                    [ NonRec "x" $ Lit (LiteralInt 1) ta
-                    , NonRec "f" $ Lam "y" tb $ App (App (Var "+" plusType) (Var "x" tb)) (Var "y" tb)
-                    , NonRec "z" $ App (Var "f" fType) (Lit (LiteralInt 2) typeInt) ]
+                    [ NonRec "x" $ Lit (LiteralInt 1) (makeFun [numa] ta)
+                    , NonRec "f" $ Lam "d" numb $
+                        Lam "y" tb $ App (App (App (Var "+" plusType) (Var "d" numb) ) (Var "x" tb)) (Var "y" tb)
+                    , NonRec "z" $ App (App (Var "f" fType) (Var "dNumInt" numInt)) (Lit (LiteralInt 2) typeInt)
+                    , NonRec "_main" $ Var "z" typeInt ]
+                -- This needs to be the composition of the renames from the ILA and renamer stage
+                topLevelRenames = M.fromList [ ("+", "v14") ]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             putStrLn $ showt ilb
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames
             lift $ lift $ lift $ B.writeFile "Output.class" (encode compiled)
 
 catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b

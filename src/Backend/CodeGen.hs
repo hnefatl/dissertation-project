@@ -5,41 +5,43 @@
 
 module Backend.CodeGen where
 
-import           BasicPrelude                hiding (encodeUtf8, head)
+import           BasicPrelude                hiding (encodeUtf8, head, init)
 import           Control.Monad.Except        (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
-import           Control.Monad.State.Strict  (MonadState, StateT, execStateT, gets, modify, get)
+import           Control.Monad.State.Strict  (MonadState, StateT, execStateT, get, gets, modify)
 import qualified Data.ByteString.Lazy        as B
+import           Data.Foldable               (null, toList)
+import           Data.Functor                (void)
 import qualified Data.Map.Strict             as M
+import           Data.Maybe                  (fromJust)
+import qualified Data.Sequence               as Seq
 import qualified Data.Set                    as S
-import           Data.Text                   (pack)
+import           Data.Text                   (pack, unpack)
 import           Data.Text.Lazy              (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding     (encodeUtf8)
 import           Data.Word                   (Word16)
 import           System.FilePath             ((</>))
 import           TextShow                    (TextShow, showb, showt)
-import           Data.Maybe                  (fromJust)
-import qualified Data.Sequence               as Seq
-import           Data.Foldable               (toList, null)
-import           Data.Functor                (void)
 
 import           Java.ClassPath
+import qualified Java.IO
+import qualified Java.Lang
 import           JVM.Assembler
 import           JVM.Builder                 hiding (locals)
-import           JVM.Builder.Monad           (execGeneratorT, encodedCodeLength, classPath)
+import           JVM.Builder.Monad           (classPath, encodedCodeLength, execGeneratorT)
+import           JVM.ClassFile               hiding (Class, Field, Method, toString)
 import qualified JVM.ClassFile               as ClassFile
-import           JVM.ClassFile               hiding (Class, Method, Field, toString)
 import           JVM.Converter
-import qualified Java.Lang
-import qualified Java.IO
 
-import           Backend.ILA                 (Alt(..), Binding(..), Literal(..), AltConstructor(..), isDefaultAlt, isDataAlt, isLiteralAlt, getBindingVariables)
+import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..),
+                                              getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB                 hiding (Converter, ConverterState)
-import           NameGenerator
-import           Names                       (VariableName, TypeVariableName, convertName)
-import qualified Preprocessor.ContainedNames as ContainedNames
 import           ExtraDefs                   (zipOverM_)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
-import           Typechecker.Hardcoded       (builtinFunctions)
+import           NameGenerator
+import           Names                       (TypeVariableName, VariableName(..), convertName)
+import qualified Preprocessor.ContainedNames as ContainedNames
+import qualified Typechecker.Types           as Types
+import           Typechecker.Hardcoded       (builtinFunctions, builtinDictionaries)
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File
@@ -54,7 +56,6 @@ instance TextShow NamedClass where
 --writeClass :: FilePath -> NamedClass -> IO ()
 --writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encodeClass c)
 
-
 -- TODO(kc506): Move somewhere more appropriate for when we generate this information
 -- |Representation of a datatype: the type name eg. Maybe, and the list of contstructor names eg. Nothing, Just
 data Datatype = Datatype TypeVariableName [VariableName]
@@ -62,29 +63,38 @@ data Datatype = Datatype TypeVariableName [VariableName]
 
 type LocalVar = Word16
 
+toLazyBytestring :: Text -> B.ByteString
+toLazyBytestring = encodeUtf8 . fromStrict
+
 data ConverterState = ConverterState
     { -- Which JVM local variable we're up to
       localVarCounter :: LocalVar
     , -- Map from datatype constructor name to branch number, eg. {False:0, True:1} or {Nothing:0, Just:1}
-      datatypes :: M.Map TypeVariableName Datatype
+      datatypes       :: M.Map TypeVariableName Datatype
     , -- Top-level variable names. Eg `x = 1 ; y = let z = 2 in z` has top-level variable names x and y. This is used when working out which free variables we need to pass to functions, and which it can get for itself.
       topLevelSymbols :: S.Set VariableName
+    , -- A reverse mapping from the renamed top-level variables to what they were originally called.
+      topLevelRenames :: M.Map VariableName VariableName
     , -- Local variable names, and an action that can be used to push them onto the stack
-      localSymbols :: M.Map VariableName (Converter ())
+      localSymbols    :: M.Map VariableName (Converter ())
+    , -- A list of initialisation actions to run as the first instructions inside `main`. Used for initialising fields.
+      initialisers    :: [Converter ()]
     , -- Which methods we're using an invokeDynamic instruction on, so we need to add bootstrap methods for
-      dynamicMethods :: Seq.Seq Text
+      dynamicMethods  :: Seq.Seq Text
+    , -- Class instances like `Num Int`. We want to compile any ground instances into static fields.
+      dictionaries    :: S.Set Types.TypePredicate
     , -- The name of the class we're compiling to
-      classname :: B.ByteString }
+      classname       :: B.ByteString }
 
 -- A `Converter Method` action represents a computation that compiles a method: the ConverterState should be reset
 -- inbetween method compilations
 newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text (LoggerT (NameGeneratorT IO)))) a)
     deriving (Functor, Applicative, Monad, MonadState ConverterState, MonadGenerator, MonadLogger, MonadNameGenerator, MonadIO)
 
--- |`convert` takes a class name, a path to the primitive java classes, and a list of ILB bindings and produces a class
--- file
-convert :: Text -> FilePath -> [Binding Rhs] -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
-convert cname primitiveClassDir bs = do
+-- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
+-- the top-level symbols and produces a class file
+convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
+convert cname primitiveClassDir bs topLevelRenamings = do
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"
@@ -94,15 +104,19 @@ convert cname primitiveClassDir bs = do
             , datatypes = M.fromList
                 [ ("Bool", Datatype "Bool" ["False", "True"])
                 , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ]
-            , topLevelSymbols = S.unions $ map getBindingVariables bs
+            , topLevelSymbols = S.unions $ M.keysSet builtinFunctions:map getBindingVariables bs
+            , topLevelRenames = topLevelRenamings
             , localSymbols = M.empty
+            , initialisers = []
             , dynamicMethods = Seq.empty
-            , classname = encodeUtf8 $ fromStrict cname }
+            , dictionaries = M.keysSet builtinDictionaries
+            , classname = toLazyBytestring cname }
           action = addBootstrapMethods inner initialState
           processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
-          processBinding (Rec m) = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
+          processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
           inner = do
             loadPrimitiveClasses primitiveClassDir
+            compileDictionaries
             mapM_ processBinding bs
             addMainMethod
 
@@ -136,12 +150,13 @@ pushSymbol v = do
     locals <- gets localSymbols
     case (S.member v globals, M.member v locals) of
         (False, False) -> throwTextError $ "Variable " <> showt v <> " not found in locals or globals"
-        (True, True) -> throwTextError $ "Variable " <> showt v <> " found in both locals and globals"
-        (True, False) -> pushGlobalSymbol v
-        (False, True) -> pushLocalSymbol v
+        (True, True)   -> throwTextError $ "Variable " <> showt v <> " found in both locals and globals"
+        (True, False)  -> pushGlobalSymbol v
+        (False, True)  -> pushLocalSymbol v
 pushGlobalSymbol :: VariableName -> Converter ()
 pushGlobalSymbol v = do
     cname <- gets classname
+    renames <- gets topLevelRenames
     getStaticField cname $ publicStaticField $ convertName v
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
@@ -180,11 +195,33 @@ addMainMethod :: Converter ()
 addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
+        -- Perform any initialisation actions
+        sequence_ =<< gets initialisers
         getStaticField Java.Lang.system Java.IO.out
         pushSymbol "_main"
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
+
+-- |Create a new class for each datatype
+compileDatatypes :: [Datatype] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [OutputClass]
+compileDatatypes ds = throwError "Need to implement datatype compilation"
+
+compileDictionaries :: Converter ()
+compileDictionaries = do
+    dicts <- gets dictionaries
+    cname <- gets classname
+    -- For each dictionary, create a new static field
+    -- TODO(kc506): Create the dictionary functions in this class
+    forM_ dicts $ \(Types.IsInstance c t) -> do
+        -- TODO(kc506): Verify the name's acceptable (like `NumInt`, not `Num[a]`)
+        let name = showt c <> showt t
+            datatypeClassName = "_" <> name
+            datatype = ObjectType $ unpack datatypeClassName
+        makePublicStaticField ("d" <> name) datatype $ \field -> do
+            let method = ClassFile.NameType (toLazyBytestring $ "_make" <> name) $ MethodSignature [] (Returns datatype)
+            invokeStatic (toLazyBytestring datatypeClassName) method
+            putStaticField cname field
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
@@ -224,7 +261,7 @@ addBootstrapPoolItems (Converter x) s = do
         let sig = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
             method = ClassFile.Method
                 { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
-                , methodName = encodeUtf8 $ fromStrict name
+                , methodName = toLazyBytestring name
                 , methodSignature = sig
                 , methodAttributesCount = 0
                 , methodAttributes = AR M.empty }
@@ -233,16 +270,20 @@ addBootstrapPoolItems (Converter x) s = do
     return (bmIndex, mfIndex, arg1, arg2s, arg3)
 
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction :: IsString s => s
+heapObject, function, thunk, bifunction, unboxedData, boxedData :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
 bifunction = "java/util/function/BiFunction"
-heapObjectClass, functionClass, thunkClass, bifunctionClass :: FieldType
+unboxedData = "Data"
+boxedData = "BoxedData"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass  :: FieldType
 heapObjectClass = ObjectType heapObject
 functionClass = ObjectType function
 thunkClass = ObjectType thunk
 bifunctionClass = ObjectType bifunction
+unboxedDataClass = ObjectType unboxedData
+boxedDataClass = ObjectType boxedData
 addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
@@ -258,21 +299,30 @@ functionClone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectC
 toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 
+-- |Create a new public static field in this class with the given name and type.
+-- The given action will be run at the start of `main`, and should be used to initialise the field
+makePublicStaticField :: Text -> FieldType -> (ClassFile.NameType Field -> Converter ()) -> Converter (ClassFile.NameType Field)
+makePublicStaticField name fieldType init = do
+    field <- newField [ ACC_PUBLIC, ACC_STATIC ] (toLazyBytestring name) fieldType
+    modify $ \s -> s
+        { initialisers = init field:initialisers s
+        , topLevelSymbols = S.insert (VariableName name) (topLevelSymbols s) }
+    return field
+
 publicStaticField :: Text -> ClassFile.NameType Field
 publicStaticField name = NameType
-    { ntName = encodeUtf8 $ fromStrict name
+    { ntName = toLazyBytestring name
     , ntSignature = thunkClass }
 
 -- |Compiling a global closure results in a static class field with the given name set to either a `Thunk` or a `Function`
 compileGlobalClosure :: VariableName -> Rhs -> Converter (ClassFile.NameType Field)
-compileGlobalClosure v (RhsClosure [] body) = do
-    -- We're compiling a non-function, so we can just make a thunk
-    cname <- gets classname
-    compileThunk body
+compileGlobalClosure v (RhsClosure [] body) =
     -- As this symbol is global, we store it in a static class field
-    let field = publicStaticField $ convertName v
-    putStaticField cname field
-    return field
+    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
+        -- We're compiling a non-function, so we can just make a thunk
+        compileThunk body
+        cname <- gets classname
+        putStaticField cname field
 compileGlobalClosure v (RhsClosure args body) = do
     -- We're compiling a global function, so it shouldn't have any non top-level free variables
     fvs <- freeVariables v args body
@@ -280,11 +330,10 @@ compileGlobalClosure v (RhsClosure args body) = do
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
     -- Get a function instance using f, then store it as a static field
-    cname <- gets classname
-    invokeStatic cname f
-    let field = publicStaticField $ convertName v
-    putStaticField cname field
-    return field
+    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
+        cname <- gets classname
+        invokeStatic cname f
+        putStaticField cname field
 -- |Compiling a local closure results in local variable bindings to either a `Thunk` or a `Function`.
 compileLocalClosure :: VariableName -> Rhs -> Converter LocalVar
 compileLocalClosure v (RhsClosure [] body) = do
@@ -320,25 +369,26 @@ compileThunk body = do
 compileFunction :: VariableName -> [VariableName] -> Exp -> Converter (ClassFile.NameType Method)
 compileFunction name args body = do
     freeVars <- freeVariables name args body
+    writeLog $ "Function " <> showt name <> " has free variables " <> showt freeVars
     let implName = "_" <> fromStrict (convertName name) <> "Impl"
         implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
         implAccs = [ACC_PRIVATE, ACC_STATIC]
     inScope $ do
         setLocalVarCounter 2 -- The first two local variables (0 and 1) are reserved for the function arguments
         -- Map each variable name to a pusher that pushes it onto the stack
-        zipOverM_ (S.toAscList freeVars) [0..] $ \v n -> addComplexLocalVariable v $ do
-            iconst_1
-            pushInt n
-            aaload
         zipOverM_ args [0..] $ \v n -> addComplexLocalVariable v $ do
-            iconst_0
+            loadLocal 0 -- Load array parameter
+            pushInt n
+            aaload -- Load value from array
+        zipOverM_ (S.toAscList freeVars) [0..] $ \v n -> addComplexLocalVariable v $ do
+            loadLocal 1
             pushInt n
             aaload
         -- The actual implementation of the function
         void $ newMethod implAccs (encodeUtf8 implName) implArgs (Returns heapObjectClass) $ do
             compileExp body
             i0 ARETURN
-    let wrapperName = encodeUtf8 $ "_make" <> fromStrict (convertName name)
+    let wrapperName = toLazyBytestring $ "_make" <> convertName name
         numFreeVars = S.size freeVars
         arity = length args
         wrapperArgs = replicate numFreeVars heapObjectClass
@@ -378,6 +428,7 @@ compileExp (ExpApp fun args) = do
         dup
         pushArg arg
         invokeVirtual function addArgument
+    invokeVirtual function enter
 compileExp (ExpConApp _ _) = throwTextError "Need support for data applications"
 compileExp (ExpCase head vs alts) = do
     compileExp head
@@ -398,7 +449,7 @@ compileCase as = do
     (altKeys, alts) <- unzip <$> sortAlts otherAlts
     defaultAlt <- case defaultAlts of
         [x] -> return x
-        x -> throwTextError $ "Expected single default alt in case statement, got: " <> showt x
+        x   -> throwTextError $ "Expected single default alt in case statement, got: " <> showt x
     let defaultAltGenerator = (\(Alt _ _ e) -> compileExp e) defaultAlt
         altGenerators = map (\(Alt _ _ e) -> compileExp e) alts
     classPathEntries <- classPath <$> getGState
@@ -409,7 +460,7 @@ compileCase as = do
             x <- liftExc $ runExceptT $ execGeneratorT classPathEntries $ execStateT e converterState
             generatorState <- case x of
                 Left err -> throwTextError (pack $ show err)
-                Right s -> return s
+                Right s  -> return s
             return $ encodedCodeLength generatorState
     -- The lengths of each branch: just the code for the expressions, nothing else
     defaultAltLength <- getAltLength defaultAltGenerator
@@ -440,7 +491,7 @@ sortAlts alts@(Alt (DataCon con) _ _:_) = do
         Nothing -> throwTextError "Unknown data constructor"
         Just branches -> do
             let getDataCon (Alt (DataCon c) _ _) = c
-                getDataCon _ = error "Compiler error: can only have datacons here"
+                getDataCon _                     = error "Compiler error: can only have datacons here"
                 okay = all ((`elem` branches) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
             let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` branches, a)) alts
@@ -456,10 +507,10 @@ pushArg (ArgLit l) = pushLit l
 pushArg (ArgVar v) = pushSymbol v
 
 pushLit :: Literal -> Converter ()
-pushLit (LiteralInt i) = pushInt (fromIntegral i)
-pushLit (LiteralChar _) = throwTextError "Need support for characters"
+pushLit (LiteralInt i)    = pushInt (fromIntegral i)
+pushLit (LiteralChar _)   = throwTextError "Need support for characters"
 pushLit (LiteralString _) = throwTextError "Need support for strings"
-pushLit (LiteralFrac _) = throwTextError "Need support for rationals"
+pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"
 
 pushInt :: Int -> Converter ()
 pushInt (-1) = iconst_m1

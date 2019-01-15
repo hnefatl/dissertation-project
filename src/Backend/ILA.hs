@@ -59,13 +59,13 @@ instance TextShow AltConstructor where
     showb Default     = "default"
 isDefaultAlt :: Alt a -> Bool
 isDefaultAlt (Alt Default _ _) = True
-isDefaultAlt _ = False
+isDefaultAlt _                 = False
 isDataAlt :: Alt a -> Bool
 isDataAlt (Alt (DataCon _) _ _) = True
-isDataAlt _ = False
+isDataAlt _                     = False
 isLiteralAlt :: Alt a -> Bool
 isLiteralAlt (Alt (LitCon _) _ _) = True
-isLiteralAlt _ = False
+isLiteralAlt _                    = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
@@ -78,7 +78,7 @@ instance TextShow a => TextShow (Binding a) where
               bodylines = [ "     " <> showb v  <> " = " <> showb e | (v, e) <- bs ]
 getBindingVariables :: Binding a -> S.Set VariableName
 getBindingVariables (NonRec v _) = S.singleton v
-getBindingVariables (Rec m) = M.keysSet m
+getBindingVariables (Rec m)      = M.keysSet m
 
 -- |The AST of ILA
 data Expr = Var VariableName Type -- Variable/function/data constructor
@@ -184,11 +184,8 @@ makeError = Var "error"
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
-    let renamer v@(VariableName n) = do
-            val <- freshVal
-            return (v, VariableName $ n <> showt val)
     boundNames <- S.toAscList <$> getBoundVariables pat
-    renames    <- M.fromList <$> mapM renamer boundNames
+    renames    <- M.fromList <$> mapM (\n -> (n, ) <$> freshVarName) boundNames
     return (boundNames, renames)
 
 getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)

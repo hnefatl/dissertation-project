@@ -45,9 +45,6 @@ instance Default RenamerState where
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }
 
-renameModule :: HsModule -> ExceptT Text NameGenerator HsModule
-renameModule = evalRenamer . rename
-
 newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState NameGenerator) a)
     deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadNameGenerator)
 
@@ -123,12 +120,16 @@ renameTypeVariable :: HsName -> Renamer HsName
 renameTypeVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 renameTypeVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 
-instance Renameable HsModule where
-    rename (HsModule a b c d e) = do
-        -- TODO(kc506): Remove when we get rid of hardcoded variables
-        let fs = M.fromSet (\(VariableName n) -> [UniqueVariableName n]) (M.keysSet builtinFunctions)
-        modify (\s -> s { variableBindings = M.union fs (variableBindings s) })
-        HsModule a b c d <$> rename e
+-- Renaming a module is a special case: we want to capture the renamings we used on the top-level variables for later
+-- (used during CodeGen).
+renameModule :: HsModule -> Renamer (HsModule, M.Map VariableName VariableName)
+renameModule (HsModule a b c d decls) = do
+    -- TODO(kc506): Remove when we get rid of hardcoded variables
+    bindVariableForScope (M.keysSet builtinFunctions) $ do
+        (decls', reverseMappings) <- renameDeclGroupWith decls (gets variableReverseMapping)
+        let topLevelRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMappings
+        return (HsModule a b c d decls', topLevelRenames)
+
 instance Renameable HsQName where
     rename (Qual m n)  = Qual m <$> renameVariable n
     rename (UnQual n)  = UnQual <$> renameVariable n
@@ -144,7 +145,8 @@ instance Renameable HsQOp where
 -- where each binding needs to be aware of the others.
 instance Renameable [HsDecl] where
     rename ds = fst <$> renameDeclGroupWith ds (pure ())
--- |Rename a horizontally-grouped list of declarations together with an auxiliary action
+-- |Rename a horizontally-grouped list of declarations together with an auxiliary action that's in scope of the
+-- renamings
 renameDeclGroupWith :: [HsDecl] -> Renamer a -> Renamer ([HsDecl], a)
 renameDeclGroupWith decls action = do
     boundVars <- getBoundVariables decls

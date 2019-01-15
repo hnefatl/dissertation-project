@@ -50,7 +50,7 @@ runDeoverload action d ts ks ce = do
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
             Left err -> throwError $ unlines [err, showt s]
-            Right y -> return y
+            Right y  -> return y
     return (z, s)
 
 evalDeoverload :: Deoverload a -> M.Map TypePredicate VariableName -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
@@ -59,7 +59,7 @@ evalDeoverload action d ts ks ce = do
     (x, s) <- lift $ runStateT (runExceptT inner) def
     case x of
         Left err -> throwError $ unlines [err, showt s]
-        Right y -> return y
+        Right y  -> return y
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })

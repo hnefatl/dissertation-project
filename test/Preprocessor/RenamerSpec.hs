@@ -13,21 +13,19 @@ import Text.Pretty.Simple      (pString)
 import TextShow                (TextShow, showt)
 
 import AlphaEq                 (alphaEq)
-import ExtraDefs               (deline)
+import ExtraDefs               (deline, pretty, synPrint)
 import NameGenerator           (evalNameGenerator)
-import Preprocessor.Renamer    (rename, runRenamer)
-
-pretty :: TextShow a => a -> Text
-pretty = toStrict . pString . unpack . showt
+import Preprocessor.Renamer    (renameModule, runRenamer)
 
 makeTest :: Text -> Text -> TestTree
 makeTest input expected =
     testCase (unpack $ deline input) $ case (,) <$> parseModule (unpack input) <*> parseModule (unpack expected) of
         ParseOk (input', expected') ->
             case runExcept renamedInput of
-                Right actual -> assertBool (unpack $ pretty state) (alphaEq expected' actual)
+                Right (actual, _) ->
+                    assertBool (unpack $ unlines [showt actual, pretty state]) (alphaEq expected' actual)
                 Left err     -> assertFailure $ unpack $ unlines [err, pretty state]
-            where (renamedInput, state) = evalNameGenerator (runRenamer $ rename input') 0
+            where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
         ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
 
 test :: TestTree
@@ -38,7 +36,7 @@ test = testGroup "Renamer"
         "v0 = 5 ; v1 = v0"
     , makeTest
         "x = 1 + 2"
-        "v0 = 1 + 2"
+        "v0 = 1 `v1` 2"
     , makeTest
         "x = y ; y = x"
         "v0 = v1 ; v1 = v0"

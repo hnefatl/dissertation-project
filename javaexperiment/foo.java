@@ -1,8 +1,7 @@
 // https://ghc.haskell.org/trac/ghc/wiki/Commentary/Rts/Storage/HeapObjects
 
 
-// These classes are mock generated code.
-// Typeclass class: provides the publicly visible function that extracts the implementation function from the dictionary
+// These functions should just be in `foo`, no extra classes
 class _Num {
     public static Function _make2B() {
         return new Function(_Num::_2BImpl, 3, new HeapObject[0]);
@@ -34,12 +33,15 @@ class _NumInt extends BoxedData {
     }
 }
 public class foo {
+    public static _NumInt dNumInt; 
+
     public static void main(String[] args) {
+        dNumInt = _NumInt._makeNumInt();
+
         // Pretend let-bound variables
         //HeapObject x = new Thunk(_Maybe._makeNothing());
         HeapObject x = new Thunk(_Maybe._makeJust(new Thunk(_Int._makeInt(5))));
         HeapObject y = new Thunk(_Int._makeInt(6));
-        HeapObject dNumInt = new Thunk(_NumInt._makeNumInt());
 
         // Invoke function
         Function f = foo._makeExampleFunction(x, dNumInt);
