@@ -175,3 +175,11 @@ None of those thunks should be necessary
 
 Split CodeGen state into Reader and State (Reader should persist after a generator's been run, for use in compiling
 different classes).
+
+Make Fun1, Fun2 etc classes, for functions of different numbers of arguments. Cuts out all the `_makeF` functions which
+are a massive waste of space.
+
+Sort hs-java stack tags: per-function datatypes in GState? Means we can keep track of how many local variables we've
+used.
+
+hs-java constant pool deduplication?

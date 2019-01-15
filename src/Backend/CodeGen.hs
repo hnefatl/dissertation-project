@@ -15,12 +15,15 @@ import qualified Data.Map.Strict             as M
 import           Data.Maybe                  (fromJust)
 import qualified Data.Sequence               as Seq
 import qualified Data.Set                    as S
+import qualified Data.Text                   as T
 import           Data.Text                   (pack, unpack)
 import           Data.Text.Lazy              (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding     (encodeUtf8)
 import           Data.Word                   (Word16)
 import           System.FilePath             ((</>))
 import           TextShow                    (TextShow, showb, showt)
+import           Numeric                     (showHex)
+import           Data.Char                   (isAscii, ord)
 
 import           Java.ClassPath
 import qualified Java.IO
@@ -60,6 +63,11 @@ instance TextShow NamedClass where
 -- |Representation of a datatype: the type name eg. Maybe, and the list of contstructor names eg. Nothing, Just
 data Datatype = Datatype TypeVariableName [VariableName]
     deriving (Eq, Ord, Show)
+
+-- TODO(kc506): Delete, this shouldn't be necessary once we've got rid of the builtin classes
+-- |Map valid haskell identifiers like "+" to valid JVM identifiers like ""
+jvmSanitise :: VariableName -> VariableName
+jvmSanitise (VariableName n) = VariableName $ pack $ concatMap (\c -> if isAscii c then [c] else showHex (ord c) "") $ unpack n
 
 type LocalVar = Word16
 
@@ -101,12 +109,13 @@ convert cname primitiveClassDir bs topLevelRenamings = do
     writeLog "- CodeGen -"
     writeLog "-----------"
     withExceptT (\e -> unlines [e, showt bs]) action
-    where initialState = ConverterState
+    where bindings = jvmSanitises bs
+          initialState = ConverterState
             { localVarCounter = 0
             , datatypes = M.fromList
                 [ ("Bool", Datatype "Bool" ["False", "True"])
                 , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ]
-            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keysSet builtinFunctions:map getBindingVariables bs
+            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keysSet builtinFunctions:map getBindingVariables bindings
             , topLevelRenames = topLevelRenamings
             , localSymbols = M.empty
             , initialisers = []
@@ -119,7 +128,7 @@ convert cname primitiveClassDir bs topLevelRenamings = do
           inner = do
             loadPrimitiveClasses primitiveClassDir
             compileDictionaries
-            mapM_ processBinding bs
+            mapM_ processBinding bindings
             addMainMethod
 
 throwTextError :: Text -> Converter a
@@ -205,12 +214,10 @@ addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
         -- Perform any initialisation actions
-        nop
         sequence_ =<< gets initialisers
-        nop
         getStaticField Java.Lang.system Java.IO.out
         pushGlobalSymbol "_main" heapObjectClass
-        invokeVirtual heapObject enter
+        invokeVirtual heapObject force
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
@@ -302,6 +309,8 @@ addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
 enter = NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
+force :: NameType Method
+force = NameType "force" $ MethodSignature [] (Returns heapObjectClass)
 functionInit :: NameType Method
 functionInit = NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf heapObjectClass] ReturnsVoid
 thunkInit :: NameType Method
@@ -327,13 +336,13 @@ makePublicStaticField name fieldType init = do
 
 -- |Compiling a global closure results in a static class field with the given name set to either a `Thunk` or a `Function`
 compileGlobalClosure :: VariableName -> Rhs -> Converter (ClassFile.NameType Field)
-compileGlobalClosure v (RhsClosure [] body) =
-    -- As this symbol is global, we store it in a static class field
-    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
-        -- We're compiling a non-function, so we can just make a thunk
-        compileThunk body
-        cname <- gets classname
-        putStaticField cname field
+--compileGlobalClosure v (RhsClosure [] body) =
+--    -- As this symbol is global, we store it in a static class field
+--    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
+--        -- We're compiling a non-function, so we can just make a thunk
+--        compileThunk body
+--        cname <- gets classname
+--        putStaticField cname field
 compileGlobalClosure v (RhsClosure args body) = do
     -- We're compiling a global function, so it shouldn't have any non top-level free variables
     fvs <- freeVariables v args body
@@ -347,10 +356,10 @@ compileGlobalClosure v (RhsClosure args body) = do
         putStaticField cname field
 -- |Compiling a local closure results in local variable bindings to either a `Thunk` or a `Function`.
 compileLocalClosure :: VariableName -> Rhs -> Converter LocalVar
-compileLocalClosure v (RhsClosure [] body) = do
-    -- Same as the global closure, but storing in a local variable rather than a static field
-    compileThunk body
-    storeLocal v
+--compileLocalClosure v (RhsClosure [] body) = do
+--    -- Same as the global closure, but storing in a local variable rather than a static field
+--    compileThunk body
+--    storeLocal v
 compileLocalClosure v (RhsClosure args body) = do
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body

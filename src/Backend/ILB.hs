@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE TupleSections              #-}
@@ -13,6 +14,9 @@ import           Control.Monad.Extra         (ifM)
 import           Control.Monad.Reader        (Reader, asks, runReader)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
+import           Numeric                     (showHex)
+import           Data.Char                   (ord)
+import Data.Text (pack, unpack)
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
@@ -116,3 +120,34 @@ instance HasFreeVariables Exp where
     getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)
 instance HasFreeVariables Rhs where
     getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
+
+-- Things that contain `VariableName`s that could contain invalid-JVM identifier characters like "<" can provide an
+-- instance to rename them into valid identifiers like "3c".
+class JVMSanitisable a where
+    jvmSanitise :: a -> a
+jvmSanitises :: JVMSanitisable a => [a] -> [a]
+jvmSanitises = map jvmSanitise
+instance JVMSanitisable String where
+    jvmSanitise = concatMap (\c -> if S.member c invalidChars then showHex (ord c) "" else [c])
+        where invalidChars = S.fromList ".;[/<>:"
+instance JVMSanitisable Text where
+    jvmSanitise = pack . jvmSanitise . unpack
+instance JVMSanitisable VariableName where
+    jvmSanitise (VariableName n) = VariableName (jvmSanitise n)
+instance JVMSanitisable Arg where
+    jvmSanitise l@ArgLit{} = l
+    jvmSanitise (ArgVar v) = ArgVar (jvmSanitise v)
+instance JVMSanitisable Exp where
+    jvmSanitise l@ExpLit{}       = l
+    jvmSanitise (ExpVar v)       = ExpVar (jvmSanitise v)
+    jvmSanitise (ExpApp v as)    = ExpApp (jvmSanitise v) (jvmSanitises as)
+    jvmSanitise (ExpConApp c as) = ExpConApp c (jvmSanitises as)
+    jvmSanitise (ExpCase s bs as) = ExpCase (jvmSanitise s) (jvmSanitises bs) (jvmSanitises as)
+    jvmSanitise (ExpLet v r e) = ExpLet (jvmSanitise v) (jvmSanitise r) (jvmSanitise e)
+instance JVMSanitisable Rhs where
+    jvmSanitise (RhsClosure vs e) = RhsClosure (jvmSanitises vs) (jvmSanitise e)
+instance JVMSanitisable a => JVMSanitisable (Alt a) where
+    jvmSanitise (Alt c vs e) = Alt c (jvmSanitises vs) (jvmSanitise e)
+instance JVMSanitisable a => JVMSanitisable (Binding a) where
+    jvmSanitise (NonRec v e) = NonRec (jvmSanitise v) (jvmSanitise e)
+    jvmSanitise Rec{} = error "Meh"
