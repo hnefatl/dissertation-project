@@ -71,8 +71,10 @@ data ConverterState = ConverterState
       localVarCounter :: LocalVar
     , -- Map from datatype constructor name to branch number, eg. {False:0, True:1} or {Nothing:0, Just:1}
       datatypes       :: M.Map TypeVariableName Datatype
-    , -- Top-level variable names. Eg `x = 1 ; y = let z = 2 in z` has top-level variable names x and y. This is used when working out which free variables we need to pass to functions, and which it can get for itself.
-      topLevelSymbols :: S.Set VariableName
+    , -- Top-level variable names. Eg `x = 1 ; y = let z = 2 in z` has top-level variable names x and y. This is used
+      -- when working out which free variables we need to pass to functions, and which it can get for itself.
+      -- The values associated with each symbol is the type of the equivalent field in the class (usually HeapObject).
+      topLevelSymbols :: M.Map VariableName FieldType
     , -- A reverse mapping from the renamed top-level variables to what they were originally called.
       topLevelRenames :: M.Map VariableName VariableName
     , -- Local variable names, and an action that can be used to push them onto the stack
@@ -104,7 +106,7 @@ convert cname primitiveClassDir bs topLevelRenamings = do
             , datatypes = M.fromList
                 [ ("Bool", Datatype "Bool" ["False", "True"])
                 , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ]
-            , topLevelSymbols = S.unions $ M.keysSet builtinFunctions:map getBindingVariables bs
+            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keysSet builtinFunctions:map getBindingVariables bs
             , topLevelRenames = topLevelRenamings
             , localSymbols = M.empty
             , initialisers = []
@@ -115,10 +117,10 @@ convert cname primitiveClassDir bs topLevelRenamings = do
           processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
           processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
           inner = do
-            compileDictionaries
             loadPrimitiveClasses primitiveClassDir
-            addMainMethod
+            compileDictionaries
             mapM_ processBinding bs
+            addMainMethod
 
 throwTextError :: Text -> Converter a
 throwTextError = liftErrorText . throwError
@@ -152,17 +154,17 @@ pushSymbol :: VariableName -> Converter ()
 pushSymbol v = do
     globals <- gets topLevelSymbols
     locals <- gets localSymbols
-    case (S.member v globals, M.member v locals) of
-        (False, False) -> throwTextError $ "Variable " <> showt v <> " not found in locals or globals"
-        (True, True)   -> throwTextError $ "Variable " <> showt v <> " found in both locals and globals"
-        (True, False)  -> pushGlobalSymbol v
-        (False, True)  -> pushLocalSymbol v
-pushGlobalSymbol :: VariableName -> Converter ()
-pushGlobalSymbol v = do
+    case (M.lookup v globals, M.member v locals) of
+        (Nothing, False) -> throwTextError $ "Variable " <> showt v <> " not found in locals or globals"
+        (Just _, True)   -> throwTextError $ "Variable " <> showt v <> " found in both locals and globals"
+        (Just t, False)  -> pushGlobalSymbol v t
+        (Nothing, True)  -> pushLocalSymbol v
+pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
+pushGlobalSymbol v t = do
     writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
     renames <- gets topLevelRenames
-    getStaticField cname $ publicStaticField $ convertName v
+    getStaticField cname $ NameType { ntName = toLazyBytestring $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
     Just pusher -> do
@@ -183,7 +185,7 @@ inScope action = do
 freeVariables :: ContainedNames.HasFreeVariables a => VariableName -> [VariableName] -> a -> Converter (S.Set VariableName)
 freeVariables name args x = do
     fvs <- liftErrorText $ ContainedNames.getFreeVariables x
-    tls <- gets topLevelSymbols
+    tls <- gets (M.keysSet . topLevelSymbols)
     -- TODO(kc506): remove these when we remove hardcoded stuff
     let bfs = M.keysSet builtinFunctions
     return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls, bfs])
@@ -203,9 +205,11 @@ addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
         -- Perform any initialisation actions
+        nop
         sequence_ =<< gets initialisers
+        nop
         getStaticField Java.Lang.system Java.IO.out
-        pushSymbol "_main"
+        pushGlobalSymbol "_main" heapObjectClass
         invokeVirtual heapObject enter
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
@@ -278,20 +282,22 @@ addBootstrapPoolItems (Converter x) s = do
     return (bmIndex, mfIndex, arg1, arg2s, arg3)
 
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData :: IsString s => s
+heapObject, function, thunk, bifunction, unboxedData, boxedData, int :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
 bifunction = "java/util/function/BiFunction"
 unboxedData = "Data"
 boxedData = "BoxedData"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass  :: FieldType
+int = "_Int"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass :: FieldType
 heapObjectClass = ObjectType heapObject
 functionClass = ObjectType function
 thunkClass = ObjectType thunk
 bifunctionClass = ObjectType bifunction
 unboxedDataClass = ObjectType unboxedData
 boxedDataClass = ObjectType boxedData
+intClass = ObjectType int
 addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
@@ -306,6 +312,8 @@ clone :: NameType Method
 clone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
 toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
+makeInt :: NameType Method
+makeInt = NameType "_makeInt" $ MethodSignature [IntType] (Returns intClass)
 
 -- |Create a new public static field in this class with the given name and type.
 -- The given action will be run at the start of `main`, and should be used to initialise the field
@@ -313,14 +321,9 @@ makePublicStaticField :: Text -> FieldType -> (ClassFile.NameType Field -> Conve
 makePublicStaticField name fieldType init = do
     field <- newField [ ACC_PUBLIC, ACC_STATIC ] (toLazyBytestring name) fieldType
     modify $ \s -> s
-        { initialisers = init field:initialisers s
-        , topLevelSymbols = S.insert (VariableName name) (topLevelSymbols s) }
+        { initialisers = initialisers s <> [init field]
+        , topLevelSymbols = M.insert (VariableName name) fieldType (topLevelSymbols s) }
     return field
-
-publicStaticField :: Text -> ClassFile.NameType Field
-publicStaticField name = NameType
-    { ntName = toLazyBytestring name
-    , ntSignature = thunkClass }
 
 -- |Compiling a global closure results in a static class field with the given name set to either a `Thunk` or a `Function`
 compileGlobalClosure :: VariableName -> Rhs -> Converter (ClassFile.NameType Field)
@@ -520,7 +523,9 @@ pushArg (ArgLit l) = pushLit l
 pushArg (ArgVar v) = pushSymbol v
 
 pushLit :: Literal -> Converter ()
-pushLit (LiteralInt i)    = pushInt (fromIntegral i)
+pushLit (LiteralInt i)    = do
+    pushInt (fromIntegral i)
+    invokeStatic int makeInt
 pushLit (LiteralChar _)   = throwTextError "Need support for characters"
 pushLit (LiteralString _) = throwTextError "Need support for strings"
 pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"

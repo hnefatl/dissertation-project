@@ -11,4 +11,9 @@ public abstract class HeapObject implements Cloneable {
         }
         return current;
     }
+
+    @Override
+    public Object clone() throws CloneNotSupportedException {
+        return super.clone();
+    }
 }

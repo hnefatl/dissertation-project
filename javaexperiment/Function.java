@@ -36,9 +36,12 @@ public class Function extends HeapObject {
     }
 
     @Override
-    public Object clone() {
+    public Object clone() throws CloneNotSupportedException {
         // Return a Function with all the same references
-        Function f = new Function(inner, arity, freeVariables);
+        Function f = (Function)super.clone();
+        f.inner = inner;
+        f.arity = arity;
+        f.freeVariables = freeVariables;
         f.arguments = arguments;
         return f;
     }
