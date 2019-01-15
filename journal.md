@@ -144,6 +144,7 @@ peephole.
 
 For the record: spent ages rewriting bits of hs-java and tweaking stuff to try to get invokeDynamic to work correctly.
 Need to generate bootstrap methods and stuff...
+Also added `checkcast` instruction, `putstaticfield`, `invokedynamic`.
 
 Add "before+after" stack comments to the definitions in CodeGen.
 
@@ -166,3 +167,11 @@ Check we can compile eg:
         Just 1
         Nothing
 where we use the same data constructor multiple times in the same case.
+
+
+ILB output looks sketchy for argument thunks:
+`f = \[d,y] -> let v0 = \[] -> y in let v1 = \[] -> x in let v2 = \[] -> d in + v0 v1 v2`
+None of those thunks should be necessary
+
+Split CodeGen state into Reader and State (Reader should persist after a generator's been run, for use in compiling
+different classes).

@@ -26,7 +26,7 @@ data Arg = ArgLit Literal
          | ArgVar VariableName
     deriving (Eq, Ord)
 data Exp = ExpLit Literal
-         -- | ExpVar VariableName -- There's no variable expression: instead, represent as an application with 0 args
+         | ExpVar VariableName
          | ExpApp VariableName [Arg] -- Might need to add a type so we know what type of register to assign?
          | ExpConApp VariableName [Arg] -- Application of a constructor: require *all* the arguments to be present.
          | ExpCase Exp [VariableName] [Alt Exp] -- Scrutinee, variables the scrutinee's assigned to, alts
@@ -40,6 +40,7 @@ instance TextShow Arg where
     showb (ArgVar v) = showb v
 instance TextShow Exp where
     showb (ExpLit l)       = showb l
+    showb (ExpVar v)       = showb v
     showb (ExpApp v as)    = intercalate " " $ showb v:map showb as
     showb (ExpConApp c as) = intercalate " " $ showb c:map showb as
     showb (ExpCase s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> intercalate " ; " (map showb as) <> " }"
@@ -84,8 +85,8 @@ anfComplexToIlbApp (ANF.TrivApp a) = case a of
     ANF.Var n _ -> ifM (isConstructor n) (return $ ExpConApp n []) (return $ ExpApp n [])
     e           -> throwError $ "Application to a " <> showt e
 anfComplexToIlbApp (ANF.App a e) = (anfTrivialToArg e,) <$> anfComplexToIlbApp a >>= \case
-    (Just arg, ExpConApp n args) -> return $ ExpConApp n (arg:args)
-    (Just arg, ExpApp n args) -> return $ ExpApp n (arg:args)
+    (Just arg, ExpConApp n args) -> return $ ExpConApp n (args ++ [arg])
+    (Just arg, ExpApp n args) -> return $ ExpApp n (args ++ [arg])
     (Nothing, app) -> return app
     (_, app) -> throwError $ "Got non-application from " <> showt a <> ": " <> showt app
 
@@ -95,7 +96,7 @@ anfTrivialToArg (ANF.Lit l _) = Just $ ArgLit l
 anfTrivialToArg ANF.Type{}    = Nothing
 
 anfTrivialToExp :: ANF.AnfTrivial -> Maybe Exp
-anfTrivialToExp (ANF.Var v _) = Just $ ExpApp v []
+anfTrivialToExp (ANF.Var v _) = Just $ ExpVar v
 anfTrivialToExp (ANF.Lit l _) = Just $ ExpLit l
 anfTrivialToExp ANF.Type{}    = Nothing
 
@@ -108,10 +109,10 @@ instance HasFreeVariables Arg where
     getFreeVariables (ArgVar v) = return $ S.singleton v
 instance HasFreeVariables Exp where
     getFreeVariables ExpLit{} = return S.empty
+    getFreeVariables (ExpVar v) = return $ S.singleton v
     getFreeVariables (ExpApp v as) = S.insert v <$> getFreeVariables as
     getFreeVariables (ExpConApp _ as) = getFreeVariables as
     getFreeVariables (ExpCase s vs cs) = S.difference <$> (S.union <$> getFreeVariables s <*> getFreeVariables cs) <*> pure (S.fromList vs)
     getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)
 instance HasFreeVariables Rhs where
     getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
---instance HasFreeVariables a => HasFreeVariables (Binding a) where

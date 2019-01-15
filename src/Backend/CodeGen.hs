@@ -115,10 +115,10 @@ convert cname primitiveClassDir bs topLevelRenamings = do
           processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
           processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
           inner = do
-            loadPrimitiveClasses primitiveClassDir
             compileDictionaries
-            mapM_ processBinding bs
+            loadPrimitiveClasses primitiveClassDir
             addMainMethod
+            mapM_ processBinding bs
 
 throwTextError :: Text -> Converter a
 throwTextError = liftErrorText . throwError
@@ -140,10 +140,14 @@ getFreshLocalVar = do
 
 -- |Record that the given variable is in the given local variable index
 addLocalVariable :: VariableName -> LocalVar -> Converter ()
-addLocalVariable v i = addComplexLocalVariable v (void $ storeSpecificLocal v i)
+addLocalVariable v i = do
+    writeLog $ "Local variable " <> showt v <> " stored with index " <> showt i
+    addComplexLocalVariable v (void $ loadLocal i)
 -- |Same as addLocalVariable but with a user-defined action to push the variable onto the stack
 addComplexLocalVariable :: VariableName -> Converter () -> Converter ()
-addComplexLocalVariable v action = modify (\s -> s { localSymbols = M.insert v action (localSymbols s) } )
+addComplexLocalVariable v action = do
+    writeLog $ "Local variable " <> showt v <> " stored with custom pusher"
+    modify (\s -> s { localSymbols = M.insert v action (localSymbols s) } )
 pushSymbol :: VariableName -> Converter ()
 pushSymbol v = do
     globals <- gets topLevelSymbols
@@ -155,12 +159,15 @@ pushSymbol v = do
         (False, True)  -> pushLocalSymbol v
 pushGlobalSymbol :: VariableName -> Converter ()
 pushGlobalSymbol v = do
+    writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
     renames <- gets topLevelRenames
     getStaticField cname $ publicStaticField $ convertName v
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
-    Just pusher -> pusher
+    Just pusher -> do
+        writeLog $ "Pushing " <> showt v <> " from locals"
+        pusher
     Nothing -> throwTextError $ "No action for local symbol " <> showt v
 
 -- |Handles resetting some state after running the action
@@ -199,6 +206,7 @@ addMainMethod = do
         sequence_ =<< gets initialisers
         getStaticField Java.Lang.system Java.IO.out
         pushSymbol "_main"
+        invokeVirtual heapObject enter
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
@@ -294,8 +302,8 @@ thunkInit :: NameType Method
 thunkInit = NameType "<init>" $ MethodSignature [heapObjectClass] ReturnsVoid
 bifunctionApply :: NameType Method
 bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
-functionClone :: NameType Method
-functionClone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
+clone :: NameType Method
+clone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
 toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 
@@ -419,10 +427,12 @@ compileFunction name args body = do
         i0 ARETURN
 
 compileExp :: Exp -> Converter ()
+compileExp (ExpVar v) = pushSymbol v
 compileExp (ExpLit l) = pushLit l
 compileExp (ExpApp fun args) = do
     pushSymbol fun -- Grab the function
-    invokeVirtual function functionClone -- Copy it so we don't mutate the reference version
+    invokeVirtual heapObject clone -- Copy it so we don't mutate the reference version
+    checkCast function -- Cast the returned Object to a Function
     -- Add each argument to the function object
     forM_ args $ \arg -> do
         dup
@@ -436,9 +446,12 @@ compileExp (ExpCase head vs alts) = do
     forM_ vs $ \var -> do
         dup -- Copy the head expression
         storeLocal var -- Store it locally
+    -- Compile the actual case expression
     compileCase alts
 compileExp (ExpLet var rhs body) = do
+    -- Compile the bound expression, store it in a local
     void $ compileLocalClosure var rhs
+    -- Compile the inner expression
     compileExp body
 
 compileCase :: [Alt Exp] -> Converter ()
@@ -534,7 +547,12 @@ storeLocal v = do
 
 storeSpecificLocal :: VariableName -> LocalVar -> Converter ()
 storeSpecificLocal v i = do
-    if i < 256 then astore_ $ fromIntegral i else wide ASTORE $ CInteger (fromIntegral i)
+    case i of
+        0 -> astore_ I0
+        1 -> astore_ I1
+        2 -> astore_ I2
+        3 -> astore_ I3
+        _ -> if i < 256 then astore $ fromIntegral i else astorew $ fromIntegral i
     addLocalVariable v i
 
 loadLocal :: Word16 -> Converter ()
@@ -542,4 +560,4 @@ loadLocal 0 = aload_ I0
 loadLocal 1 = aload_ I1
 loadLocal 2 = aload_ I2
 loadLocal 3 = aload_ I3
-loadLocal i = aload $ CInteger $ fromIntegral i
+loadLocal i = if i < 256 then aload $ fromIntegral i else aloadw $ fromIntegral i
