@@ -45,4 +45,13 @@ public class Function extends HeapObject {
         f.arguments = arguments;
         return f;
     }
+
+    @Override
+    public String toString() {
+        String res = "Function:";
+        for (HeapObject a : arguments) {
+            res += " " + a.toString();
+        }
+        return res;
+    }
 }

@@ -14,4 +14,9 @@ public class Thunk extends HeapObject {
         contained = contained.enter();
         return contained;
     }
+
+    @Override
+    public String toString() {
+        return "Thunk: { " + contained.toString() + "}";
+    }
 }
