@@ -316,8 +316,8 @@ test = let
         let t = makeFun [typeInt, ta] ta
         in testBindings "class Foo b where { bar :: Int -> b -> b }"
             [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) t) ]
-    --,
-    --    testBindings "class Foo a where { bar :: a -> a } ; x = bar 5"
-    --        [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) $ makeFun [ta] ta)
-    --        , ("x", Quantified (S.singleton b) $ Qualified (S.fromList [IsInstance "Foo" tb, IsInstance "Num" tb]) tb) ]
+    ,
+        testBindings "class Foo a where { bar :: a -> a } ; x = bar 5"
+            [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) $ makeFun [ta] ta)
+            , ("x", Quantified (S.singleton b) $ Qualified (S.fromList [IsInstance "Foo" tb, IsInstance "Num" tb]) tb) ]
     ]

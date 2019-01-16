@@ -453,14 +453,26 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
                 forM_ varNames (\v -> insertQuantifiedType v quantType)
                 writeLog $ "Processed " <> showt names <> ", got " <> showt quantType
             _ -> throwError "Non-type signature declaration found in typeclass"
+        -- Update our running class environment
+        -- TODO(kc506): When we support contexts, update this to include the superclasses
+        addClasses $ M.singleton className (Class S.empty S.empty)
         return d
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
 inferDecl _ = throwError "Declaration not yet supported"
 
+-- |Returns True if the given declaration can contain recursive references with other declarations
+needsRecursiveBinding :: MonadError Text m => Syntax.HsDecl -> m Bool
+needsRecursiveBinding HsPatBind{} = return True
+needsRecursiveBinding HsFunBind{} = return True
+needsRecursiveBinding HsClassDecl{} = return False
+needsRecursiveBinding HsTypeSig{} = return False
+needsRecursiveBinding d = throwError $ "Unknown decl " <> showt d
+
 inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDecls ds = do
-    names <- getBoundVariables ds
+    recursiveDecls <- filterM needsRecursiveBinding ds
+    names <- getBoundVariables recursiveDecls
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ "Adding " <> showt typeVarMapping <> " to environment for declaration group"
     addVariableTypes typeVarMapping
@@ -523,6 +535,7 @@ updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDecls
 
 updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
+updateDeclTypeTags d@HsClassDecl{}          = return d
 updateDeclTypeTags _                        = throwError "Unsupported declaration when updating type tags"
 updateDeclsTypeTags :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 updateDeclsTypeTags = mapM updateDeclTypeTags
@@ -548,6 +561,7 @@ checkModuleExpTypes :: MonadError Text m => Syntax.HsModule -> m ()
 checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
 checkDeclExpTypes :: MonadError Text m => Syntax.HsDecl -> m ()
 checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
+checkDeclExpTypes HsClassDecl{}          = return ()
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
 checkDeclsExpTypes :: MonadError Text m => [Syntax.HsDecl] -> m ()
 checkDeclsExpTypes = mapM_ checkDeclExpTypes
