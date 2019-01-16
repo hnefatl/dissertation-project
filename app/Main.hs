@@ -62,31 +62,31 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     (Right (), logs) -> printLogsIfVerbose flags logs
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
-            --m <- embedExceptIOIntoResult $ parse f
-            --(renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
-            --(taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
-            --deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
-            --let deoverloadedTypes = map deoverloadQuantType types
-            --ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
-            let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
-                [ta, tb] = [ TypeVar y | y <- [a, b] ]
-                numa = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) ta KindStar
-                numb = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) tb KindStar
-                numInt = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) typeInt KindStar
-                plusType = makeFun [tb, tb] tb
-                fType = makeFun [numInt, typeInt, typeInt] typeInt
-                -- x = 1 :: Num a -> a
-                -- f = \d -> \y -> (+) d x y :: Num b -> b -> b
-                -- z = f dNumInt 2 :: Int
-                -- _main = z
-                ila =
-                    [ NonRec "x" $ Lit (LiteralInt 1) (makeFun [numa] ta)
-                    , NonRec "f" $ Lam "d" numb $
-                        Lam "y" tb $ App (App (App (Var "+" plusType) (Var "d" numb) ) (Var "x" tb)) (Var "y" tb)
-                    , NonRec "z" $ App (App (Var "f" fType) (Var "dNumInt" numInt)) (Lit (LiteralInt 2) typeInt)
-                    , NonRec "_main" $ Var "z" typeInt ]
-                -- This needs to be the composition of the renames from the ILA and renamer stage
-                topLevelRenames = M.fromList [ ("+", "v14") ]
+            m <- embedExceptIOIntoResult $ parse f
+            (renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
+            (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
+            deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
+            let deoverloadedTypes = map deoverloadQuantType types
+            ila <- embedExceptLoggerNGIntoResult $ ILA.evalConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            --let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
+            --    [ta, tb] = [ TypeVar y | y <- [a, b] ]
+            --    numa = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) ta KindStar
+            --    numb = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) tb KindStar
+            --    numInt = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) typeInt KindStar
+            --    plusType = makeFun [tb, tb] tb
+            --    fType = makeFun [numInt, typeInt, typeInt] typeInt
+            --    -- x = 1 :: Num a -> a
+            --    -- f = \d -> \y -> (+) d x y :: Num b -> b -> b
+            --    -- z = f dNumInt 2 :: Int
+            --    -- _main = z
+            --    ila =
+            --        [ NonRec "x" $ Lit (LiteralInt 1) (makeFun [numa] ta)
+            --        , NonRec "f" $ Lam "d" numb $
+            --            Lam "y" tb $ App (App (App (Var "+" plusType) (Var "d" numb) ) (Var "x" tb)) (Var "y" tb)
+            --        , NonRec "z" $ App (App (Var "f" fType) (Var "dNumInt" numInt)) (Lit (LiteralInt 2) typeInt)
+            --        , NonRec "_main" $ Var "z" typeInt ]
+            --    -- This needs to be the composition of the renames from the ILA and renamer stage
+            --    topLevelRenames = M.fromList [ ("+", "v14") ]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             putStrLn $ showt ilb
