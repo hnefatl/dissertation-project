@@ -130,6 +130,8 @@ deoverloadDecls = mapM deoverloadDecl
 deoverloadDecl :: HsDecl -> Deoverload HsDecl
 deoverloadDecl (HsPatBind loc pat rhs ds) =
     HsPatBind loc pat <$> deoverloadRhs rhs <*> pure ds
+deoverloadDecl (HsTypeSig loc names t) = return $ HsTypeSig loc names (HsQualType [] $ deoverloadType t)
+deoverloadDecl (HsClassDecl loc ctx name args ds) = HsClassDecl loc ctx name args <$> deoverloadDecls ds
 deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
