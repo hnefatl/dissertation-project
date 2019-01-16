@@ -21,6 +21,7 @@ import           TextShow.Instances          ()
 
 import           NameGenerator
 import           Names
+import           ExtraDefs                   (synPrint)
 import           Preprocessor.ContainedNames
 import           Typechecker.Hardcoded
 
@@ -156,7 +157,9 @@ renameDeclGroupWith decls action = do
 instance Renameable HsDecl where
     rename (HsPatBind loc pat rhs decls) = HsPatBind loc <$> rename pat <*> rename rhs <*> rename decls
     rename (HsFunBind matches)           = HsFunBind <$> renames matches
-    rename _                             = throwError "Declaration not supported"
+    rename (HsClassDecl loc ctx name args decls) =
+        HsClassDecl loc <$> renames ctx <*> pure name <*> mapM renameVariable args <*> rename decls
+    rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
 
 instance Renameable HsMatch where
     rename (HsMatch loc funName pats rhs decls) = do

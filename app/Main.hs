@@ -8,7 +8,6 @@ import System.Exit
 import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import TextShow (TextShow, showt)
 import Data.Text (unpack, pack)
-import Data.Binary (encode)
 import Data.Default (Default, def)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
@@ -25,7 +24,7 @@ import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType
 import qualified Backend.ILA as ILA (evalConverter, toIla)
 import qualified Backend.ILAANF as ILAANF (ilaToAnf)
 import qualified Backend.ILB as ILB (runConverter, anfToIlb)
-import qualified Backend.CodeGen as CodeGen (convert)
+import qualified Backend.CodeGen as CodeGen (convert, writeClass)
 
 import qualified Data.Set as S
 import Typechecker.Types
@@ -92,7 +91,8 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             putStrLn $ showt ilb
             compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames
-            lift $ lift $ lift $ B.writeFile "Output.class" (encode compiled)
+            let outputDir = "out"
+            lift $ lift $ lift $ CodeGen.writeClass outputDir compiled
 
 catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
 catchAdd x = withExceptT (\e -> unlines [e, showt x])

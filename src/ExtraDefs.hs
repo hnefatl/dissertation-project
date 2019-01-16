@@ -24,6 +24,8 @@ pretty :: TextShow a => a -> Text
 pretty = toStrict . pString . unpack . showt
 synPrint :: Pretty a => a -> Text
 synPrint = pack . prettyPrint
+synPrintList :: Pretty a => [a] -> Text
+synPrintList xs = "[" <> intercalate " " (map synPrint xs) <> "]"
 
 middleText :: (TextShow a, TextShow b) => Text -> a -> b -> Text
 middleText m l r = showt l <> m <> showt r

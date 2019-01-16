@@ -15,8 +15,8 @@ import           Control.Monad.Reader        (Reader, asks, runReader)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Numeric                     (showHex)
-import           Data.Char                   (ord)
-import Data.Text (pack, unpack)
+import           Data.Char                   (isAlphaNum, ord)
+import           Data.Text                   (pack, unpack)
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
@@ -121,15 +121,15 @@ instance HasFreeVariables Exp where
 instance HasFreeVariables Rhs where
     getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
 
--- Things that contain `VariableName`s that could contain invalid-JVM identifier characters like "<" can provide an
+-- Things that contain `VariableName`s that could contain invalid Java identifier characters like "<" can provide an
 -- instance to rename them into valid identifiers like "3c".
 class JVMSanitisable a where
     jvmSanitise :: a -> a
 jvmSanitises :: JVMSanitisable a => [a] -> [a]
 jvmSanitises = map jvmSanitise
 instance JVMSanitisable String where
-    jvmSanitise = concatMap (\c -> if S.member c invalidChars then showHex (ord c) "" else [c])
-        where invalidChars = S.fromList ".;[/<>:"
+    jvmSanitise = concatMap (\c -> if validChar c then [c] else showHex (ord c) "")
+        where validChar c = isAlphaNum c || c == '$' || c == '_'
 instance JVMSanitisable Text where
     jvmSanitise = pack . jvmSanitise . unpack
 instance JVMSanitisable VariableName where

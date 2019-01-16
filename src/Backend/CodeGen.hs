@@ -15,15 +15,13 @@ import qualified Data.Map.Strict             as M
 import           Data.Maybe                  (fromJust)
 import qualified Data.Sequence               as Seq
 import qualified Data.Set                    as S
-import qualified Data.Text                   as T
 import           Data.Text                   (pack, unpack)
 import           Data.Text.Lazy              (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding     (encodeUtf8)
 import           Data.Word                   (Word16)
-import           System.FilePath             ((</>))
+import           System.FilePath             ((<.>), (</>))
 import           TextShow                    (TextShow, showb, showt)
-import           Numeric                     (showHex)
-import           Data.Char                   (isAscii, ord)
+import           Data.Binary                 (encode)
 
 import           Java.ClassPath
 import qualified Java.IO
@@ -35,7 +33,7 @@ import           JVM.ClassFile               hiding (Class, Field, Method, toStr
 import qualified JVM.ClassFile               as ClassFile
 import           JVM.Converter
 
-import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..),
+import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..), Datatype(..),
                                               getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB                 hiding (Converter, ConverterState)
 import           ExtraDefs                   (zipOverM_)
@@ -56,18 +54,8 @@ data NamedClass = NamedClass Text OutputClass
 instance TextShow NamedClass where
     showb = fromString . show
 
---writeClass :: FilePath -> NamedClass -> IO ()
---writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encodeClass c)
-
--- TODO(kc506): Move somewhere more appropriate for when we generate this information
--- |Representation of a datatype: the type name eg. Maybe, and the list of contstructor names eg. Nothing, Just
-data Datatype = Datatype TypeVariableName [VariableName]
-    deriving (Eq, Ord, Show)
-
--- TODO(kc506): Delete, this shouldn't be necessary once we've got rid of the builtin classes
--- |Map valid haskell identifiers like "+" to valid JVM identifiers like ""
-jvmSanitise :: VariableName -> VariableName
-jvmSanitise (VariableName n) = VariableName $ pack $ concatMap (\c -> if isAscii c then [c] else showHex (ord c) "") $ unpack n
+writeClass :: FilePath -> NamedClass -> IO ()
+writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encode c)
 
 type LocalVar = Word16
 
@@ -103,7 +91,7 @@ newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
+convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) NamedClass
 convert cname primitiveClassDir bs topLevelRenamings = do
     writeLog "-----------"
     writeLog "- CodeGen -"
@@ -122,7 +110,9 @@ convert cname primitiveClassDir bs topLevelRenamings = do
             , dynamicMethods = Seq.empty
             , dictionaries = S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
             , classname = toLazyBytestring cname }
-          action = addBootstrapMethods inner initialState
+          action = do
+            compiled <- addBootstrapMethods inner initialState
+            return $ NamedClass cname compiled
           processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
           processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
           inner = do

@@ -10,6 +10,7 @@ import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
+import           Control.Monad.Extra         (whenJust)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -174,7 +175,8 @@ addTypePredicates = mapM_ addTypePredicate
 insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
 insertQuantifiedType name t = do
     bs <- gets bindings
-    when (M.member name bs) $ throwError $ "Overwriting binding " <> showt name <> " with " <> showt t
+    whenJust (M.lookup name bs) $
+        \t' -> throwError $ "Overwriting binding " <> showt name <> " :: " <> showt t' <> " with " <> showt t
     modify (\s -> s { bindings = M.insert name t bs })
 
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
@@ -426,12 +428,34 @@ inferRhs (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
 inferDecl :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 inferDecl (HsPatBind l pat rhs ds) = do
+    writeLog $ "Processing declaration for " <> synPrint pat
     patType <- nameToType =<< inferPattern pat
     (rhsExp, rhsVar) <- inferRhs rhs
     rhsType <- nameToType rhsVar
     unify patType rhsType
     return $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind _) = throwError "Functions not yet supported"
+inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
+    ([], [arg]) -> do
+        ks <- getKinds
+        let argName = convertName arg
+            className = convertName name
+        writeLog $ unwords ["Processing decl for", showt className, showt argName, "with members", synPrintList decls]
+        forM_ decls $ \case
+            HsTypeSig _ names t -> do
+                Qualified quals t' <- synToQualType ks t
+                let classPred = IsInstance className (TypeVar (TypeVariable argName KindStar))
+                    -- Update eg. `a -> a -> a` in class `Num a` to be `Num a => a -> a -> a`
+                    qualType = Qualified (S.insert classPred quals) t'
+                    freeTypeVars = S.map (\v -> TypeVariable v KindStar) $ getTypeVars qualType
+                    varNames = map convertName names
+                    quantType = Quantified freeTypeVars qualType
+                forM_ varNames (\v -> insertQuantifiedType v quantType)
+                writeLog $ "Processed " <> showt names <> ", got " <> showt quantType
+            _ -> throwError "Non-type signature declaration found in typeclass"
+        return d
+    ([], _) -> throwError "Multiparameter typeclasses not supported"
+    (_, _) -> throwError "Contexts not yet supported in typeclasses"
 inferDecl _ = throwError "Declaration not yet supported"
 
 inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
@@ -461,9 +485,12 @@ inferModule (HsModule a b c d decls) = do
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
     m <- HsModule a b c d <$> inferDeclGroup decls
+    writeLog "Inferred module types"
     ts <- getBoundVariableTypes
     m' <- updateModuleTypeTags m
+    writeLog "Updated explicit type tags"
     checkModuleExpTypes m'
+    writeLog "Checked explicit type tags"
     return (m', ts)
 
 -- TODO(kc506): Delete once we don't need builtins

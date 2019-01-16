@@ -13,6 +13,7 @@ import           Language.Haskell.Syntax
 import           TextShow                (TextShow, showt)
 
 import           Names
+import           ExtraDefs               (synPrint)
 
 
 disjointUnion :: (MonadError Text m, Ord a, TextShow a) => S.Set a -> S.Set a -> m (S.Set a)
@@ -43,7 +44,9 @@ instance HasBoundVariables HsDecl where
             funName = head names
             allNamesMatch = all (== funName) names
         if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
-    getBoundVariables _ = throwError "Declaration not supported"
+    getBoundVariables (HsTypeSig _ names _) = return $ S.fromList $ map convertName names
+    getBoundVariables (HsClassDecl _ _ _ _ decls) = S.unions <$> mapM getBoundVariables decls
+    getBoundVariables d = throwError $ unlines ["Declaration not supported:", synPrint d]
 instance HasBoundVariables HsPat where
     getBoundVariables (HsPVar v)            = return $ S.singleton (convertName v)
     getBoundVariables (HsPLit _)            = return S.empty
@@ -60,7 +63,9 @@ instance HasBoundVariables HsPat where
 
 instance HasFreeVariables HsDecl where
     getFreeVariables (HsPatBind _ _ rhs _) = getFreeVariables rhs
-    getFreeVariables (HsFunBind _)         = throwError "Variables in a HsMatch not supported"
+    getFreeVariables HsFunBind{}           = return S.empty
+    getFreeVariables HsClassDecl{}         = return S.empty
+    getFreeVariables HsTypeSig{}           = return S.empty
     getFreeVariables _                     = throwError "Not supported"
 instance HasFreeVariables HsRhs where
     getFreeVariables (HsUnGuardedRhs e) = getFreeVariables e
