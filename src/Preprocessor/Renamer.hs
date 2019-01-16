@@ -59,15 +59,16 @@ evalRenamer (Renamer inner) = do
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
 
-getUniqueScopedName :: (Ord n, TextShow n) => (RenamerState -> M.Map n [un]) -> n -> Renamer un
-getUniqueScopedName f name = gets (M.lookup name . f) >>= \case
+getUniqueScopedVariableName :: VariableName -> Renamer UniqueVariableName
+getUniqueScopedVariableName name = gets (M.lookup name . variableBindings) >>= \case
     Nothing -> throwError $ "Missing unique name for variable " <> showt name
     Just [] -> throwError $ "Variable out of scope " <> showt name
     Just (newname:_) -> return newname
-getUniqueScopedVariableName :: VariableName -> Renamer UniqueVariableName
-getUniqueScopedVariableName = getUniqueScopedName variableBindings
 getUniqueScopedTypeVariableName :: TypeVariableName -> Renamer UniqueTypeVariableName
-getUniqueScopedTypeVariableName = getUniqueScopedName typeVariableBindings
+getUniqueScopedTypeVariableName name = gets (M.lookup name . typeVariableBindings) >>= \case
+    Nothing -> throwError $ "Missing unique name for type variable " <> showt name
+    Just [] -> throwError $ "Type variable out of scope " <> showt name
+    Just (newname:_) -> return newname
 
 bindVariableForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindVariableForScope names action = do
@@ -157,8 +158,15 @@ renameDeclGroupWith decls action = do
 instance Renameable HsDecl where
     rename (HsPatBind loc pat rhs decls) = HsPatBind loc <$> rename pat <*> rename rhs <*> rename decls
     rename (HsFunBind matches)           = HsFunBind <$> renames matches
+    rename (HsTypeSig loc names t)       = HsTypeSig loc <$> mapM renameVariable names <*> rename t
     rename (HsClassDecl loc ctx name args decls) =
-        HsClassDecl loc <$> renames ctx <*> pure name <*> mapM renameVariable args <*> rename decls
+        -- Bind the argument variable at an outer scope
+        bindTypeVariableForScope (S.fromList $ map convertName args) $ do
+            decls' <- forM decls $ \case
+                HsTypeSig loc names t ->
+                    HsTypeSig loc <$> mapM renameVariable names <*> renameQualTypeWithExistingScope t
+                _ -> throwError "Non-HsTypeSig in typeclass"
+            HsClassDecl loc <$> renames ctx <*> pure name <*> mapM renameTypeVariable args <*> pure decls'
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
 
 instance Renameable HsMatch where
@@ -207,10 +215,16 @@ instance Renameable HsExp where
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename _ = throwError "Renaming expression not supported"
 
+renameQualTypeWithExistingScope :: HsQualType -> Renamer HsQualType
+renameQualTypeWithExistingScope qt@(HsQualType quals t) = do
+    existingBindings <- gets (M.keysSet . typeVariableBindings)
+    let contained = getFreeTypeVariables qt
+        newBindings = S.difference contained existingBindings
+    bindTypeVariableForScope newBindings $ HsQualType <$> renames quals <*> rename t
+
 instance Renameable HsQualType where
-    rename qt@(HsQualType quals t) = bindTypeVariableForScope contained action
+    rename qt = bindTypeVariableForScope contained (renameQualTypeWithExistingScope qt)
         where contained = getFreeTypeVariables qt
-              action = HsQualType <$> renames quals <*> rename t
 instance Renameable HsAsst where
     rename (name, ts) = (name,) <$> renames ts
 instance Renameable HsType where

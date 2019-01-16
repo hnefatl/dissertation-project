@@ -152,6 +152,12 @@ instance AlphaEq HsDecl where
         alphaEq' pat1 pat2
         alphaEq' rhs1 rhs2
         alphaEq' ds1 ds2
+    alphaEq' (HsTypeSig _ names1 t1) (HsTypeSig _ names2 t2) = alphaEq' names1 names2 >> alphaEq' t1 t2
+    alphaEq' (HsClassDecl _ ctx1 name1 args1 ds1) (HsClassDecl _ ctx2 name2 args2 ds2) = do
+        alphaEq' ctx1 ctx2
+        alphaEq' name1 name2
+        alphaEq' args1 args2
+        alphaEq' ds1 ds2
     alphaEq' d1 d2 = throwError $ unlines [ "Different declaration types:", showt d1, "vs", showt d2 ]
 instance AlphaEq HsPat where
     alphaEq' (HsPVar n1) (HsPVar n2) = alphaEq' (convertName n1 :: Text) (convertName n2)
