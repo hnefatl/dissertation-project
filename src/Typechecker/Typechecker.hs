@@ -135,7 +135,7 @@ addVariableTypes vs = do
 getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariable name = do
     x <- gets (M.lookup name . variableTypes) -- Variable's either provided by the variableTypes
-    y <- traverse instantiate =<< gets (M.lookup name . bindings) -- Or the bindings
+    y <- traverse instantiateToVar =<< gets (M.lookup name . bindings) -- Or the bindings
     maybe (throwError $ "Symbol " <> showt name <> " not in environment") return (x <|> y)
 getVariableTypeVariableOrAdd :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ \_ -> do
@@ -145,18 +145,24 @@ getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ 
 
 -- |Instantiate a quantified type into a simple type, replacing all universally quantified variables with new
 -- type variables and adding the new type constraints to the environment
-instantiate :: QuantifiedType -> TypeInferrer TypeVariableName
-instantiate qt@(Quantified _ ql@(Qualified quals t)) = do
+instantiateToVar :: QuantifiedType -> TypeInferrer TypeVariableName
+instantiateToVar qt = do
     v <- freshTypeVarName
+    writeLog $ "Instantiating " <> showt v <> " with " <> showt qt
+    Qualified quals t <- instantiate qt
+    addTypePredicates quals
+    vt <- nameToType v
+    unify vt t
+    return v
+
+instantiate :: (MonadError Text m, MonadNameGenerator m) => QuantifiedType -> m QualifiedType
+instantiate qt@(Quantified _ ql) = do
     -- Create a "default" mapping from each type variable in the type to itself
     let identityMap = M.fromList $ map (\x -> (x, TypeVar $ TypeVariable x KindStar)) $ S.toList $ getTypeVars ql
     -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
     sub <- Substitution <$> (M.union <$> getInstantiatingTypeMap qt <*> pure identityMap)
-    writeLog $ "Instantiating " <> showt v <> " with " <> showt qt <> " using " <> showt sub
-    addTypePredicates $ S.map (applySub sub) quals
-    vt <- nameToType v
-    unify vt (applySub sub t)
-    return v
+    return $ applySub sub ql
+
 
 addTypeConstraint :: TypeVariableName -> ClassName -> TypeInferrer ()
 addTypeConstraint varname classname = addTypeConstraints varname (S.singleton classname)
@@ -229,13 +235,21 @@ getQualifiedType name = do
     let qt = Qualified predicates t
     writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
+qualToQuant :: Bool -> QualifiedType -> TypeInferrer QuantifiedType
+qualToQuant freshen qt = do
+    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qt)
+    case freshen of
+        False -> return $ Quantified quantifiers qt
+        True -> do
+            qt' <- instantiate $ Quantified quantifiers qt
+            quantifiers' <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qt')
+            return $ Quantified quantifiers' qt'
 getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name = do
-    qualT <- getQualifiedType name
-    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qualT)
-    qt <- Quantified quantifiers <$> getQualifiedType name
-    writeLog $ showt name <> " has quantified type " <> showt qt
-    return qt
+    qual <- getQualifiedType name
+    quant <- qualToQuant False qual
+    writeLog $ showt name <> " has quantified type " <> showt quant
+    return quant
 getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
 getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
 
@@ -244,7 +258,7 @@ getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable n
 instantiateIfNeeded :: TypeVariableName -> TypeInferrer TypeVariableName
 instantiateIfNeeded name = gets (reverseLookup name . variableTypes) >>= \case
         Just varName -> gets (M.lookup varName . bindings) >>= \case
-            Just qt -> instantiate qt
+            Just qt -> instantiateToVar qt
             Nothing -> return name
         Nothing -> return name
 
@@ -368,7 +382,7 @@ inferPattern (HsPAsPat name pat) = do
     return v
 inferPattern (HsPParen pat) = inferPattern pat
 inferPattern (HsPApp con pats) = do
-    t <- instantiate =<< getVariableQuantifiedType (convertName con)
+    t <- instantiateToVar =<< getVariableQuantifiedType (convertName con)
     conType <- applyCurrentSubstitution =<< nameToType t
     -- Check the data constructor's been fully applied
     let (args, _) = unmakeCon conType
@@ -435,6 +449,13 @@ inferDecl (HsPatBind l pat rhs ds) = do
     unify patType rhsType
     return $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind _) = throwError "Functions not yet supported"
+inferDecl d@(HsTypeSig _ names t) = do
+    ks <- getKinds
+    t' <- synToQualType ks t
+    qt <- qualToQuant True t'
+    let varNames = map convertName names
+    forM_ varNames (\v -> insertQuantifiedType v qt)
+    return d
 inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], [arg]) -> do
         ks <- getKinds

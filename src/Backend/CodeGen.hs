@@ -34,7 +34,7 @@ import           JVM.ClassFile               hiding (Class, Field, Method, toStr
 import qualified JVM.ClassFile               as ClassFile
 import           JVM.Converter
 
-import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..), Datatype(..), Typeclass(..), getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
+import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..), Datatype(..), getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB                 hiding (Converter, ConverterState)
 import           ExtraDefs                   (zipOverM_)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
@@ -42,7 +42,7 @@ import           NameGenerator
 import           Names                       (TypeVariableName, VariableName(..), convertName)
 import qualified Preprocessor.ContainedNames as ContainedNames
 import qualified Typechecker.Types           as Types
-import           Typechecker.Hardcoded       (builtinFunctions, builtinDictionaries)
+import           Typechecker.Hardcoded       (builtinFunctions)
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File
@@ -90,8 +90,8 @@ newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> [Typeclass] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs tcs topLevelRenamings = do
+convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname primitiveClassDir bs topLevelRenamings = do
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"

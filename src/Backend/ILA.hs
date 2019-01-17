@@ -8,7 +8,7 @@ module Backend.ILA where
 
 import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
-import           Control.Monad.State.Strict  (StateT, MonadState, runStateT, modify)
+import           Control.Monad.State.Strict  (StateT, MonadState, runStateT, modify, gets)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, reader, runReaderT)
 import           Control.Monad.Extra         (concatForM)
 import           Data.Default                (Default, def)
@@ -21,7 +21,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (middleText)
+import           ExtraDefs                   (middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
@@ -33,10 +33,13 @@ import qualified Typechecker.Types           as T
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
 -- list of branches. Each branch is a branch name (eg. `Just` and a list of types). `data Maybe a = Nothing | Just a` is
 -- `Datatype "Maybe" ["a"] [("Nothing", []), ("Just", ["a"])]`
+data Strictness = Strict | NonStrict deriving (Eq, Ord, Show)
+instance TextShow Strictness where
+    showb = fromString . show
 data Datatype = Datatype
     { typeName :: TypeVariableName
     , parameters :: [TypeVariableName]
-    , branches :: [(VariableName, [Type])] }
+    , branches :: [(VariableName, [(Type, Strictness)])] }
     deriving (Eq, Ord, Show)
 instance TextShow Datatype where
     showb = fromString . show
@@ -133,24 +136,22 @@ getExprType (Type t)                 = return t
 
 data ConverterReadableState = ConverterReadableState
     { types       :: M.Map VariableName QuantifiedSimpleType
-    , renamings   :: M.Map VariableName VariableName
-    , kinds       :: M.Map TypeVariableName Kind }
+    , renamings   :: M.Map VariableName VariableName }
     deriving (Eq, Show)
 instance Default ConverterReadableState where
     def = ConverterReadableState
         { types = M.empty
-        , renamings = M.empty
-        , kinds = M.empty }
+        , renamings = M.empty }
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
     { datatypes   :: [Datatype]
-    , typeclasses :: [Typeclass] }
+    , kinds       :: M.Map TypeVariableName Kind }
     deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState
-        { datatypes = []
-        , typeclasses = [] }
+        { datatypes = [] 
+        , kinds = M.empty }
 instance TextShow ConverterState where
     showb = fromString . show
 
@@ -158,7 +159,8 @@ newtype Converter a = Converter (ReaderT ConverterReadableState (StateT Converte
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
 runConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter (Converter inner) ts ks = runStateT (runReaderT (local (addTypes ts) $ local (addKinds ks) inner) def) def
+runConverter x ts ks = runStateT (runReaderT (local (addTypes ts) inner) def) def
+    where Converter inner = addKinds ks >> x
 evalConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
 evalConverter x ts ks = fst <$> runConverter x ts ks
 
@@ -168,14 +170,12 @@ addRenamings :: M.Map VariableName VariableName -> ConverterReadableState -> Con
 addRenamings rens state = state { renamings = M.union rens (renamings state) }
 addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterReadableState -> ConverterReadableState
 addTypes ts state = state { types = M.union ts (types state) }
-addKinds :: M.Map TypeVariableName Kind -> ConverterReadableState -> ConverterReadableState
-addKinds ks state = state { kinds = M.union ks (kinds state) }
+addKinds :: M.Map TypeVariableName Kind -> Converter ()
+addKinds ks = modify $ \st -> st { kinds = M.union ks (kinds st) }
 getKinds :: Converter (M.Map TypeVariableName Kind)
-getKinds = asks kinds
+getKinds = gets kinds
 addDatatype :: Datatype -> Converter ()
 addDatatype d = modify (\s -> s { datatypes = d:datatypes s })
-addTypeclass :: Typeclass -> Converter ()
-addTypeclass t = modify (\s -> s { typeclasses = t:typeclasses s })
 
 getRenamed :: VariableName -> Converter VariableName
 getRenamed name = reader (M.lookup name . renamings) >>= \case
@@ -230,7 +230,7 @@ getPatRenamings pat = do
 
 getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
 getPatVariableTypes (HsPVar v   ) t = return $ M.singleton (convertName v) t
-getPatVariableTypes (HsPLit _   ) _ = return $ M.empty
+getPatVariableTypes (HsPLit _   ) _ = return M.empty
 getPatVariableTypes (HsPApp _ ps) t = do
     (argTypes, _) <- T.unmakeFun t
     unless (length ps /= length argTypes)
@@ -292,19 +292,31 @@ declToIla (HsPatBind _ pat rhs _) = do
             return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)") tempNames body , Alt Default [] (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
     return $ Rec (M.singleton resultName resultExpr):extractors
-declToIla (HsClassDecl _ ctx name args decls) = case (ctx, args) of
-    ([], [arg]) -> do
-        let argName = convertName arg
-            className = convertName name
-            argType = TypeVar (TypeVariable argName KindStar)
-        definedFunctions <- concatForM decls $ \decl -> case decl of
-            HsTypeSig _ names _ -> mapM (\n -> let v = convertName n in (v,) <$> getType v) names
-            _ -> throwError $ "Declaration not supported in typeclass: " <> showt decl
-        addTypeclass $ Typeclass (IsInstance className argType) (M.fromList definedFunctions)
+declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
+declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
+    ([], []) -> do
+        writeLog $ "Processing datatype " <> showt name
+        bs' <- mapM conDeclToBranch bs
+        addDatatype $ Datatype
+            { typeName = convertName name
+            , parameters = map convertName args
+            , branches = bs' }
+        let kind = foldr KindFun KindStar $ replicate (length args) KindStar
+        writeLog $ "Got kind " <> showt kind
+        addKinds $ M.singleton (convertName name) kind
         return []
-    ([], _) -> throwError "Multiparameter typeclasses not supported"
-    (_, _) -> throwError "Context not yet supported in typeclasses"
+    (_, []) -> throwError $ "Datatype contexts not supported:\n" <> showt d
+    (_, _) -> throwError $ "Deriving clauses not supported:\n" <> showt d
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
+
+conDeclToBranch :: HsConDecl -> Converter (VariableName, [(Type, Strictness)])
+conDeclToBranch (HsConDecl _ name ts) = do
+    ks <- getKinds
+    ts' <- forM ts $ \case
+        HsBangedTy t -> (, Strict) <$> T.synToType ks t
+        HsUnBangedTy t -> (, NonStrict) <$> T.synToType ks t
+    return (convertName name, ts')
+conDeclToBranch d@HsRecDecl{} = throwError $ "Record datatypes not supported:\n" <> showt d
 
 rhsType :: HsRhs -> Converter Type
 rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = getSimpleFromSynType t
