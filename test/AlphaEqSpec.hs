@@ -13,24 +13,23 @@ import           TextShow                (TextShow, showt)
 
 import           AlphaEq
 import           Names
-import           Logger (evalLogger)
 import           Typechecker.Types
 
 synPrint :: Pretty a => a -> Text
 synPrint = pack . prettyPrint
 
 makeTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
-makeTest x = makeTestWith showt x
+makeTest = makeTestWith showt
 makeTestWith :: AlphaEq a => (a -> Text) -> a -> a -> TestTree
 makeTestWith f x y = testCase (unpack $ f x <> " vs " <> f y) $
     whenJust result (\err -> assertFailure $ unpack $ unlines [err, showt state])
-    where (result, state) = evalLogger $ runAlphaEq x y
+    where (result, state) = runAlphaEq x y
 makeFailTest :: (TextShow a, AlphaEq a) => a -> a -> TestTree
-makeFailTest x = makeFailTestWith showt x
+makeFailTest = makeFailTestWith showt
 makeFailTestWith :: AlphaEq a => (a -> Text) -> a -> a -> TestTree
 makeFailTestWith f x y = testCase (unpack $ "Fails: " <> f x <> " vs " <> f y) $
     when (isNothing result) (assertFailure $ show state)
-    where (result, state) = evalLogger $ runAlphaEq x y
+    where (result, state) = runAlphaEq x y
 
 test :: TestTree
 test = testGroup "AlphaEq"

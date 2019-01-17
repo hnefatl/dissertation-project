@@ -6,10 +6,9 @@
 module AlphaEq where
 
 import           BasicPrelude
-import           Control.Monad.Except       (ExceptT, MonadError, catchError, liftEither, runExceptT, throwError)
+import           Control.Monad.Except       (ExceptT, Except, MonadError, catchError, liftEither, runExceptT, runExcept, throwError)
 import           Control.Monad.Extra        (findM)
-import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT, get, put)
-import Logger (MonadLogger, Logger, evalLogger, writeLog)
+import           Control.Monad.State.Strict (MonadState, State, evalStateT, gets, modify, runState, get, put)
 import           Data.Either                (isRight)
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
@@ -24,36 +23,33 @@ import           Names
 import           TextShowHsSrc              ()
 import           Typechecker.Types
 
-newtype AlphaEqM a = AlphaEqM { inner :: ExceptT Text (StateT (M.Map Text Text) Logger) a }
-    deriving (Functor, Applicative, Monad, MonadState (M.Map Text Text), MonadError Text, MonadLogger)
+newtype AlphaEqM a = AlphaEqM { inner :: ExceptT Text (State (M.Map Text Text)) a }
+    deriving (Functor, Applicative, Monad, MonadState (M.Map Text Text), MonadError Text)
 
 class TextShow a => AlphaEq a where
     alphaEq' :: a -> a -> AlphaEqM ()
 alphaEqBool :: AlphaEqM a -> AlphaEqM Bool
-alphaEqBool x = catchError (x >> return True) (\err -> writeFail err >> return False)
-    where writeFail err = writeLog $ "Alpha-eq fail: " <> err
+alphaEqBool x = catchError (x >> return True) (const $ return False)
 alphaEqBool' :: AlphaEq a => a -> a -> AlphaEqM Bool
 alphaEqBool' x = alphaEqBool . alphaEq' x
 
 alphaEq :: AlphaEq a => a -> a -> Bool
-alphaEq x y = isRight $ evalLogger $ runExceptT $ alphaEqError x y
-alphaEqError :: AlphaEq a => a -> a -> ExceptT Text Logger ()
+alphaEq x y = isRight $ runExcept $ alphaEqError x y
+alphaEqError :: AlphaEq a => a -> a -> Except Text ()
 alphaEqError x y = do
     z <- lift $ evalStateT (runExceptT $ inner $ alphaEq' x y) M.empty
     liftEither z
 
-runAlphaEq :: AlphaEq a => a -> a -> Logger (Maybe Text, M.Map Text Text)
-runAlphaEq x y = do
-    (result, s) <- runStateT (runExceptT $ inner $ alphaEq' x y) M.empty
-    return (either Just (const Nothing) result, s)
+runAlphaEq :: AlphaEq a => a -> a -> (Maybe Text, M.Map Text Text)
+runAlphaEq x y = (either Just (const Nothing) result, s)
+    where (result, s) = runState (runExceptT $ inner $ alphaEq' x y) M.empty
 
 -- |If the given computation fails, restore internal state to how it was before running the computation. If the
 -- computation succeeds, leave the state alone.
 checkpoint :: AlphaEqM a -> AlphaEqM a
 checkpoint x = do
     s <- get
-    writeLog $ "Before: " <> showt s
-    catchError x (\err -> get >>= \s' -> writeLog ("After: " <> showt s') >> put s >> throwError err)
+    catchError x (\err -> put s >> throwError err)
 
 -- The workhorse: drives renaming names
 instance AlphaEq Text where
@@ -61,9 +57,7 @@ instance AlphaEq Text where
         | s1 == s2 = return ()
         | otherwise = (,) <$> gets (M.lookup s1) <*> gets (M.lookup s2) >>= \case
             -- Neither's been renamed before, add renames to them both
-            (Nothing, Nothing) -> do
-                modify (M.union $ M.fromList [(s1, s2), (s2, s1)])
-                writeLog $ "Alpha-eq: " <> showt s1 <> " and " <> s2
+            (Nothing, Nothing) -> modify (M.union $ M.fromList [(s1, s2), (s2, s1)])
             -- Both have been renamed before, check if they've been renamed to each other
             (Just x, Just y) ->
                 unless (x == s2 && y == s1) $ throwError $ unwords [s1, "and", s2, "already renamed to", x, "and", y]

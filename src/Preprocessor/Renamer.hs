@@ -163,8 +163,8 @@ instance Renameable HsDecl where
         -- Bind the argument variable at an outer scope
         bindTypeVariableForScope (S.fromList $ map convertName args) $ do
             decls' <- forM decls $ \case
-                HsTypeSig loc names t ->
-                    HsTypeSig loc <$> mapM renameVariable names <*> renameQualTypeWithExistingScope t
+                HsTypeSig loc' names t ->
+                    HsTypeSig loc' <$> mapM renameVariable names <*> renameQualTypeWithExistingScope t
                 _ -> throwError "Non-HsTypeSig in typeclass"
             HsClassDecl loc <$> renames ctx <*> pure name <*> mapM renameTypeVariable args <*> pure decls'
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
@@ -183,14 +183,14 @@ instance Renameable HsRhs where
 
 instance Renameable HsPat where
     rename (HsPVar n)            = HsPVar <$> renameVariable n
-    rename l@(HsPLit _)          = return l
+    rename l@HsPLit{}            = return l
     rename (HsPNeg p)            = HsPNeg <$> rename p
     rename (HsPInfixApp p1 n p2) = HsPInfixApp <$> rename p1 <*> rename n <*> rename p2
     rename (HsPApp con ps)       = HsPApp con <$> renames ps
     rename (HsPTuple ps)         = HsPTuple <$> renames ps
     rename (HsPList ps)          = HsPList <$> renames ps
     rename (HsPParen p)          = HsPParen <$> rename p
-    rename (HsPRec _ _)          = throwError "Record fields not supported"
+    rename HsPRec{}              = throwError "Record fields not supported"
     rename (HsPAsPat n p)        = HsPAsPat <$> renameVariable n <*> rename p
     rename HsPWildCard           = return HsPWildCard
     rename (HsPIrrPat p)         = HsPIrrPat <$> rename p

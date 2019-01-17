@@ -13,7 +13,8 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 
 import NameGenerator (NameGenerator, NameGeneratorT, evalNameGeneratorT, embedNG)
-import Logger (LoggerT, runLoggerT, writeLogs)
+import Logger (LoggerT, runLoggerT, writeLogs, writeLog)
+import ExtraDefs (pretty, synPrint)
 import Typechecker.Hardcoded
 
 import Language.Haskell.Syntax (HsModule)
@@ -69,30 +70,14 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
             (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
+            when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
-            --let [a, b] = [ TypeVariable y KindStar | y <- ["a", "b"] ]
-            --    [ta, tb] = [ TypeVar y | y <- [a, b] ]
-            --    numa = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) ta KindStar
-            --    numb = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) tb KindStar
-            --    numInt = TypeApp (TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)) typeInt KindStar
-            --    plusType = makeFun [tb, tb] tb
-            --    fType = makeFun [numInt, typeInt, typeInt] typeInt
-            --    -- x = 1 :: Num a -> a
-            --    -- f = \d -> \y -> (+) d x y :: Num b -> b -> b
-            --    -- z = f dNumInt 2 :: Int
-            --    -- _main = z
-            --    ila =
-            --        [ NonRec "x" $ Lit (LiteralInt 1) (makeFun [numa] ta)
-            --        , NonRec "f" $ Lam "d" numb $
-            --            Lam "y" tb $ App (App (App (Var "+" plusType) (Var "d" numb) ) (Var "x" tb)) (Var "y" tb)
-            --        , NonRec "z" $ App (App (Var "f" fType) (Var "dNumInt" numInt)) (Lit (LiteralInt 2) typeInt)
-            --        , NonRec "_main" $ Var "z" typeInt ]
-            --    -- This needs to be the composition of the renames from the ILA and renamer stage
-            --    topLevelRenames = M.fromList [ ("+", "v14") ]
+            when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
+            when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
-            putStrLn $ showt ilb
+            when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
             compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled

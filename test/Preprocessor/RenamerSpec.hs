@@ -2,20 +2,23 @@ module Preprocessor.RenamerSpec where
 
 import BasicPrelude
 import Test.Tasty              (TestTree, testGroup)
-import Test.Tasty.HUnit        (assertBool, assertFailure, testCase)
+import Test.Tasty.HUnit        (Assertion, assertFailure, testCase)
 
 import Language.Haskell.Parser (ParseResult(..), parseModule)
 
 import Control.Monad.Except    (runExcept)
 import Data.Text               (pack, unpack)
-import Data.Text.Lazy          (toStrict)
-import Text.Pretty.Simple      (pString)
-import TextShow                (TextShow, showt)
+import TextShow                (showt)
 
-import AlphaEq                 (alphaEq)
+import AlphaEq                 (AlphaEq, alphaEqError)
 import ExtraDefs               (deline, pretty, synPrint)
 import NameGenerator           (evalNameGenerator)
 import Preprocessor.Renamer    (renameModule, runRenamer)
+
+assertAlphaEq :: AlphaEq a => Text -> a -> a -> Assertion
+assertAlphaEq msg x y = case runExcept $ alphaEqError x y of
+    Left err -> assertFailure $ unpack $ unlines [err, msg]
+    Right () -> return ()
 
 makeTest :: Text -> Text -> TestTree
 makeTest input expected =
@@ -23,7 +26,7 @@ makeTest input expected =
         ParseOk (input', expected') ->
             case runExcept renamedInput of
                 Right (actual, _) ->
-                    assertBool (unpack $ unlines [showt actual, synPrint actual, pretty state]) (alphaEq expected' actual)
+                    assertAlphaEq (unlines [showt actual, synPrint actual, synPrint expected', pretty state]) expected' actual
                 Left err     -> assertFailure $ unpack $ unlines [err, pretty state]
             where (renamedInput, state) = evalNameGenerator (runRenamer $ renameModule input') 0
         ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
@@ -67,4 +70,7 @@ test = testGroup "Renamer"
     , makeTest
         "class Foo a where { bar :: Int -> a -> a }"
         "class Foo t0 where { v1 :: Int -> t0 -> t0 }"
+    , makeTest
+        "f = \\x (Foo y z@(w, u)) -> (y, u)"
+        "f = \\v0 (Foo v1 v2@(v3, v4)) -> (v1, v4)"
     ]

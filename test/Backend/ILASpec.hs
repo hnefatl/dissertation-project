@@ -3,7 +3,7 @@
 module Backend.ILASpec where
 
 import           BasicPrelude            hiding (head)
-import           Control.Monad.Except    (MonadError, runExceptT, throwError)
+import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
@@ -17,7 +17,7 @@ import           AlphaEq                 (alphaEqError)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
 import           Backend.ILA
 import           ExtraDefs
-import           Logger                  (runLogger, runLoggerT)
+import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
@@ -34,8 +34,8 @@ makeTest :: Text -> [Binding Expr] -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $
     case evalNameGenerator (runLoggerT $ runExceptT foo) 0 of
         (Left err, logs) -> assertFailure $ unpack $ unlines [err, "Logs:", unlines logs]
-        (Right binds, logs1) -> case runLogger $ runExceptT $ alphaEqError (S.fromList expected) (S.fromList binds) of
-            (Left err, logs2) -> assertFailure $ unpack $ unlines [err, unlines $ map showt expected, "vs", unlines $ map showt binds, "Logs:", unlines logs1, unlines logs2]
+        (Right binds, logs1) -> case runExcept $ alphaEqError (S.fromList expected) (S.fromList binds) of
+            Left err -> assertFailure $ unpack $ unlines [err, unlines $ map showt expected, "vs", unlines $ map showt binds, "Logs:", unlines logs1]
             _ -> return ()
     where foo = do
             m <- parse input

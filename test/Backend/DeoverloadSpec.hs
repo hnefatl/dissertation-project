@@ -13,7 +13,7 @@ import Data.Tuple.Extra        (both)
 import AlphaEq
 import Backend.Deoverload
 import ExtraDefs               (pretty, synPrint)
-import Logger                  (runLogger, runLoggerT)
+import Logger                  (runLoggerT)
 import NameGenerator
 import Typechecker.Hardcoded
 import Typechecker.Typechecker
@@ -32,8 +32,8 @@ makeTest sActual sExpected = testCase (unpack sActual) $ case both (parseModule 
             ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
             expected' = stripModuleParens expected
         actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
-        let (result, alphaLogs) = runLogger $ runExceptT $ alphaEqError expected' actual
-        unpackEither result (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint actual, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs, unlines alphaLogs])
+        let result = runExcept $ alphaEqError expected' actual
+        unpackEither result (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint actual, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
     (ParseFailed _ _, _) -> assertFailure "Failed to parse expected"
     (_, ParseFailed _ _) -> assertFailure "Failed to parse actual"
 

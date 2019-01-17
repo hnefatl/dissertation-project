@@ -21,7 +21,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (middleText, synPrint, mapError)
+import           ExtraDefs                   (middleText, pretty, synPrint, mapError)
 import           Logger
 import           NameGenerator
 import           Names
@@ -392,8 +392,8 @@ patToIla (HsPVar n) _ head body _ = do
 patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) t head body bodyType = do
     argNames <- replicateM (length args) freshVarName
-    let (argTypes, _) = T.unmakeCon t
-        argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
+    (_, argTypes) <- T.unmakeApp t
+    let argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
     return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]
 patToIla (HsPTuple pats) t head body bodyType = do

@@ -149,7 +149,6 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     methodDecls <- zipOverM methods [0..] $ \(name, t) i -> do
         patVar <- convertName <$> freshVarName
         let numFunArgs = synFunArgNum t
-        writeLog $ "numFunArgs = " <> showt numFunArgs
         let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numMethods - 1 - i) HsPWildCard
             funArgs = [HsPApp (UnQual cname) pattern]
             bodyType = HsQualType [] t
