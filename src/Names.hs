@@ -74,3 +74,8 @@ instance NameConvertible Syntax.HsOp VariableName where
 instance NameConvertible Syntax.HsQOp VariableName where
     convertName (HsQVarOp name) = convertName name
     convertName (HsQConOp name) = convertName name
+
+instance NameConvertible VariableName HsName where
+    convertName (VariableName n) = HsIdent $ unpack n
+instance NameConvertible TypeVariableName HsName where
+    convertName (TypeVariableName n) = HsIdent $ unpack n

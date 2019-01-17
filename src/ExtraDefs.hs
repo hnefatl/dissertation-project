@@ -40,6 +40,15 @@ zipOverM xs ys f = zipWithM f xs ys
 zipOverM_ :: Applicative f => [a] -> [b] -> (a -> b -> f c) -> f ()
 zipOverM_ xs ys f = zipWithM_ f xs ys
 
+zipWithM3 :: Applicative f => (a -> b -> c -> f d) -> [a] -> [b] -> [c] -> f [d]
+zipWithM3 _ [] _ _ = pure []
+zipWithM3 _ _ [] _ = pure []
+zipWithM3 _ _ _ [] = pure []
+zipWithM3 f (x:xs) (y:ys) (z:zs) = (:) <$> f x y z <*> zipWithM3 f xs ys zs
+
+zipOverM3 :: Applicative f => [a] -> [b] -> [c] -> (a -> b -> c -> f d) -> f [d]
+zipOverM3 xs ys zs f = zipWithM3 f xs ys zs
+
 -- |Check if the given function holds for each element in the same index in the given lists. Returns `False` if the
 -- lists are different lengths.
 pairwiseAndM :: Applicative f => (a -> b -> f Bool) -> [a] -> [b] -> f Bool

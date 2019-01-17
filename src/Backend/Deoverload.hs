@@ -7,6 +7,7 @@ module Backend.Deoverload where
 import           BasicPrelude               hiding (exp)
 import           Control.Monad.Except       (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
 import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT)
+import           Control.Monad.Extra        (concatMapM, concatForM)
 import           Data.Default               (Default, def)
 import           Data.Foldable              (null, toList)
 import qualified Data.Map.Strict            as M
@@ -15,14 +16,15 @@ import           Data.Text                  (unpack)
 import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showb, showt)
 
-import           ExtraDefs                  (synPrint)
+import           ExtraDefs                  (synPrint, zipOverM3)
 import           Logger
-import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName)
+import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                      (TypeVariableName(..), VariableName(..), convertName)
 import           TextShowHsSrc              ()
 import           Typechecker.Hardcoded      (builtinKinds)
 import           Typechecker.Substitution   (applySub)
 import           Typechecker.Typeclasses    (ClassEnvironment, entails)
+import           Typechecker.Typechecker    (nullSrcLoc)
 import           Typechecker.Types
 import           Typechecker.Unifier        (mgu)
 
@@ -125,14 +127,35 @@ deoverloadModule (HsModule a b c d decls) = do
     HsModule a b c d <$> deoverloadDecls decls
 
 deoverloadDecls :: [HsDecl] -> Deoverload [HsDecl]
-deoverloadDecls = mapM deoverloadDecl
+deoverloadDecls = concatMapM deoverloadDecl
 
-deoverloadDecl :: HsDecl -> Deoverload HsDecl
-deoverloadDecl (HsPatBind loc pat rhs ds) =
-    HsPatBind loc pat <$> deoverloadRhs rhs <*> pure ds
-deoverloadDecl (HsTypeSig loc names t) = return $ HsTypeSig loc names (HsQualType [] $ deoverloadType t)
-deoverloadDecl (HsClassDecl loc ctx name args ds) = HsClassDecl loc ctx name args <$> deoverloadDecls ds
+deoverloadDecl :: HsDecl -> Deoverload [HsDecl]
+deoverloadDecl (HsPatBind loc pat rhs ds) = pure <$> (HsPatBind loc pat <$> deoverloadRhs rhs <*> pure ds)
+deoverloadDecl (HsTypeSig loc names t) = return [HsTypeSig loc names (HsQualType [] $ deoverloadType t)]
+deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
+    unless (null ctx) $ throwError $ "Class contexts not supported: " <> showt ctx
+    -- Sort all type bindings like `x, y :: a -> a` into a list of pairs `[(x, a -> a), (y, a -> a)]`
+    typeSigs <- fmap (sortOn fst) $ concatForM ds $ \decl -> case decl of
+        HsTypeSig _ names (HsQualType [] t) -> return [ (name, t) | name <- names ]
+        HsTypeSig{} -> throwError $ "No support for class methods with constraints: " <> synPrint decl
+        _ -> return []
+    let numTypeSigs = length typeSigs
+        dataArgs = map (HsBangedTy . snd) typeSigs
+        dataDecl = HsDataDecl nullSrcLoc [] cname args [ HsConDecl nullSrcLoc cname dataArgs ] []
+    patVars <- map convertName <$> replicateM numTypeSigs freshVarName
+    methodDecls <- zipOverM3 typeSigs [0..] patVars $ \(name, t) i patVar -> do
+        let numFunArgs = synFunArgNum t
+        argVars <- map convertName <$> replicateM numFunArgs freshVarName
+        let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numTypeSigs - 1 - i) HsPWildCard
+            funArgs = HsPApp (UnQual cname) pattern:map HsPVar argVars
+            body = HsLambda nullSrcLoc funArgs $ HsVar (UnQual $ argVars !! i)
+        return $ HsPatBind nullSrcLoc (HsPVar name) (HsUnGuardedRhs body) []
+    return $ dataDecl:methodDecls
 deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
+
+isTypeSig :: HsDecl -> Bool
+isTypeSig HsTypeSig{} = True
+isTypeSig _ = False
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs (HsUnGuardedRhs expr) = case expr of

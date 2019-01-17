@@ -38,11 +38,15 @@ data Datatype = Datatype
     , parameters :: [TypeVariableName]
     , branches :: [(VariableName, [Type])] }
     deriving (Eq, Ord, Show)
+instance TextShow Datatype where
+    showb = fromString . show
 
 data Typeclass = Typeclass
     { head :: TypePredicate
     , methods :: M.Map VariableName QuantifiedSimpleType }
     deriving (Eq, Ord, Show)
+instance TextShow Typeclass where
+    showb = fromString . show
 
 
 -- |A literal value

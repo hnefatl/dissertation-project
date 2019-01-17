@@ -95,7 +95,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             putStrLn $ showt ilb
             compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb (typeclasses ilaState) topLevelRenames
             let outputDir = "out"
-            lift $ lift $ lift $ CodeGen.writeClass outputDir compiled
+            lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
 
 catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
 catchAdd x = withExceptT (\e -> unlines [e, showt x])

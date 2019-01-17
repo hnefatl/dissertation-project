@@ -96,8 +96,7 @@ convert cname primitiveClassDir bs tcs topLevelRenamings = do
     writeLog "- CodeGen -"
     writeLog "-----------"
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
-    datatypes <- constructDatatypes
-    dataClasses <- compileDatatypes datatypes
+    dataClasses <- undefined --compileDatatypes
     return $ mainClass:dataClasses
     where bindings = jvmSanitises bs
           initialState = ConverterState
@@ -108,7 +107,6 @@ convert cname primitiveClassDir bs tcs topLevelRenamings = do
             , localSymbols = M.empty
             , initialisers = []
             , dynamicMethods = Seq.empty
-            , typeclasses = tcs
             , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
             , classname = toLazyBytestring cname }
           action = do
@@ -212,17 +210,6 @@ addMainMethod = do
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
-
-constructDatatypes :: MonadNameGenerator m => ConverterState -> m [Datatype]
-constructDatatypes st = do
-    tcds <- concatForM (typeclasses st) $ \tc -> do
-        paramVar <- freshTypeVarName
-        let Types.IsInstance className _ = head tc
-            classNameVar = VariableName $ convertName className
-            methodTypes = map (\(Types.Quantified _ t) -> t) $ M.elems (methods tc)
-        return [ Datatype { typeName = className, parameters = [paramVar], branches = [(classNameVar, methodTypes)] } ]
-    -- TODO(kc506): User-defined datatypes here as well
-    return $ tcds ++ []
 
 -- |Create a new class for each datatype
 compileDatatypes :: [Datatype] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]

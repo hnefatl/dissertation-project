@@ -141,6 +141,8 @@ Would be nice to have an equivalent to GHC's primops: a way of representing prim
 haskell-land, not just in the final lowering pass. Means we could do unboxing optimisations in Core rather than eg. as a
 peephole.
 
+Deoverloader does a source-to-source translation to replace typeclasses with datatypes, and instances with datatypes and
+functions.
 
 For the record: spent ages rewriting bits of hs-java and tweaking stuff to try to get invokeDynamic to work correctly.
 Need to generate bootstrap methods and stuff...
