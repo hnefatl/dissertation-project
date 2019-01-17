@@ -17,6 +17,7 @@ import qualified Data.Set                    as S
 import           Numeric                     (showHex)
 import           Data.Char                   (isAlphaNum, ord)
 import           Data.Text                   (pack, unpack)
+import           Data.Bifunctor              (bimap)
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
@@ -150,4 +151,4 @@ instance JVMSanitisable a => JVMSanitisable (Alt a) where
     jvmSanitise (Alt c vs e) = Alt c (jvmSanitises vs) (jvmSanitise e)
 instance JVMSanitisable a => JVMSanitisable (Binding a) where
     jvmSanitise (NonRec v e) = NonRec (jvmSanitise v) (jvmSanitise e)
-    jvmSanitise Rec{} = error "Meh"
+    jvmSanitise (Rec m) = Rec $ M.fromList $ map (bimap jvmSanitise jvmSanitise) $ M.toList m

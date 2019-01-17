@@ -21,7 +21,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (middleText, synPrint)
+import           ExtraDefs                   (middleText, synPrint, mapError)
 import           Logger
 import           NameGenerator
 import           Names
@@ -232,18 +232,16 @@ getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableNa
 getPatVariableTypes (HsPVar v   ) t = return $ M.singleton (convertName v) t
 getPatVariableTypes (HsPLit _   ) _ = return M.empty
 getPatVariableTypes (HsPApp _ ps) t = do
-    (argTypes, _) <- T.unmakeFun t
-    unless (length ps /= length argTypes)
-        $ throwError "Partially applied data constructor in ILA lowering"
+    (_, argTypes) <- T.unmakeApp t
+    unless (length ps == length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
     M.unions <$> zipWithM getPatVariableTypes ps argTypes
 getPatVariableTypes (HsPTuple ps) t = do
     argTypes <- T.unmakeTuple t
-    unless (length ps /= length argTypes)
-        $ throwError "Partially applied tuple in ILA lowering"
+    unless (length ps == length argTypes) $ throwError "Partially applied tuple in ILA lowering"
     M.unions <$> zipWithM getPatVariableTypes ps argTypes
 getPatVariableTypes (HsPList ps) t = do
     elementType <- T.unmakeList t
-    M.unions <$> mapM (flip getPatVariableTypes $ elementType) ps
+    M.unions <$> mapM (flip getPatVariableTypes elementType) ps
 getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
 getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
 getPatVariableTypes HsPWildCard _ = return M.empty
@@ -261,7 +259,8 @@ toIla (HsModule _ _ _ _ decls) = do
     writeLog "-------"
     writeLog "- ILA -"
     writeLog "-------"
-    concat <$> mapM declToIla decls
+    let mapper e = unlines [e, unlines $ map synPrint decls]
+    mapError mapper $ concat <$> mapM declToIla decls
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do

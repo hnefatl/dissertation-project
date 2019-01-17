@@ -4,6 +4,7 @@ module ExtraDefs where
 
 import           BasicPrelude            hiding (intercalate)
 import           Data.Foldable           (foldl', foldlM, length)
+import           Control.Monad.Except    (MonadError, catchError, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (intercalate, lines, pack, unpack)
@@ -11,6 +12,9 @@ import           Data.Text.Lazy          (toStrict)
 import           Language.Haskell.Pretty (Pretty, prettyPrint)
 import           Text.Pretty.Simple      (pString)
 import           TextShow                (TextShow, showt)
+
+mapError :: MonadError e m => (e -> e) -> m a -> m a
+mapError f x = catchError x (throwError . f)
 
 -- TODO(kc506): PR to `extra` to generalise these to foldables
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
