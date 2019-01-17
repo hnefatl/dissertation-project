@@ -2,13 +2,15 @@
 
 module ExtraDefs where
 
-import           BasicPrelude            hiding (intercalate)
+import           BasicPrelude            hiding (intercalate, encodeUtf8)
 import           Data.Foldable           (foldl', foldlM, length)
 import           Control.Monad.Except    (MonadError, catchError, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (intercalate, lines, pack, unpack)
-import           Data.Text.Lazy          (toStrict)
+import           Data.Text.Lazy          (toStrict, fromStrict)
+import           Data.Text.Lazy.Encoding (encodeUtf8)
+import qualified Data.ByteString.Lazy    as B
 import           Language.Haskell.Pretty (Pretty, prettyPrint)
 import           Text.Pretty.Simple      (pString)
 import           TextShow                (TextShow, showt)
@@ -16,7 +18,9 @@ import           TextShow                (TextShow, showt)
 mapError :: MonadError e m => (e -> e) -> m a -> m a
 mapError f x = catchError x (throwError . f)
 
--- TODO(kc506): PR to `extra` to generalise these to foldables
+toLazyBytestring :: Text -> B.ByteString
+toLazyBytestring = encodeUtf8 . fromStrict
+
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
 anyM f = foldlM (\x y -> (x ||) <$> f y) False
