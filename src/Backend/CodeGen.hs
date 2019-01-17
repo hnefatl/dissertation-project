@@ -8,6 +8,7 @@ module Backend.CodeGen where
 import           BasicPrelude                hiding (encodeUtf8, head, init)
 import           Control.Monad.Except        (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import           Control.Monad.State.Strict  (MonadState, StateT, execStateT, get, gets, modify)
+import           Control.Monad.Extra         (concatForM)
 import qualified Data.ByteString.Lazy        as B
 import           Data.Foldable               (null, toList)
 import           Data.Functor                (void)
@@ -33,8 +34,7 @@ import           JVM.ClassFile               hiding (Class, Field, Method, toStr
 import qualified JVM.ClassFile               as ClassFile
 import           JVM.Converter
 
-import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..), Datatype(..),
-                                              getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
+import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Literal(..), Datatype(..), Typeclass(..), getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB                 hiding (Converter, ConverterState)
 import           ExtraDefs                   (zipOverM_)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
@@ -65,8 +65,7 @@ toLazyBytestring = encodeUtf8 . fromStrict
 data ConverterState = ConverterState
     { -- Which JVM local variable we're up to
       localVarCounter :: LocalVar
-    , -- Map from datatype constructor name to branch number, eg. {False:0, True:1} or {Nothing:0, Just:1}
-      datatypes       :: M.Map TypeVariableName Datatype
+    , datatypes       :: M.Map TypeVariableName Datatype
     , -- Top-level variable names. Eg `x = 1 ; y = let z = 2 in z` has top-level variable names x and y. This is used
       -- when working out which free variables we need to pass to functions, and which it can get for itself.
       -- The values associated with each symbol is the type of the equivalent field in the class (usually HeapObject).
@@ -91,24 +90,26 @@ newtype Converter a = Converter (StateT ConverterState (GeneratorT (ExceptT Text
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) NamedClass
-convert cname primitiveClassDir bs topLevelRenamings = do
+convert :: Text -> FilePath -> [Binding Rhs] -> [Typeclass] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname primitiveClassDir bs tcs topLevelRenamings = do
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"
-    withExceptT (\e -> unlines [e, showt bs]) action
+    mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
+    datatypes <- constructDatatypes
+    dataClasses <- compileDatatypes datatypes
+    return $ mainClass:dataClasses
     where bindings = jvmSanitises bs
           initialState = ConverterState
             { localVarCounter = 0
-            , datatypes = M.fromList
-                [ ("Bool", Datatype "Bool" ["False", "True"])
-                , ("Maybe", Datatype "Maybe" ["Nothing", "Just"]) ]
+            , datatypes = M.fromList [ ("Bool", Datatype "Bool" [] [("False", []), ("True", [])]) ]
             , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keysSet builtinFunctions:map getBindingVariables bindings
             , topLevelRenames = topLevelRenamings
             , localSymbols = M.empty
             , initialisers = []
             , dynamicMethods = Seq.empty
-            , dictionaries = S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
+            , typeclasses = tcs
+            , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
             , classname = toLazyBytestring cname }
           action = do
             compiled <- addBootstrapMethods inner initialState
@@ -191,9 +192,9 @@ freeVariables name args x = do
 
 addDynamicMethod :: Text -> Converter Word16
 addDynamicMethod m = do
-    methods <- gets dynamicMethods
+    ms <- gets dynamicMethods
     modify (\s -> s { dynamicMethods = dynamicMethods s Seq.|> m })
-    return $ fromIntegral $ Seq.length methods
+    return $ fromIntegral $ Seq.length ms
 
 loadPrimitiveClasses :: FilePath -> Converter ()
 loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>)) classes
@@ -212,9 +213,22 @@ addMainMethod = do
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
 
+constructDatatypes :: MonadNameGenerator m => ConverterState -> m [Datatype]
+constructDatatypes st = do
+    tcds <- concatForM (typeclasses st) $ \tc -> do
+        paramVar <- freshTypeVarName
+        let Types.IsInstance className _ = head tc
+            classNameVar = VariableName $ convertName className
+            methodTypes = map (\(Types.Quantified _ t) -> t) $ M.elems (methods tc)
+        return [ Datatype { typeName = className, parameters = [paramVar], branches = [(classNameVar, methodTypes)] } ]
+    -- TODO(kc506): User-defined datatypes here as well
+    return $ tcds ++ []
+
 -- |Create a new class for each datatype
-compileDatatypes :: [Datatype] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [OutputClass]
-compileDatatypes ds = throwError "Need to implement datatype compilation"
+compileDatatypes :: [Datatype] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+compileDatatypes ds = do
+    writeLog $ "Compiling datatypes: " <> showt ds
+    throwError "Need to implement datatype compilation"
 
 compileDictionaries :: Converter ()
 compileDictionaries = do
@@ -265,8 +279,8 @@ addBootstrapPoolItems (Converter x) s = do
     -- Add some constants to the pool that we'll need later, when we're creating the bootstrap method attribute
     arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
     arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
-    let methods = dynamicMethods converterState
-    arg2s <- forM (toList methods) $ \name -> do
+    let ms = dynamicMethods converterState
+    arg2s <- forM (toList ms) $ \name -> do
         let sig = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
             method = ClassFile.Method
                 { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
@@ -502,7 +516,7 @@ sortAlts alts@(Alt (DataCon con) _ _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
-    case find (con `elem`) (map (\(Datatype _ bs) -> bs) $ M.elems ds) of
+    case find (con `elem`) $ map (map fst . branches) $ M.elems ds of
         Nothing -> throwTextError "Unknown data constructor"
         Just branches -> do
             let getDataCon (Alt (DataCon c) _ _) = c

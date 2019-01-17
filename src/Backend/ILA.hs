@@ -30,10 +30,18 @@ import           Typechecker.Types           (Kind(..), Qualified(..), Quantifie
 import qualified Typechecker.Types           as T
 
 
-data Datatype = Datatype TypeVariableName [VariableName]
+-- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
+-- list of branches. Each branch is a branch name (eg. `Just` and a list of types). `data Maybe a = Nothing | Just a` is
+-- `Datatype "Maybe" ["a"] [("Nothing", []), ("Just", ["a"])]`
+data Datatype = Datatype
+    { typeName :: TypeVariableName
+    , parameters :: [TypeVariableName]
+    , branches :: [(VariableName, [Type])] }
     deriving (Eq, Ord, Show)
 
-data Typeclass = Typeclass TypePredicate (M.Map VariableName QuantifiedSimpleType)
+data Typeclass = Typeclass
+    { head :: TypePredicate
+    , methods :: M.Map VariableName QuantifiedSimpleType }
     deriving (Eq, Ord, Show)
 
 
@@ -123,18 +131,24 @@ data ConverterReadableState = ConverterReadableState
     { types       :: M.Map VariableName QuantifiedSimpleType
     , renamings   :: M.Map VariableName VariableName
     , kinds       :: M.Map TypeVariableName Kind }
+    deriving (Eq, Show)
 instance Default ConverterReadableState where
     def = ConverterReadableState
         { types = M.empty
         , renamings = M.empty
         , kinds = M.empty }
+instance TextShow ConverterReadableState where
+    showb = fromString . show
 data ConverterState = ConverterState
     { datatypes   :: [Datatype]
     , typeclasses :: [Typeclass] }
+    deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState
         { datatypes = []
         , typeclasses = [] }
+instance TextShow ConverterState where
+    showb = fromString . show
 
 newtype Converter a = Converter (ReaderT ConverterReadableState (StateT ConverterState (ExceptT Text (LoggerT NameGenerator))) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)

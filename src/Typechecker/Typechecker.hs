@@ -440,7 +440,7 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
         ks <- getKinds
         let argName = convertName arg
             className = convertName name
-        writeLog $ unwords ["Processing decl for", showt className, showt argName, "with members", synPrintList decls]
+        writeLog $ unwords ["Processing decl for", showt className, showt argName]
         forM_ decls $ \case
             HsTypeSig _ names t -> do
                 Qualified quals t' <- synToQualType ks t
