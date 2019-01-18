@@ -6,7 +6,7 @@ module Backend.CodeGen where
 
 import           BasicPrelude                hiding (encodeUtf8, head, init)
 import           Control.Monad.Except        (ExceptT, runExceptT, throwError, withExceptT)
-import           Control.Monad.State.Strict  (execStateT, get, gets)
+import           Control.Monad.State.Strict  (evalStateT, execStateT, get, gets)
 import qualified Data.ByteString.Lazy        as B
 import           Data.Foldable               (null, toList)
 import           Data.Functor                (void)
@@ -15,8 +15,6 @@ import           Data.Maybe                  (fromJust)
 import qualified Data.Sequence               as Seq
 import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
-import           Data.Text.Lazy              (fromStrict, toStrict)
-import           Data.Text.Lazy.Encoding     (encodeUtf8)
 import           Data.Word                   (Word16)
 import           System.FilePath             ((<.>), (</>))
 import           TextShow                    (showt)
@@ -27,7 +25,6 @@ import qualified Java.IO
 import qualified Java.Lang
 import           JVM.Assembler
 import           JVM.Builder                 hiding (locals)
-import           JVM.Builder.Monad           (classPath, encodedCodeLength, execGeneratorT)
 import           JVM.ClassFile               hiding (Class, Field, Method, toString)
 import qualified JVM.ClassFile               as ClassFile
 import           JVM.Converter
@@ -37,7 +34,7 @@ import           Backend.ILB                 hiding (Converter, ConverterState)
 import           ExtraDefs                   (zipOverM_, toLazyBytestring)
 import           Logger                      (LoggerT, writeLog)
 import           NameGenerator
-import           Names                       (VariableName(..), convertName)
+import           Names                       (TypeVariableName, VariableName(..), convertName)
 import qualified Preprocessor.ContainedNames as ContainedNames
 import qualified Typechecker.Types           as Types
 import           Typechecker.Hardcoded       (builtinFunctions)
@@ -57,36 +54,34 @@ freeVariables name args x = do
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs topLevelRenamings = do
+convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname primitiveClassDir bs topLevelRenamings ds = do
+    let bindings = jvmSanitises bs
+        initialState = ConverterState
+            { localVarCounter = 0
+            , datatypes = M.union ds $ M.fromList [ ("Bool", Datatype "Bool" [] [("False", []), ("True", [])]) ]
+            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings
+            , topLevelRenames = topLevelRenamings
+            , localSymbols = M.empty
+            , initialisers = map (\gen -> gen cname) $ M.elems compilerGeneratedHooks
+            , dynamicMethods = Seq.empty
+            , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
+            , classname = toLazyBytestring cname }
+        action = do
+            compiled <- flip addBootstrapMethods initialState $ do
+                loadPrimitiveClasses primitiveClassDir
+                compileDictionaries
+                mapM_ processBinding bindings
+                addMainMethod
+            return $ NamedClass cname compiled
+        processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
+        processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     dataClasses <- undefined --compileDatatypes
     return $ mainClass:dataClasses
-    where bindings = jvmSanitises bs
-          initialState = ConverterState
-            { localVarCounter = 0
-            , datatypes = M.fromList [ ("Bool", Datatype "Bool" [] [("False", []), ("True", [])]) ]
-            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keysSet builtinFunctions:map getBindingVariables bindings
-            , topLevelRenames = topLevelRenamings
-            , localSymbols = M.empty
-            , initialisers = []
-            , dynamicMethods = Seq.empty
-            , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
-            , classname = toLazyBytestring cname }
-          action = do
-            compiled <- addBootstrapMethods inner initialState
-            return $ NamedClass cname compiled
-          processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
-          processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
-          inner = do
-            loadPrimitiveClasses primitiveClassDir
-            compileDictionaries
-            mapM_ processBinding bindings
-            addMainMethod
-            sequence_ compilerGeneratedHooks
 
 loadPrimitiveClasses :: FilePath -> Converter ()
 loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>)) classes
@@ -176,13 +171,6 @@ addBootstrapPoolItems (Converter x) s = do
 
 -- |Compiling a global closure results in a static class field with the given name set to either a `Thunk` or a `Function`
 compileGlobalClosure :: VariableName -> Rhs -> Converter (ClassFile.NameType Field)
---compileGlobalClosure v (RhsClosure [] body) =
---    -- As this symbol is global, we store it in a static class field
---    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
---        -- We're compiling a non-function, so we can just make a thunk
---        compileThunk body
---        cname <- gets classname
---        putStaticField cname field
 compileGlobalClosure v (RhsClosure args body) = do
     -- We're compiling a global function, so it shouldn't have any non top-level free variables
     fvs <- freeVariables v args body
@@ -196,10 +184,6 @@ compileGlobalClosure v (RhsClosure args body) = do
         putStaticField cname field
 -- |Compiling a local closure results in local variable bindings to either a `Thunk` or a `Function`.
 compileLocalClosure :: VariableName -> Rhs -> Converter LocalVar
---compileLocalClosure v (RhsClosure [] body) = do
---    -- Same as the global closure, but storing in a local variable rather than a static field
---    compileThunk body
---    storeLocal v
 compileLocalClosure v (RhsClosure args body) = do
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
@@ -230,7 +214,7 @@ compileFunction :: VariableName -> [VariableName] -> Exp -> Converter (ClassFile
 compileFunction name args body = do
     freeVars <- freeVariables name args body
     writeLog $ "Function " <> showt name <> " has free variables " <> showt freeVars
-    let implName = "_" <> fromStrict (convertName name) <> "Impl"
+    let implName = "_" <> convertName name <> "Impl"
         implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
         implAccs = [ACC_PRIVATE, ACC_STATIC]
     inScope $ do
@@ -245,38 +229,14 @@ compileFunction name args body = do
             pushInt n
             aaload
         -- The actual implementation of the function
-        void $ newMethod implAccs (encodeUtf8 implName) implArgs (Returns heapObjectClass) $ do
+        void $ newMethod implAccs (toLazyBytestring implName) implArgs (Returns heapObjectClass) $ do
             compileExp body
             i0 ARETURN
-    let wrapperName = toLazyBytestring $ "_make" <> convertName name
+    let wrapperName = "_make" <> convertName name
         numFreeVars = S.size freeVars
         arity = length args
-        wrapperArgs = replicate numFreeVars heapObjectClass
-        wrapperAccs = [ACC_PUBLIC, ACC_STATIC]
     -- The wrapper function to construct an application instance of the function
-    inScope $ newMethod wrapperAccs wrapperName wrapperArgs (Returns functionClass) $ do
-        setLocalVarCounter (fromIntegral numFreeVars) -- Local variables [0..numFreeVars) are used for arguments
-        -- Record that we're using a dynamic function invocation, remember the implementation function's name
-        methodIndex <- addDynamicMethod (toStrict implName)
-        -- This is the function we're going to return at the end
-        new function
-        dup
-        -- Invoke the bootstrap method for this dynamic call site to create our BiFunction instance
-        invokeDynamic methodIndex bifunctionApply
-        -- Push the arity of the function
-        pushInt arity
-        -- Create an array of HeapObjects holding the free variables we were given as arguments
-        pushInt numFreeVars
-        allocNewArray heapObject
-        forM_ [0..numFreeVars - 1] $ \fv -> do
-            -- For each free variable argument, push it into the same index in the array
-            dup
-            pushInt fv
-            loadLocal (fromIntegral fv)
-            aastore
-        -- Call the Function constructor with the bifunction, the arity, and the free variable array
-        invokeSpecial function functionInit
-        i0 ARETURN
+    compileMakerFunction wrapperName arity numFreeVars implName
 
 compileExp :: Exp -> Converter ()
 compileExp (ExpVar v) = pushSymbol v
@@ -307,42 +267,31 @@ compileExp (ExpLet var rhs body) = do
     compileExp body
 
 compileCase :: [Alt Exp] -> Converter ()
-compileCase as = do
-    let (defaultAlts, otherAlts) = partition isDefaultAlt as
-        numAlts = genericLength otherAlts
-    -- altKeys are the branch numbers of each alt's constructor
-    (altKeys, alts) <- unzip <$> sortAlts otherAlts
-    defaultAlt <- case defaultAlts of
-        [x] -> return x
-        x   -> throwTextError $ "Expected single default alt in case statement, got: " <> showt x
-    let defaultAltGenerator = (\(Alt _ _ e) -> compileExp e) defaultAlt
-        altGenerators = map (\(Alt _ _ e) -> compileExp e) alts
-    classPathEntries <- classPath <$> getGState
-    let getAltLength :: Converter () -> Converter Word32
-        getAltLength (Converter e) = do
-            converterState <- get
-            -- Run a compilation in a separate generator monad instance
-            x <- liftExc $ runExceptT $ execGeneratorT classPathEntries $ execStateT e converterState
-            generatorState <- case x of
-                Left err -> throwTextError (pack $ show err)
-                Right s  -> return s
-            return $ encodedCodeLength generatorState
-    -- The lengths of each branch: just the code for the expressions, nothing else
-    defaultAltLength <- getAltLength defaultAltGenerator
-    altLengths <- mapM getAltLength altGenerators
-    currentByte <- encodedCodeLength <$> getGState
-    let -- Compute the length of the lookupswitch instruction, so we know how far to offset the jumps by
-        instructionPadding = fromIntegral $ 4 - (currentByte `mod` 4)
-        -- 1 byte for instruction, then padding, then 4 bytes for the default case and 8 bytes for each other case
-        instructionLength = fromIntegral $ 1 + instructionPadding + 4 + 8 * numAlts
-        -- The offsets past the switch instruction of each branch
-        defaultAltOffset = instructionLength -- Default branch starts immediately after the instruction
-        altOffsets = scanl (+) defaultAltLength altLengths -- Other branches come after the default branch
-    -- TODO(kc506): Switch between using lookupswitch/tableswitch depending on how saturated the possible branches are
-    let switch = LOOKUPSWITCH instructionPadding defaultAltOffset (fromIntegral numAlts) (zip altKeys altOffsets)
-    i0 switch
-    defaultAltGenerator
-    sequence_ altGenerators
+compileCase as = case partition isDefaultAlt as of
+    ([defaultAlt], otherAlts) -> do
+        -- altKeys are the branch numbers of each alt's constructor
+        (altKeys, alts) <- unzip <$> sortAlts otherAlts
+        s <- get
+        let defaultAltGenerator = (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) defaultAlt
+            altGenerators = map (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) alts
+            unwrap (Converter x) = x
+            runner x = evalStateT x s
+        Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
+    _ -> throwTextError "Expected single default alt in case statement"
+
+-- TODO(kc506): Change to `Maybe VariableName` to allow us to compile `Alt`s without storing all their data parameters,
+-- only the ones we use.
+bindDataVariables :: [VariableName] -> Converter ()
+bindDataVariables vs = do
+    -- Replace the head expression with a ref to its data array
+    getField heapObject $ NameType "data" (arrayOf boxedDataClass)
+    zipOverM_ vs [0..] $ \var index -> do
+        -- Store the data at the given index into the given variable
+        dup
+        pushInt index
+        aaload
+        storeLocal var
+    pop -- Remove the data array, all the data's store in local variables now
 
 
 -- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
@@ -353,7 +302,7 @@ sortAlts alts@(Alt (DataCon con) _ _:_) = do
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
     case find (con `elem`) $ map (map fst . branches) $ M.elems ds of
-        Nothing -> throwTextError "Unknown data constructor"
+        Nothing -> throwTextError $ "Unknown data constructor: " <> showt con
         Just branches -> do
             let getDataCon (Alt (DataCon c) _ _) = c
                 getDataCon _                     = error "Compiler error: can only have datacons here"

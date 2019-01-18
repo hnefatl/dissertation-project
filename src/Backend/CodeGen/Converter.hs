@@ -178,6 +178,35 @@ makePublicStaticField name fieldType init = do
         , topLevelSymbols = M.insert (VariableName name) fieldType (topLevelSymbols s) }
     return field
 
+-- Create a function that wraps a Function object around an implementation (java) function
+compileMakerFunction :: Text -> Int -> Int -> Text -> Converter (ClassFile.NameType Method)
+compileMakerFunction name arity numFreeVars implName = do
+    let accs = [ACC_PUBLIC, ACC_STATIC]
+        wrapperArgs = replicate numFreeVars heapObjectClass
+    inScope $ newMethod accs (toLazyBytestring name) wrapperArgs (Returns functionClass) $ do
+        setLocalVarCounter (fromIntegral numFreeVars) -- Local variables [0..numFreeVars) are used for arguments
+        -- Record that we're using a dynamic function invocation, remember the implementation function's name
+        methodIndex <- addDynamicMethod implName
+        -- This is the function we're going to return at the end
+        new function
+        dup
+        -- Invoke the bootstrap method for this dynamic call site to create our BiFunction instance
+        invokeDynamic methodIndex bifunctionApply
+        -- Push the arity of the function
+        pushInt arity
+        -- Create an array of HeapObjects holding the free variables we were given as arguments
+        pushInt numFreeVars
+        allocNewArray heapObject
+        forM_ [0..numFreeVars - 1] $ \fv -> do
+            -- For each free variable argument, push it into the same index in the array
+            dup
+            pushInt fv
+            loadLocal (fromIntegral fv)
+            aastore
+        -- Call the Function constructor with the bifunction, the arity, and the free variable array
+        invokeSpecial function functionInit
+        i0 ARETURN
+
 
 pushArg :: Arg -> Converter ()
 pushArg (ArgLit l) = pushLit l

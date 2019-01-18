@@ -78,7 +78,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames (datatypes ilaState)
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
 

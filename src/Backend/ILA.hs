@@ -9,8 +9,7 @@ module Backend.ILA where
 import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.State.Strict  (StateT, MonadState, runStateT, modify, gets)
-import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, reader, runReaderT)
-import           Control.Monad.Extra         (concatForM)
+import           Control.Monad.Reader        (MonadReader, ReaderT, local, reader, runReaderT)
 import           Data.Default                (Default, def)
 import           Data.List                   (foldl', intersperse)
 import qualified Data.Map.Strict             as M
@@ -21,7 +20,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (middleText, pretty, synPrint, mapError)
+import           ExtraDefs                   (middleText, synPrint, mapError)
 import           Logger
 import           NameGenerator
 import           Names
@@ -145,12 +144,12 @@ instance Default ConverterReadableState where
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
-    { datatypes   :: [Datatype]
+    { datatypes   :: M.Map TypeVariableName Datatype
     , kinds       :: M.Map TypeVariableName Kind }
     deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState
-        { datatypes = [] 
+        { datatypes = M.empty
         , kinds = M.empty }
 instance TextShow ConverterState where
     showb = fromString . show
@@ -175,7 +174,7 @@ addKinds ks = modify $ \st -> st { kinds = M.union ks (kinds st) }
 getKinds :: Converter (M.Map TypeVariableName Kind)
 getKinds = gets kinds
 addDatatype :: Datatype -> Converter ()
-addDatatype d = modify (\s -> s { datatypes = d:datatypes s })
+addDatatype d = modify (\s -> s { datatypes = M.insert (typeName d) d (datatypes s) })
 
 getRenamed :: VariableName -> Converter VariableName
 getRenamed name = reader (M.lookup name . renamings) >>= \case
@@ -278,7 +277,6 @@ declToIla (HsPatBind _ pat rhs _) = do
     resultExpr <- local (addRenamings renames . addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
-        writeLog $ "RHST: " <> showt rhst
         patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
@@ -395,12 +393,7 @@ patToIla (HsPApp con args) t head body bodyType = do
     argNames <- replicateM (length args) freshVarName
     let (_, argTypes) = T.unmakeApp t
         argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
-    writeLog $ "t = " <> showt t
-    writeLog $ "argNames = " <> showt argNames
-    writeLog $ "argTypes = " <> showt argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
-    writeLog $ showt body
-    writeLog $ showt body'
     return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]
 patToIla (HsPTuple pats) t head body bodyType = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body bodyType
 patToIla (HsPList []) _ head body bodyType =
