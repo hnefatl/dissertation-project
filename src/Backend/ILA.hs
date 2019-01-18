@@ -220,7 +220,7 @@ makeList' es t = foldr (\x y -> App (App cons x) y) nil es
           nil  = Var "[]" (T.makeList t)
 
 makeError :: Type -> Expr
-makeError = Var "error"
+makeError = Var "compilerError"
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
@@ -232,7 +232,7 @@ getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableNa
 getPatVariableTypes (HsPVar v   ) t = return $ M.singleton (convertName v) t
 getPatVariableTypes (HsPLit _   ) _ = return M.empty
 getPatVariableTypes (HsPApp _ ps) t = do
-    (_, argTypes) <- T.unmakeApp t
+    let (_, argTypes) = T.unmakeApp t
     unless (length ps == length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
     M.unions <$> zipWithM getPatVariableTypes ps argTypes
 getPatVariableTypes (HsPTuple ps) t = do
@@ -278,6 +278,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     resultExpr <- local (addRenamings renames . addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
+        writeLog $ "RHST: " <> showt rhst
         patToIla pat rhst rhsExpr resultTuple resultType
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
@@ -392,14 +393,16 @@ patToIla (HsPVar n) _ head body _ = do
 patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) t head body bodyType = do
     argNames <- replicateM (length args) freshVarName
-    let (argTypes, _) = T.unmakeCon t
-    let argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
+    let (_, argTypes) = T.unmakeApp t
+        argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
+    writeLog $ "t = " <> showt t
+    writeLog $ "argNames = " <> showt argNames
+    writeLog $ "argTypes = " <> showt argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
+    writeLog $ showt body
+    writeLog $ showt body'
     return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]
-patToIla (HsPTuple pats) t head body bodyType = do
-    ts <- T.unmakeTuple t
-    let t' = T.makeFun ts t -- The type of the tuple constructor is the elements types to the tuple type
-    patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t' head body bodyType
+patToIla (HsPTuple pats) t head body bodyType = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body bodyType
 patToIla (HsPList []) _ head body bodyType =
     return $ Case head [] [Alt nilCon [] body, Alt Default [] $ makeError bodyType ]
     where nilCon = DataCon "[]"

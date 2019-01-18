@@ -81,7 +81,7 @@ test = let
         let either = TypeConstant "Either" (KindFun KindStar $ KindFun KindStar KindStar)
             t = TypeApp (TypeApp (TypeCon either) ta (KindFun KindStar KindStar)) tb KindStar
             output = unmakeApp t
-            expected = Right (TypeCon either, [ta, tb])
+            expected = (TypeCon either, [ta, tb])
         in testCase "unmakeApp" $ assertEqual "" expected output
     ,
         -- Simple literal type checks

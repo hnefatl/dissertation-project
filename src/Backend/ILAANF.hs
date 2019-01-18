@@ -88,7 +88,7 @@ makeTupleUnsafe :: MonadNameGenerator m => [AnfTrivial] -> m AnfComplex
 makeTupleUnsafe es = either (error . unpack) id <$> runExceptT (makeTuple es)
 
 makeError :: Type -> AnfTrivial
-makeError = Var "error"
+makeError = Var "compilerError"
 
 
 ilaToAnf :: (MonadNameGenerator m, MonadError Text m) => [Binding ILA.Expr] -> m [Binding AnfRhs]

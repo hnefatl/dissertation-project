@@ -162,11 +162,10 @@ unmakeSynFun :: HsType -> ([HsType], HsType)
 unmakeSynFun (HsTyFun a e) = let (as, b) = unmakeSynFun e in (a:as, b)
 unmakeSynFun t             = ([], t)
 
-unmakeApp :: MonadError Text m => Type -> m (Type, [Type])
-unmakeApp (TypeApp t1 t2 _) = do
-    (baseT, ts) <- unmakeApp t1
-    return (baseT, ts ++ [t2])
-unmakeApp t = return (t, [])
+unmakeApp :: Type -> (Type, [Type])
+unmakeApp (TypeApp t1 t2 _) = (baseT, ts ++ [t2])
+    where (baseT, ts) = unmakeApp t1
+unmakeApp t = (t, [])
 
 -- |Split a type representing a function into the argument and the return type
 unwrapFunMaybe :: Type -> Maybe (Type, Type)
