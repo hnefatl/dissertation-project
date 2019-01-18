@@ -392,7 +392,7 @@ patToIla (HsPVar n) _ head body _ = do
 patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) t head body bodyType = do
     argNames <- replicateM (length args) freshVarName
-    (_, argTypes) <- T.unmakeApp t
+    let (argTypes, _) = T.unmakeCon t
     let argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
     return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]

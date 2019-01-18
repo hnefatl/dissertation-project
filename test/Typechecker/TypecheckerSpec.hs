@@ -78,6 +78,12 @@ test = let
             output = unmakeSynFun (makeSynFun args sc)
         in testCase "unmakeSynFun . makeSynFun" $ assertEqual "" (args, sc) output
     ,
+        let either = TypeConstant "Either" (KindFun KindStar $ KindFun KindStar KindStar)
+            t = TypeApp (TypeApp (TypeCon either) ta (KindFun KindStar KindStar)) tb KindStar
+            output = unmakeApp t
+            expected = Right (TypeCon either, [ta, tb])
+        in testCase "unmakeApp" $ assertEqual "" expected output
+    ,
         -- Simple literal type checks
         let s = "x = 5"
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta)]
