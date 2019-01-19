@@ -62,7 +62,7 @@ convert cname primitiveClassDir bs topLevelRenamings ds = do
     let bindings = jvmSanitises bs
         initialState = ConverterState
             { localVarCounter = 0
-            , datatypes = M.union ds $ M.fromList [ ("Bool", Datatype "Bool" [] [("False", []), ("True", [])]) ]
+            , datatypes = jvmSanitises ds
             , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings
             , topLevelRenames = topLevelRenamings
             , localSymbols = M.empty
@@ -110,6 +110,7 @@ compileDatatypes ds classpath = do
             dclass = toLazyBytestring dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
             compileDatatype = zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
+                void $ addToPool (CClass boxedData)
                 let numArgs = length args
                     methName = toLazyBytestring $ "_make" <> convertName branchName
                     methArgs = replicate numArgs heapObjectClass
@@ -291,15 +292,15 @@ compileExp (ExpApp fun args) = do
 compileExp (ExpConApp con args) = do
     ds <- gets datatypes
     case find (\d -> con `elem` map fst (branches d)) ds of
-        Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con
+        Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
         Just datatype -> do
-            let classname = "_" <> convertName (typeName datatype)
+            let cname = "_" <> convertName (typeName datatype)
                 methodname = "_make" <> convertName con
-                methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack classname)
+                methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
                 numArgs = length args
             -- Push all the datatype arguments onto the stack then call the datatype constructor
             forM_ args pushArg
-            invokeStatic (toLazyBytestring classname) $ NameType (toLazyBytestring methodname) methodSig
+            invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
 compileExp (ExpCase head vs alts) = do
     compileExp head
     -- Bind each extra variable to the head
@@ -350,7 +351,7 @@ sortAlts alts@(Alt (DataCon con) _ _:_) = do
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
     case find (con `elem`) $ map (map fst . branches) $ M.elems ds of
-        Nothing -> throwTextError $ "Unknown data constructor: " <> showt con
+        Nothing -> throwTextError $ "Unknown data constructor: " <> showt con <> "\n" <> showt ds
         Just branches -> do
             let getDataCon (Alt (DataCon c) _ _) = c
                 getDataCon _                     = error "Compiler error: can only have datacons here"

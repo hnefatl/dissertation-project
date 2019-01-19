@@ -148,7 +148,6 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     -- methodDecls are `f (Foo f' _) = f'` and `g (Foo _ g') = g'` for each method of the class
     methodDecls <- zipOverM methods [0..] $ \(name, t) i -> do
         patVar <- convertName <$> freshVarName
-        let numFunArgs = synFunArgNum t
         let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numMethods - 1 - i) HsPWildCard
             funArgs = [HsPApp (UnQual cname) pattern]
             bodyType = HsQualType [] t
@@ -160,6 +159,7 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         writeLog $ "Generated function declaration " <> synPrint decl
         return decl
     return $ dataDecl:methodDecls
+deoverloadDecl d@HsDataDecl{} = return [d]
 deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
 
 isTypeSig :: HsDecl -> Bool

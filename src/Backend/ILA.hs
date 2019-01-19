@@ -26,7 +26,7 @@ import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (HasBoundVariables, HasFreeVariables, getBoundVariables, getFreeVariables)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
-                                              TypePredicate(..), TypeVariable(..))
+                                              TypePredicate(..))
 import qualified Typechecker.Types           as T
 
 
@@ -44,6 +44,7 @@ data Datatype = Datatype
 instance TextShow Datatype where
     showb = fromString . show
 
+-- TODO(kc506): Not sure if we need... maybe for instances?
 data Typeclass = Typeclass
     { head    :: TypePredicate
     , methods :: M.Map VariableName QuantifiedSimpleType }

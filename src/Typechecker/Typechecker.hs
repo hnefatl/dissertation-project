@@ -575,6 +575,7 @@ updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDecls
 updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
 updateDeclTypeTags d@HsClassDecl{}          = return d
+updateDeclTypeTags d@HsDataDecl{}           = return d
 updateDeclTypeTags _                        = throwError "Unsupported declaration when updating type tags"
 updateDeclsTypeTags :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 updateDeclsTypeTags = mapM updateDeclTypeTags
@@ -601,6 +602,7 @@ checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
 checkDeclExpTypes :: MonadError Text m => Syntax.HsDecl -> m ()
 checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
 checkDeclExpTypes HsClassDecl{}          = return ()
+checkDeclExpTypes HsDataDecl{}           = return ()
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
 checkDeclsExpTypes :: MonadError Text m => [Syntax.HsDecl] -> m ()
 checkDeclsExpTypes = mapM_ checkDeclExpTypes

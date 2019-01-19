@@ -11,15 +11,15 @@ import           Data.Bifunctor              (bimap)
 import qualified Data.Map.Strict as M
 
 import Names (VariableName(..))
-import Backend.ILA (Binding(..), Alt(..))
+import Backend.ILA (Binding(..), Alt(..), Datatype(..), AltConstructor(..))
 import Backend.ILB (Arg(..), Exp(..), Rhs(..))
 
 -- Things that contain `VariableName`s that could contain invalid Java identifier characters like "<" can provide an
 -- instance to rename them into valid identifiers like "3c".
 class JVMSanitisable a where
     jvmSanitise :: a -> a
-jvmSanitises :: JVMSanitisable a => [a] -> [a]
-jvmSanitises = map jvmSanitise
+jvmSanitises :: (Functor t, JVMSanitisable a) => t a -> t a
+jvmSanitises = fmap jvmSanitise
 
 -- The only valid characters are unicode alphanumeric characters, the dollar sign, and the underscore. This is the set
 -- of Java valid identifiers, which is a subset of the JVM valid identifiers. We write some bootstrap classes in Java
@@ -45,7 +45,14 @@ instance JVMSanitisable Exp where
 instance JVMSanitisable Rhs where
     jvmSanitise (RhsClosure vs e) = RhsClosure (jvmSanitises vs) (jvmSanitise e)
 instance JVMSanitisable a => JVMSanitisable (Alt a) where
-    jvmSanitise (Alt c vs e) = Alt c (jvmSanitises vs) (jvmSanitise e)
+    jvmSanitise (Alt c vs e) = Alt (jvmSanitise c) (jvmSanitises vs) (jvmSanitise e)
+instance JVMSanitisable AltConstructor where
+    jvmSanitise (DataCon v) = DataCon (jvmSanitise v)
+    jvmSanitise l@LitCon{} = l
+    jvmSanitise Default = Default
 instance JVMSanitisable a => JVMSanitisable (Binding a) where
     jvmSanitise (NonRec v e) = NonRec (jvmSanitise v) (jvmSanitise e)
     jvmSanitise (Rec m) = Rec $ M.fromList $ map (bimap jvmSanitise jvmSanitise) $ M.toList m
+
+instance JVMSanitisable Datatype where
+    jvmSanitise d = d { branches = [ (jvmSanitise v, as) | (v, as) <- branches d ] }
