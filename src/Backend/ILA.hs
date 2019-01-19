@@ -8,8 +8,8 @@ module Backend.ILA where
 
 import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
-import           Control.Monad.State.Strict  (StateT, MonadState, runStateT, modify, gets)
 import           Control.Monad.Reader        (MonadReader, ReaderT, local, reader, runReaderT)
+import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
 import           Data.List                   (foldl', intersperse)
 import qualified Data.Map.Strict             as M
@@ -20,12 +20,13 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (middleText, synPrint, mapError)
+import           ExtraDefs                   (mapError, middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (HasBoundVariables, HasFreeVariables, getBoundVariables, getFreeVariables)
-import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..), TypePredicate(..), TypeVariable(..))
+import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
+                                              TypePredicate(..), TypeVariable(..))
 import qualified Typechecker.Types           as T
 
 
@@ -36,15 +37,15 @@ data Strictness = Strict | NonStrict deriving (Eq, Ord, Show)
 instance TextShow Strictness where
     showb = fromString . show
 data Datatype = Datatype
-    { typeName :: TypeVariableName
+    { typeName   :: TypeVariableName
     , parameters :: [TypeVariableName]
-    , branches :: [(VariableName, [(Type, Strictness)])] }
+    , branches   :: [(VariableName, [(Type, Strictness)])] }
     deriving (Eq, Ord, Show)
 instance TextShow Datatype where
     showb = fromString . show
 
 data Typeclass = Typeclass
-    { head :: TypePredicate
+    { head    :: TypePredicate
     , methods :: M.Map VariableName QuantifiedSimpleType }
     deriving (Eq, Ord, Show)
 instance TextShow Typeclass where
@@ -134,8 +135,8 @@ getExprType (Case _ _ (Alt _ _ e:_)) = getExprType e
 getExprType (Type t)                 = return t
 
 data ConverterReadableState = ConverterReadableState
-    { types       :: M.Map VariableName QuantifiedSimpleType
-    , renamings   :: M.Map VariableName VariableName }
+    { types     :: M.Map VariableName QuantifiedSimpleType
+    , renamings :: M.Map VariableName VariableName }
     deriving (Eq, Show)
 instance Default ConverterReadableState where
     def = ConverterReadableState
@@ -144,8 +145,8 @@ instance Default ConverterReadableState where
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
-    { datatypes   :: M.Map TypeVariableName Datatype
-    , kinds       :: M.Map TypeVariableName Kind }
+    { datatypes :: M.Map TypeVariableName Datatype
+    , kinds     :: M.Map TypeVariableName Kind }
     deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState

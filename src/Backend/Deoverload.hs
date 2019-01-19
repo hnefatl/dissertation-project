@@ -6,8 +6,8 @@ module Backend.Deoverload where
 
 import           BasicPrelude               hiding (exp)
 import           Control.Monad.Except       (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
+import           Control.Monad.Extra        (concatForM, concatMapM)
 import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT)
-import           Control.Monad.Extra        (concatMapM, concatForM)
 import           Data.Default               (Default, def)
 import           Data.Foldable              (null, toList)
 import qualified Data.Map.Strict            as M
@@ -23,8 +23,8 @@ import           Names                      (TypeVariableName(..), VariableName(
 import           TextShowHsSrc              ()
 import           Typechecker.Hardcoded      (builtinKinds)
 import           Typechecker.Substitution   (applySub)
-import           Typechecker.Typeclasses    (ClassEnvironment, entails)
 import           Typechecker.Typechecker    (nullSrcLoc)
+import           Typechecker.Typeclasses    (ClassEnvironment, entails)
 import           Typechecker.Types
 import           Typechecker.Unifier        (mgu)
 
@@ -164,7 +164,7 @@ deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
 
 isTypeSig :: HsDecl -> Bool
 isTypeSig HsTypeSig{} = True
-isTypeSig _ = False
+isTypeSig _           = False
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs (HsUnGuardedRhs expr) = case expr of

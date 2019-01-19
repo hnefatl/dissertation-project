@@ -19,9 +19,9 @@ import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 
+import           ExtraDefs                   (synPrint)
 import           NameGenerator
 import           Names
-import           ExtraDefs                   (synPrint)
 import           Preprocessor.ContainedNames
 import           Typechecker.Hardcoded
 
@@ -116,11 +116,13 @@ renames :: (Renameable a, Traversable f) => f a -> Renamer (f a)
 renames = mapM rename
 
 renameVariable :: HsName -> Renamer HsName
-renameVariable n@(HsIdent _)  = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsIdent{}  = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsSymbol{} = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsSpecial{} = return n
 renameTypeVariable :: HsName -> Renamer HsName
-renameTypeVariable n@(HsIdent _) = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@(HsSymbol _) = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsIdent{} = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsSymbol{} = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsSpecial{} = return n
 
 -- Renaming a module is a special case: we want to capture the renamings we used on the top-level variables for later
 -- (used during CodeGen).
@@ -167,7 +169,18 @@ instance Renameable HsDecl where
                     HsTypeSig loc' <$> mapM renameVariable names <*> renameQualTypeWithExistingScope t
                 _ -> throwError "Non-HsTypeSig in typeclass"
             HsClassDecl loc <$> renames ctx <*> pure name <*> mapM renameTypeVariable args <*> pure decls'
+    rename (HsDataDecl loc ctx name args decls derivings) =
+        bindTypeVariableForScope (S.fromList $ map convertName args) $
+            HsDataDecl loc ctx name <$> mapM renameTypeVariable args <*> renames decls <*> pure derivings
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
+
+instance Renameable HsConDecl where
+    rename (HsConDecl loc name args) = HsConDecl loc <$> renameVariable name <*> renames args
+    rename HsRecDecl{} = throwError "Record data declarations not supported in renamer"
+
+instance Renameable HsBangType where
+    rename (HsBangedTy t) = HsBangedTy <$> rename t
+    rename (HsUnBangedTy t) = HsUnBangedTy <$> rename t
 
 instance Renameable HsMatch where
     rename (HsMatch loc funName pats rhs decls) = do

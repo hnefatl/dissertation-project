@@ -1,45 +1,47 @@
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Backend.CodeGen where
 
-import           BasicPrelude                hiding (encodeUtf8, head, init)
-import           Control.Monad.Except        (ExceptT, runExcept, runExceptT, throwError, withExceptT)
-import           Control.Monad.State.Strict  (evalStateT, execStateT, get, gets)
-import qualified Data.ByteString.Lazy        as B
-import           Data.Foldable               (null, toList)
-import           Data.Functor                (void)
-import qualified Data.Map.Strict             as M
-import           Data.Maybe                  (fromJust)
-import qualified Data.Sequence               as Seq
-import qualified Data.Set                    as S
-import           Data.Text                   (pack, unpack)
-import           Data.Word                   (Word16)
-import           System.FilePath             ((<.>), (</>))
-import           TextShow                    (showt)
-import           Data.Binary                 (encode)
+import           BasicPrelude                   hiding (encodeUtf8, head, init)
+import           Control.Monad.Except           (ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Control.Monad.State.Strict     (evalStateT, execStateT, get, gets)
+import           Data.Binary                    (encode)
+import qualified Data.ByteString.Lazy           as B
+import           Data.Foldable                  (null, toList)
+import           Data.Functor                   (void)
+import qualified Data.Map.Strict                as M
+import           Data.Maybe                     (fromJust)
+import qualified Data.Sequence                  as Seq
+import qualified Data.Set                       as S
+import           Data.Text                      (pack, unpack)
+import           Data.Word                      (Word16)
+import           System.FilePath                ((<.>), (</>))
+import           TextShow                       (showt)
 
 import           Java.ClassPath
 import qualified Java.IO
 import qualified Java.Lang
 import           JVM.Assembler
-import           JVM.Builder                 hiding (locals)
-import           JVM.ClassFile               hiding (Class, Field, Method, toString)
-import qualified JVM.ClassFile               as ClassFile
+import           JVM.Builder                    hiding (locals)
+import           JVM.ClassFile                  hiding (Class, Field, Method, toString)
+import qualified JVM.ClassFile                  as ClassFile
 import           JVM.Converter
 
-import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..), Datatype(..), getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
-import           Backend.ILB                 hiding (Converter, ConverterState)
-import           ExtraDefs                   (zipOverM_, toLazyBytestring)
-import           Logger                      (LoggerT, writeLog)
-import           NameGenerator
-import           Names                       (TypeVariableName, VariableName(..), convertName)
-import qualified Preprocessor.ContainedNames as ContainedNames
-import qualified Typechecker.Types           as Types
-import           Typechecker.Hardcoded       (builtinFunctions)
 import           Backend.CodeGen.Converter
-import           Backend.CodeGen.Hooks       (compilerGeneratedHooks)
+import           Backend.CodeGen.Hooks          (compilerGeneratedHooks)
+import           Backend.CodeGen.JVMSanitisable (jvmSanitises)
+import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
+                                                 getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
+import           Backend.ILB                    hiding (Converter, ConverterState)
+import           ExtraDefs                      (toLazyBytestring, zipOverM_)
+import           Logger                         (LoggerT, writeLog)
+import           NameGenerator
+import           Names                          (TypeVariableName, VariableName(..), convertName)
+import qualified Preprocessor.ContainedNames    as ContainedNames
+import           Typechecker.Hardcoded          (builtinFunctions)
+import qualified Typechecker.Types              as Types
 
 writeClass :: FilePath -> NamedClass -> IO ()
 writeClass directory (NamedClass name c) = B.writeFile (directory </> unpack name <.> "class") (encode c)
@@ -121,15 +123,17 @@ compileDatatypes ds classpath = do
                     dup
                     pushInt branchTag
                     putField dclass boxedDataBranch
-                    -- Initialise the data array
+                    -- Create a data array, fill it with the arguments
                     dup
-                    getField dclass boxedDataData
+                    pushInt numArgs
+                    allocNewArray heapObject
                     forM_ [0..numArgs - 1] $ \i -> do
                         dup
                         pushInt i
                         loadLocal (fromIntegral i)
                         aastore
-                    pop
+                    -- Assign it to the datatype's data field
+                    putField dclass boxedDataData
                     -- Return the instance of our class, fully initialised
                     i0 ARETURN
         case runExcept $ generate classpath dclass compileDatatype of
@@ -284,7 +288,18 @@ compileExp (ExpApp fun args) = do
         pushArg arg
         invokeVirtual function addArgument
     invokeVirtual function enter
-compileExp (ExpConApp _ _) = throwTextError "Need support for data applications"
+compileExp (ExpConApp con args) = do
+    ds <- gets datatypes
+    case find (\d -> con `elem` map fst (branches d)) ds of
+        Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con
+        Just datatype -> do
+            let classname = "_" <> convertName (typeName datatype)
+                methodname = "_make" <> convertName con
+                methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack classname)
+                numArgs = length args
+            -- Push all the datatype arguments onto the stack then call the datatype constructor
+            forM_ args pushArg
+            invokeStatic (toLazyBytestring classname) $ NameType (toLazyBytestring methodname) methodSig
 compileExp (ExpCase head vs alts) = do
     compileExp head
     -- Bind each extra variable to the head

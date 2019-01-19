@@ -12,8 +12,8 @@ import           Data.Text               (pack)
 import           Language.Haskell.Syntax
 import           TextShow                (TextShow, showt)
 
-import           Names
 import           ExtraDefs               (synPrint)
+import           Names
 
 
 disjointUnion :: (MonadError Text m, Ord a, TextShow a) => S.Set a -> S.Set a -> m (S.Set a)
@@ -46,7 +46,11 @@ instance HasBoundVariables HsDecl where
         if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
     getBoundVariables (HsTypeSig _ names _) = return $ S.fromList $ map convertName names
     getBoundVariables (HsClassDecl _ _ _ _ decls) = S.unions <$> mapM getBoundVariables decls
+    getBoundVariables (HsDataDecl _ _ _ _ conDecls _) = getBoundVariables conDecls
     getBoundVariables d = throwError $ unlines ["Declaration not supported:", synPrint d]
+instance HasBoundVariables HsConDecl where
+    getBoundVariables (HsConDecl _ n _) = return $ S.singleton $ convertName n
+    getBoundVariables (HsRecDecl _ n _) = return $ S.singleton $ convertName n
 instance HasBoundVariables HsPat where
     getBoundVariables (HsPVar v)            = return $ S.singleton (convertName v)
     getBoundVariables (HsPLit _)            = return S.empty
@@ -62,11 +66,11 @@ instance HasBoundVariables HsPat where
     getBoundVariables (HsPRec _ _)          = throwError "Pattern records not supported"
 
 instance HasFreeVariables HsDecl where
-    getFreeVariables (HsPatBind _ _ rhs _) = getFreeVariables rhs
-    getFreeVariables HsFunBind{}           = return S.empty
-    getFreeVariables HsClassDecl{}         = return S.empty
-    getFreeVariables HsTypeSig{}           = return S.empty
-    getFreeVariables _                     = throwError "Not supported"
+    getFreeVariables (HsPatBind _ _ rhs _)      = getFreeVariables rhs
+    getFreeVariables (HsClassDecl _ _ _ _ args) = S.unions <$> mapM getFreeVariables args
+    getFreeVariables HsTypeSig{}                = return S.empty
+    getFreeVariables HsDataDecl{}               = return S.empty
+    getFreeVariables _                          = throwError "Not supported"
 instance HasFreeVariables HsRhs where
     getFreeVariables (HsUnGuardedRhs e) = getFreeVariables e
     getFreeVariables (HsGuardedRhss _)  = throwError "Guarded rhss not supported"

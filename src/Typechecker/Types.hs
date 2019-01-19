@@ -139,10 +139,12 @@ makeTuple :: [Type] -> Type
 makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
 makeSynFun :: [HsType] -> HsType -> HsType
 makeSynFun as e = foldr HsTyFun e as
+makeSynApp :: HsType -> [HsType] -> HsType
+makeSynApp e = foldl HsTyApp e
 
 synFunArgNum :: HsType -> Int
 synFunArgNum (HsTyFun _ t) = 1 + synFunArgNum t
-synFunArgNum _ = 0
+synFunArgNum _             = 0
 
 -- |Given a type representing a function, unpack it to return the arguments and return type
 unmakeFun :: MonadError Text m => Type -> m ([Type], Type)

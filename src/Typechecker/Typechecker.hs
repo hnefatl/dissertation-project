@@ -9,8 +9,8 @@ module Typechecker.Typechecker where
 import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
-import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Control.Monad.Extra         (whenJust)
+import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -94,6 +94,13 @@ nameSimpleType t = do
     t' <- nameToType name
     unify t' t
     return name
+
+synToQuantType :: HsQualType -> TypeInferrer QuantifiedType
+synToQuantType t = do
+    ks <- getKinds
+    t' <- synToQualType ks t
+    let freeVars = S.map (\v -> TypeVariable v KindStar) $ getTypeVars t'
+    return $ Quantified freeVars t'
 
 -- |Returns the current substitution in the monad
 getSubstitution :: TypeInferrer Substitution
@@ -458,19 +465,14 @@ inferDecl d@(HsTypeSig _ names t) = do
     return d
 inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], [arg]) -> do
-        ks <- getKinds
-        let argName = convertName arg
-            className = convertName name
-        writeLog $ unwords ["Processing decl for", showt className, showt argName]
+        let className = convertName name
+        writeLog $ unwords ["Processing decl for", showt className, showt arg]
         forM_ decls $ \case
-            HsTypeSig _ names t -> do
-                Qualified quals t' <- synToQualType ks t
-                let classPred = IsInstance className (TypeVar (TypeVariable argName KindStar))
+            HsTypeSig _ names (HsQualType quals t) -> do
+                let classPred = (UnQual name, [HsTyVar arg])
                     -- Update eg. `a -> a -> a` in class `Num a` to be `Num a => a -> a -> a`
-                    qualType = Qualified (S.insert classPred quals) t'
-                    freeTypeVars = S.map (\v -> TypeVariable v KindStar) $ getTypeVars qualType
                     varNames = map convertName names
-                    quantType = Quantified freeTypeVars qualType
+                quantType <- synToQuantType (HsQualType (classPred:quals) t)
                 forM_ varNames (\v -> insertQuantifiedType v quantType)
                 writeLog $ "Processed " <> showt names <> ", got " <> showt quantType
             _ -> throwError "Non-type signature declaration found in typeclass"
@@ -480,15 +482,32 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
         return d
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
+inferDecl (HsDataDecl loc ctx name args decls derivings) = do
+    let typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
+    addKinds $ M.singleton (convertName name) typeKind
+    let resultType = makeSynApp (HsTyCon $ UnQual name) (map HsTyVar args)
+    decls' <- mapM (inferConDecl resultType) decls
+    return $ HsDataDecl loc ctx name args decls' derivings
 inferDecl _ = throwError "Declaration not yet supported"
+
+inferConDecl :: HsType -> Syntax.HsConDecl -> TypeInferrer Syntax.HsConDecl
+inferConDecl conType d@(HsConDecl _ name args) = do
+    let argTypes = flip map args $ \arg -> case arg of
+            HsBangedTy t -> t
+            HsUnBangedTy t -> t
+    qt <- synToQuantType $ HsQualType [] (makeSynFun argTypes conType)
+    insertQuantifiedType (convertName name) qt
+    return d
+inferConDecl _ HsRecDecl{} = throwError $ "Record data declarations not supported in typechecker"
 
 -- |Returns True if the given declaration can contain recursive references with other declarations
 needsRecursiveBinding :: MonadError Text m => Syntax.HsDecl -> m Bool
-needsRecursiveBinding HsPatBind{} = return True
-needsRecursiveBinding HsFunBind{} = return True
+needsRecursiveBinding HsPatBind{}   = return True
+needsRecursiveBinding HsFunBind{}   = return True
 needsRecursiveBinding HsClassDecl{} = return False
-needsRecursiveBinding HsTypeSig{} = return False
-needsRecursiveBinding d = throwError $ "Unknown decl " <> showt d
+needsRecursiveBinding HsTypeSig{}   = return False
+needsRecursiveBinding HsDataDecl{}  = return False
+needsRecursiveBinding d             = throwError $ "Unknown decl " <> showt d
 
 inferDecls :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDecls ds = do
@@ -526,7 +545,6 @@ inferModule (HsModule a b c d decls) = do
     writeLog "Checked explicit type tags"
     return (m', ts)
 
--- TODO(kc506): Delete once we don't need builtins
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
     addClasses builtinClasses

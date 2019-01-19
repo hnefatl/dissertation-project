@@ -33,8 +33,8 @@ dependencies:
 - pretty-simple
 - extra
 - data-default
-- haskell-src
-- hs-java # Provided from custom repo, see stack.yaml extra-deps
+- haskell-src # Provided from custom repo, see stack.yaml extra-deps
+- hs-java # Also provided from custom repo
 - binary
 - filepath
 

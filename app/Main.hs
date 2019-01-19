@@ -19,7 +19,7 @@ import Typechecker.Hardcoded
 import Language.Haskell.Syntax (HsModule)
 import Language.Haskell.Parser (parseModule, ParseResult(..))
 import Preprocessor.Renamer (evalRenamer, renameModule)
-import Typechecker.Typechecker (evalTypeInferrer, inferModuleWithBuiltins)
+import Typechecker.Typechecker (evalTypeInferrer, inferModule)
 import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
 import qualified Backend.ILA as ILA (runConverter, toIla, datatypes)
 import qualified Backend.ILAANF as ILAANF (ilaToAnf)
@@ -64,7 +64,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
           x = do
             m <- embedExceptIOIntoResult $ parse f
             (renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
-            (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModuleWithBuiltins renamedModule
+            (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types

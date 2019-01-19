@@ -41,17 +41,20 @@ instance IsString TypeVariableName where
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
 
+instance NameConvertible Syntax.HsSpecialCon Text where
+    convertName HsUnitCon      = "()"
+    convertName HsListCon      = "[]"
+    convertName HsCons         = ":"
+    convertName HsFunCon       = "->"
+    convertName (HsTupleCon _) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
 instance NameConvertible Syntax.HsName Text where
     convertName (HsIdent name)  = pack name
     convertName (HsSymbol name) = pack name
+    convertName (HsSpecial s) = convertName s
 instance NameConvertible Syntax.HsQName Text where
     convertName (Qual _ name)            = convertName name
     convertName (UnQual name)            = convertName name
-    convertName (Special HsUnitCon)      = "()"
-    convertName (Special HsListCon)      = "[]"
-    convertName (Special HsCons)         = ":"
-    convertName (Special HsFunCon)       = "->"
-    convertName (Special (HsTupleCon _)) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
+    convertName (Special s)              = convertName s
 instance NameConvertible VariableName Text where
     convertName (VariableName n) = n
 instance NameConvertible TypeVariableName Text where
