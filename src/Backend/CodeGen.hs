@@ -5,7 +5,7 @@
 module Backend.CodeGen where
 
 import           BasicPrelude                hiding (encodeUtf8, head, init)
-import           Control.Monad.Except        (ExceptT, runExceptT, throwError, withExceptT)
+import           Control.Monad.Except        (ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import           Control.Monad.State.Strict  (evalStateT, execStateT, get, gets)
 import qualified Data.ByteString.Lazy        as B
 import           Data.Foldable               (null, toList)
@@ -107,10 +107,7 @@ compileDatatypes ds classpath = do
         let dname = "_" <> convertName (typeName datatype)
             dclass = toLazyBytestring dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
-        -- TODO(kc506): Pretty sure we should be able to do this without generateT: we don't need IO
-        -- need NameGenerator...
-        ((), out) <- withExceptT (pack . show) $ generateT classpath dclass $ do
-            zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
+            compileDatatype = zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
                 let numArgs = length args
                     methName = toLazyBytestring $ "_make" <> convertName branchName
                     methArgs = replicate numArgs heapObjectClass
@@ -135,8 +132,11 @@ compileDatatypes ds classpath = do
                     pop
                     -- Return the instance of our class, fully initialised
                     i0 ARETURN
-        let out' = out { superClass = boxedData }
-        return $ NamedClass dname (classDirect2File out')
+        case runExcept $ generate classpath dclass compileDatatype of
+            Left err -> throwError $ pack $ show err
+            Right ((), out) -> do
+                let out' = out { superClass = boxedData }
+                return $ NamedClass dname (classDirect2File out')
 
 -- TODO(kc506): Should be uneccessary: dictionaries should be created by `instance` decls in ILA conversion
 compileDictionaries :: Converter ()
