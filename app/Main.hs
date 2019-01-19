@@ -9,7 +9,6 @@ import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError,
 import TextShow (TextShow, showt)
 import Data.Text (unpack, pack)
 import Data.Default (Default, def)
-import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 
 import NameGenerator (NameGenerator, NameGeneratorT, evalNameGeneratorT, embedNG)
@@ -22,14 +21,11 @@ import Language.Haskell.Parser (parseModule, ParseResult(..))
 import Preprocessor.Renamer (evalRenamer, renameModule)
 import Typechecker.Typechecker (evalTypeInferrer, inferModuleWithBuiltins)
 import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
-import qualified Backend.ILA as ILA (runConverter, toIla)
+import qualified Backend.ILA as ILA (runConverter, toIla, datatypes)
 import qualified Backend.ILAANF as ILAANF (ilaToAnf)
 import qualified Backend.ILB as ILB (runConverter, anfToIlb)
 import qualified Backend.CodeGen as CodeGen (convert, writeClass)
 
-import qualified Data.Set as S
-import Typechecker.Types
-import Backend.ILA
 
 data Flags = Flags
     { verbose :: Bool }
@@ -78,7 +74,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames (datatypes ilaState)
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames (ILA.datatypes ilaState)
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
 

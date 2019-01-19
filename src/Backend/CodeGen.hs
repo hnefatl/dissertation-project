@@ -56,6 +56,7 @@ freeVariables name args x = do
 -- the top-level symbols and produces a class file
 convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
 convert cname primitiveClassDir bs topLevelRenamings ds = do
+    classpath <- loadPrimitiveClasses primitiveClassDir
     let bindings = jvmSanitises bs
         initialState = ConverterState
             { localVarCounter = 0
@@ -68,9 +69,7 @@ convert cname primitiveClassDir bs topLevelRenamings ds = do
             , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
             , classname = toLazyBytestring cname }
         action = do
-            compiled <- flip addBootstrapMethods initialState $ do
-                loadPrimitiveClasses primitiveClassDir
-                compileDictionaries
+            compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
                 addMainMethod
             return $ NamedClass cname compiled
@@ -79,12 +78,12 @@ convert cname primitiveClassDir bs topLevelRenamings ds = do
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"
+    dataClasses <- compileDatatypes (M.elems ds) classpath
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
-    dataClasses <- undefined --compileDatatypes
     return $ mainClass:dataClasses
 
-loadPrimitiveClasses :: FilePath -> Converter ()
-loadPrimitiveClasses dirPath = withClassPath $ mapM_ (loadClass . (dirPath </>)) classes
+loadPrimitiveClasses :: MonadIO m => FilePath -> m [Tree CPEntry]
+loadPrimitiveClasses dirPath = liftIO $ execClassPath (mapM_ (loadClass . (dirPath </>)) classes)
     where classes = ["HeapObject", "Function"]
 
 addMainMethod :: Converter ()
@@ -101,11 +100,45 @@ addMainMethod = do
         i0 RETURN
 
 -- |Create a new class for each datatype
-compileDatatypes :: [Datatype] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-compileDatatypes ds = do
+compileDatatypes :: [Datatype] -> [Tree CPEntry] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+compileDatatypes ds classpath = do
     writeLog $ "Compiling datatypes: " <> showt ds
-    throwError "Need to implement datatype compilation"
+    forM ds $ \datatype -> do
+        let dname = "_" <> convertName (typeName datatype)
+            dclass = toLazyBytestring dname
+            methFlags = [ ACC_PUBLIC, ACC_STATIC ]
+        -- TODO(kc506): Pretty sure we should be able to do this without generateT: we don't need IO
+        -- need NameGenerator...
+        ((), out) <- withExceptT (pack . show) $ generateT classpath dclass $ do
+            zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
+                let numArgs = length args
+                    methName = toLazyBytestring $ "_make" <> convertName branchName
+                    methArgs = replicate numArgs heapObjectClass
+                    methRet = Returns $ ObjectType $ unpack dname
+                newMethod methFlags methName methArgs methRet $ do
+                    -- Create a new instance of the class representing this datatype
+                    new dclass
+                    dup
+                    invokeSpecial dclass Java.Lang.objectInit
+                    -- Fill out the branch field with eg. 0 for Nothing or 1 for Just.
+                    dup
+                    pushInt branchTag
+                    putField dclass boxedDataBranch
+                    -- Initialise the data array
+                    dup
+                    getField dclass boxedDataData
+                    forM_ [0..numArgs - 1] $ \i -> do
+                        dup
+                        pushInt i
+                        loadLocal (fromIntegral i)
+                        aastore
+                    pop
+                    -- Return the instance of our class, fully initialised
+                    i0 ARETURN
+        let out' = out { superClass = boxedData }
+        return $ NamedClass dname (classDirect2File out')
 
+-- TODO(kc506): Should be uneccessary: dictionaries should be created by `instance` decls in ILA conversion
 compileDictionaries :: Converter ()
 compileDictionaries = do
     dicts <- gets dictionaries
@@ -125,8 +158,8 @@ compileDictionaries = do
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
 -- This should be called at the end of the generation of a class file
-addBootstrapMethods :: Converter () -> ConverterState -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
-addBootstrapMethods x s = runExceptT (generateT [] (classname s) $ addBootstrapPoolItems x s) >>= \case
+addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
+addBootstrapMethods s cp x = runExceptT (generateT cp (classname s) $ addBootstrapPoolItems x s) >>= \case
     Left err -> throwError $ pack $ show err
     Right ((bootstrapMethodStringIndex, metafactoryIndex, arg1, arg2s, arg3), classDirect) -> do
         let classFile = classDirect2File classDirect -- Convert the "direct" in-memory class into a class file structure

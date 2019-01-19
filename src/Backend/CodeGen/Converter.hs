@@ -167,6 +167,10 @@ toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 makeInt :: NameType Method
 makeInt = NameType "_makeInt" $ MethodSignature [IntType] (Returns intClass)
+boxedDataBranch :: NameType Field
+boxedDataBranch = NameType "branch" $ IntType
+boxedDataData :: NameType Field
+boxedDataData = NameType "data" $ arrayOf heapObjectClass
 
 -- |Create a new public static field in this class with the given name and type.
 -- The given action will be run at the start of `main`, and should be used to initialise the field
@@ -214,13 +218,13 @@ pushArg (ArgVar v) = pushSymbol v
 
 pushLit :: Literal -> Converter ()
 pushLit (LiteralInt i)    = do
-    pushInt (fromIntegral i)
+    pushInt $ fromIntegral i
     invokeStatic int makeInt
 pushLit (LiteralChar _)   = throwTextError "Need support for characters"
 pushLit (LiteralString _) = throwTextError "Need support for strings"
 pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"
 
-pushInt :: Int -> Converter ()
+pushInt :: MonadGenerator m => Int -> m ()
 pushInt (-1) = iconst_m1
 pushInt 0 = iconst_0
 pushInt 1 = iconst_1
@@ -232,7 +236,7 @@ pushInt i
     -- TODO(kc506): Check sign's preserved. JVM instruction takes a signed Word8, haskell's is unsigned.
     | i >= -128 && i <= 127 = bipush $ fromIntegral i
     | i >= -32768 && i <= 32767 = sipush $ fromIntegral i
-    | otherwise = throwTextError "Need support for: 32 bit integers and arbitrary-sized integers"
+    | otherwise = error "Need support for: 32 bit integers and arbitrary-sized integers"
 
 storeLocal :: VariableName -> Converter LocalVar
 storeLocal v = do
@@ -250,7 +254,7 @@ storeSpecificLocal v i = do
         _ -> if i < 256 then astore $ fromIntegral i else astorew $ fromIntegral i
     addLocalVariable v i
 
-loadLocal :: Word16 -> Converter ()
+loadLocal :: MonadGenerator m => Word16 -> m ()
 loadLocal 0 = aload_ I0
 loadLocal 1 = aload_ I1
 loadLocal 2 = aload_ I2
