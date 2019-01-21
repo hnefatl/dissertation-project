@@ -80,6 +80,8 @@ convert cname primitiveClassDir bs topLevelRenamings ds = do
     writeLog "-----------"
     writeLog "- CodeGen -"
     writeLog "-----------"
+    writeLog "Renames"
+    forM_ (M.toList topLevelRenamings) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
     dataClasses <- compileDatatypes (M.elems ds) classpath
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
@@ -302,12 +304,15 @@ compileExp (ExpConApp con args) = do
             forM_ args pushArg
             invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
 compileExp (ExpCase head vs alts) = do
+    nop
     compileExp head
+    nop
     -- Bind each extra variable to the head
     forM_ vs $ \var -> do
         dup -- Copy the head expression
         storeLocal var -- Store it locally
     -- Compile the actual case expression
+    nop
     compileCase alts
 compileExp (ExpLet var rhs body) = do
     -- Compile the bound expression, store it in a local
