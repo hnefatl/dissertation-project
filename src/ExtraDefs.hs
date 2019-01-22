@@ -7,6 +7,7 @@ import           Data.Foldable           (foldl', foldlM, length)
 import           Control.Monad.Except    (MonadError, catchError, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
+import           Data.Tuple              (swap)
 import           Data.Text               (intercalate, lines, pack, unpack)
 import           Data.Text.Lazy          (toStrict, fromStrict)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
@@ -75,3 +76,6 @@ reverseLookup x = fmap fst . find ((x ==) . snd) . M.toList
 
 setMapIntersect :: Ord a => S.Set a -> M.Map a b -> [b]
 setMapIntersect s m = M.elems $ M.intersection m (M.fromSet (const ()) s)
+
+inverseMap :: (Ord a, Ord b) => M.Map a b -> M.Map b a
+inverseMap = M.fromList . map swap . M.toList

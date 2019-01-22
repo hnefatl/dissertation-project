@@ -57,14 +57,14 @@ freeVariables name args x = do
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
 convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs topLevelRenamings ds = do
+convert cname primitiveClassDir bs reverseRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let bindings = jvmSanitises bs
         initialState = ConverterState
             { localVarCounter = 0
             , datatypes = jvmSanitises ds
             , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings
-            , topLevelRenames = topLevelRenamings
+            , reverseRenames = reverseRenames
             , localSymbols = M.empty
             , initialisers = map (\gen -> gen cname) $ M.elems compilerGeneratedHooks
             , dynamicMethods = Seq.empty
@@ -81,7 +81,7 @@ convert cname primitiveClassDir bs topLevelRenamings ds = do
     writeLog "- CodeGen -"
     writeLog "-----------"
     writeLog "Renames"
-    forM_ (M.toList topLevelRenamings) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
+    forM_ (M.toList reverseRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
     dataClasses <- compileDatatypes (M.elems ds) classpath
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
@@ -306,13 +306,23 @@ compileExp (ExpConApp con args) = do
 compileExp (ExpCase head vs alts) = do
     nop
     compileExp head
-    nop
+    -- Evaluate the expression
+    invokeVirtual heapObject enter
     -- Bind each extra variable to the head
     forM_ vs $ \var -> do
         dup -- Copy the head expression
         storeLocal var -- Store it locally
+    -- Branch: if the head object is a boxed data, we extract its branch value. Otherwise, we pop it and push 0 instead.
+    instanceOf boxedData
+    i0 $ IF C_EQ 12 -- If instanceof returned 0, the head's not data. Jump to the "else" block
+    do -- The "then" block
+        checkCast boxedData
+        getField boxedData boxedDataBranch
+        goto 5 -- Jump past the "else" block
+    do -- The "else" block
+        pop
+        iconst_0
     -- Compile the actual case expression
-    nop
     compileCase alts
 compileExp (ExpLet var rhs body) = do
     -- Compile the bound expression, store it in a local

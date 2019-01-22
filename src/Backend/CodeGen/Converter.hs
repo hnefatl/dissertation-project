@@ -49,7 +49,7 @@ data ConverterState = ConverterState
       -- The values associated with each symbol is the type of the equivalent field in the class (usually HeapObject).
       topLevelSymbols :: M.Map VariableName FieldType
     , -- A reverse mapping from the renamed top-level variables to what they were originally called.
-      topLevelRenames :: M.Map VariableName VariableName
+      reverseRenames :: M.Map VariableName VariableName
     , -- Local variable names, and an action that can be used to push them onto the stack
       localSymbols    :: M.Map VariableName (Converter ())
     , -- A list of initialisation actions to run as the first instructions inside `main`. Used for initialising fields.
@@ -107,7 +107,7 @@ pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
 pushGlobalSymbol v t = do
     writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
-    renames <- gets topLevelRenames
+    renames <- gets reverseRenames
     getStaticField cname $ NameType { ntName = toLazyBytestring $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case

@@ -1,30 +1,32 @@
-{-# Language FlexibleContexts #-}
-{-# Language LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE TupleSections    #-}
 
 module Main where
 
-import BasicPrelude
-import System.Exit
-import Control.Monad.Except (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
-import TextShow (TextShow, showt)
-import Data.Text (unpack, pack)
-import Data.Default (Default, def)
-import qualified Data.Map as M
+import           BasicPrelude
+import           Control.Monad.Except    (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Data.Default            (Default, def)
+import qualified Data.Map                as M
+import           Data.Text               (pack, unpack)
+import           System.Exit
+import           TextShow                (TextShow, showt)
 
-import NameGenerator (NameGenerator, NameGeneratorT, evalNameGeneratorT, embedNG)
-import Logger (LoggerT, runLoggerT, writeLogs, writeLog)
-import ExtraDefs (pretty, synPrint)
-import Typechecker.Hardcoded
+import           ExtraDefs               (pretty, synPrint)
+import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
+import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
+import           Names                   (VariableName)
+import           Typechecker.Hardcoded
 
-import Language.Haskell.Syntax (HsModule)
-import Language.Haskell.Parser (parseModule, ParseResult(..))
-import Preprocessor.Renamer (evalRenamer, renameModule)
-import Typechecker.Typechecker (evalTypeInferrer, inferModule)
-import Backend.Deoverload (evalDeoverload, deoverloadModule, deoverloadQuantType)
-import qualified Backend.ILA as ILA (runConverter, toIla, datatypes)
-import qualified Backend.ILAANF as ILAANF (ilaToAnf)
-import qualified Backend.ILB as ILB (runConverter, anfToIlb)
-import qualified Backend.CodeGen as CodeGen (convert, writeClass)
+import qualified Backend.CodeGen         as CodeGen (convert, writeClass)
+import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
+import qualified Backend.ILA             as ILA (datatypes, reverseRenamings, runConverter, toIla)
+import qualified Backend.ILAANF          as ILAANF (ilaToAnf)
+import qualified Backend.ILB             as ILB (anfToIlb, runConverter)
+import           Language.Haskell.Parser (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax (HsModule)
+import           Preprocessor.Renamer    (evalRenamer, renameModule)
+import           Typechecker.Typechecker (evalTypeInferrer, inferModule)
 
 
 data Flags = Flags
@@ -39,16 +41,16 @@ main = do
     inputFile <- getArgs
     let usageMsg = "Usage: compiler-exe <input file>"
     case inputFile of
-        [] -> putStrLn usageMsg
+        []  -> putStrLn usageMsg
         [f] -> compile flags $ unpack f
-        _ -> putStrLn usageMsg
+        _   -> putStrLn usageMsg
 
 parse :: FilePath -> ExceptT Text IO HsModule
 parse f = do
     s <- readFile f
     case parseModule (unpack s) of
         ParseFailed loc err -> throwError $ "Parse failed at " <> showt loc <> " with error:\n" <> pack err
-        ParseOk m -> return m
+        ParseOk m           -> return m
 
 printLogsIfVerbose :: Flags -> [Text] -> IO ()
 printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
@@ -63,20 +65,27 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
             m <- embedExceptIOIntoResult $ parse f
-            (renamedModule, topLevelRenames) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
+            (renamedModule, reverseRenames1) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
             (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            let reverseRenames2 = ILA.reverseRenamings ilaState
+                reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
             ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb topLevelRenames (ILA.datatypes ilaState)
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb reverseRenames (ILA.datatypes ilaState)
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
+
+-- |"Extend" one map with another: given mappings x->y and y->z, create a mapping (x+y)->(y+z).
+combineReverseRenamings :: M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName
+combineReverseRenamings xs ys = M.unions [xToz, xs, ys]
+    where xToz = M.fromList $ flip map (M.toList xs) $ \(x,y) -> maybe (x,y) (x,) (M.lookup y ys)
 
 catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
 catchAdd x = withExceptT (\e -> unlines [e, showt x])

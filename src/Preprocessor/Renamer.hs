@@ -116,12 +116,12 @@ renames :: (Renameable a, Traversable f) => f a -> Renamer (f a)
 renames = mapM rename
 
 renameVariable :: HsName -> Renamer HsName
-renameVariable n@HsIdent{}  = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@HsSymbol{} = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameVariable n@HsSpecial{} = return n
 renameTypeVariable :: HsName -> Renamer HsName
-renameTypeVariable n@HsIdent{} = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@HsSymbol{} = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 renameTypeVariable n@HsSpecial{} = return n
 
 -- Renaming a module is a special case: we want to capture the renamings we used on the top-level variables for later
@@ -131,8 +131,8 @@ renameModule (HsModule a b c d decls) = do
     -- TODO(kc506): Remove when we get rid of hardcoded variables
     bindVariableForScope (M.keysSet builtinFunctions) $ do
         (decls', reverseMappings) <- renameDeclGroupWith decls (gets variableReverseMapping)
-        let topLevelRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMappings
-        return (HsModule a b c d decls', topLevelRenames)
+        let reverseRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMappings
+        return (HsModule a b c d decls', reverseRenames)
 
 instance Renameable HsQName where
     rename (Qual m n)  = Qual m <$> renameVariable n
@@ -176,10 +176,10 @@ instance Renameable HsDecl where
 
 instance Renameable HsConDecl where
     rename (HsConDecl loc name args) = HsConDecl loc <$> renameVariable name <*> renames args
-    rename HsRecDecl{} = throwError "Record data declarations not supported in renamer"
+    rename HsRecDecl{}               = throwError "Record data declarations not supported in renamer"
 
 instance Renameable HsBangType where
-    rename (HsBangedTy t) = HsBangedTy <$> rename t
+    rename (HsBangedTy t)   = HsBangedTy <$> rename t
     rename (HsUnBangedTy t) = HsUnBangedTy <$> rename t
 
 instance Renameable HsMatch where

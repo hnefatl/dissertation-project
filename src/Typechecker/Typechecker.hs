@@ -493,7 +493,7 @@ inferDecl _ = throwError "Declaration not yet supported"
 inferConDecl :: HsType -> Syntax.HsConDecl -> TypeInferrer Syntax.HsConDecl
 inferConDecl conType d@(HsConDecl _ name args) = do
     let argTypes = flip map args $ \arg -> case arg of
-            HsBangedTy t -> t
+            HsBangedTy t   -> t
             HsUnBangedTy t -> t
     qt <- synToQuantType $ HsQualType [] (makeSynFun argTypes conType)
     insertQuantifiedType (convertName name) qt

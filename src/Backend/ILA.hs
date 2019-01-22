@@ -8,7 +8,7 @@ module Backend.ILA where
 
 import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
-import           Control.Monad.Reader        (MonadReader, ReaderT, local, reader, runReaderT)
+import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
 import           Data.List                   (foldl', intersperse)
@@ -20,7 +20,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (mapError, middleText, synPrint)
+import           ExtraDefs                   (inverseMap, mapError, middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
@@ -146,13 +146,15 @@ instance Default ConverterReadableState where
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
-    { datatypes :: M.Map TypeVariableName Datatype
-    , kinds     :: M.Map TypeVariableName Kind }
+    { datatypes        :: M.Map TypeVariableName Datatype
+    , kinds            :: M.Map TypeVariableName Kind
+    , reverseRenamings :: M.Map VariableName VariableName }
     deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState
         { datatypes = M.empty
-        , kinds = M.empty }
+        , kinds = M.empty
+        , reverseRenamings = M.empty }
 instance TextShow ConverterState where
     showb = fromString . show
 
@@ -165,10 +167,12 @@ runConverter x ts ks = runStateT (runReaderT (local (addTypes ts) inner) def) de
 evalConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
 evalConverter x ts ks = fst <$> runConverter x ts ks
 
-addRenaming :: VariableName -> VariableName -> ConverterReadableState -> ConverterReadableState
-addRenaming x = addRenamings . M.singleton x
-addRenamings :: M.Map VariableName VariableName -> ConverterReadableState -> ConverterReadableState
-addRenamings rens state = state { renamings = M.union rens (renamings state) }
+addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
+addRenaming v r = addRenamings (M.singleton v r)
+addRenamings :: M.Map VariableName VariableName -> Converter a -> Converter a
+addRenamings rens action = do
+    modify (\st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) })
+    local (\st -> st { renamings = M.union rens (renamings st) }) action
 addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterReadableState -> ConverterReadableState
 addTypes ts state = state { types = M.union ts (types state) }
 addKinds :: M.Map TypeVariableName Kind -> Converter ()
@@ -179,15 +183,15 @@ addDatatype :: Datatype -> Converter ()
 addDatatype d = modify (\s -> s { datatypes = M.insert (typeName d) d (datatypes s) })
 
 getRenamed :: VariableName -> Converter VariableName
-getRenamed name = reader (M.lookup name . renamings) >>= \case
+getRenamed name = asks (M.lookup name . renamings) >>= \case
     Nothing -> throwError $ "Variable " <> showt name <> " not in renamings."
     Just renamed -> return renamed
 
 getRenamedOrDefault :: VariableName -> Converter VariableName
-getRenamedOrDefault name = reader (M.findWithDefault name name . renamings)
+getRenamedOrDefault name = asks (M.findWithDefault name name . renamings)
 
 getType :: VariableName -> Converter QuantifiedSimpleType
-getType name = reader (M.lookup name . types) >>= \case
+getType name = asks (M.lookup name . types) >>= \case
     Nothing -> throwError $ "Variable " <> showt name <> " not in type environment"
     Just t -> return t
 getSimpleType :: VariableName -> Converter Type
@@ -276,7 +280,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     let resultType  = T.makeTuple boundTypes
         resultTuple = makeTuple (zip renamedExps boundTypes)
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    resultExpr <- local (addRenamings renames . addTypes ts) $ do
+    resultExpr <- addRenamings renames $ local (addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
         patToIla pat rhst rhsExpr resultTuple resultType
@@ -346,7 +350,7 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
-    body <- local (addRenamings renames . addTypes renamedVariableTypes) $ do
+    body <- addRenamings renames $ local (addTypes renamedVariableTypes) $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
         patToIla p argType (Var argName argType) nextBody bodyType
     return (Lam argName argType body)
