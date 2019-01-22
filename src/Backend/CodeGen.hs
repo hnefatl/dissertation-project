@@ -60,12 +60,13 @@ freeVariables name args x = do
 convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
 convert cname primitiveClassDir bs main reverseRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
-    let bindings = jvmSanitises bs
+    let ds' = jvmSanitises ds
+        bindings = jvmSanitises bs
         initialState = ConverterState
             { mainName = main
             , localVarCounter = 0
-            , datatypes = jvmSanitises ds
-            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings <> map (S.map jvmSanitise . getBranchNames) (M.elems ds)
+            , datatypes = ds'
+            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
             , reverseRenames = reverseRenames
             , localSymbols = M.empty
             , initialisers = map (\gen -> gen cname) $ M.elems compilerGeneratedHooks
@@ -84,7 +85,7 @@ convert cname primitiveClassDir bs main reverseRenames ds = do
     writeLog "-----------"
     writeLog "Renames"
     forM_ (M.toList reverseRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
-    dataClasses <- compileDatatypes (M.elems ds) classpath
+    dataClasses <- compileDatatypes (M.elems ds') classpath
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
 
@@ -111,18 +112,20 @@ compileDatatypes :: [Datatype] -> [Tree CPEntry] -> ExceptT Text (LoggerT (NameG
 compileDatatypes ds classpath = do
     writeLog $ "Compiling datatypes: " <> showt ds
     forM ds $ \datatype -> do
-        let dname = "_" <> convertName (typeName datatype)
+        let dname = convertName (typeName datatype)
             dclass = toLazyBytestring dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
             compileDatatype = do
+                -- Create a boring constructor
                 void $ newMethod [ACC_PUBLIC] "<init>" [] ReturnsVoid $ do
                     aload_ I0
                     invokeSpecial boxedData Java.Lang.objectInit
                     i0 RETURN
+                -- Compile each constructor into a static "maker" method
                 zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
                     void $ addToPool (CClass boxedData)
                     let numArgs = length args
-                        methName = toLazyBytestring $ "_make_" <> convertName branchName
+                        methName = toLazyBytestring $ "_make" <> convertName branchName
                         methArgs = replicate numArgs heapObjectClass
                         methRet = Returns $ ObjectType $ unpack dname
                     newMethod methFlags methName methArgs methRet $ do
@@ -163,11 +166,10 @@ compileDictionaries = do
     forM_ dicts $ \(Types.IsInstance c t) -> do
         -- TODO(kc506): Verify the name's acceptable (like `NumInt`, not `Num[a]`)
         let name = showt c <> showt t
-            datatypeClassName = "_" <> name
-            datatype = ObjectType $ unpack datatypeClassName
+            datatype = ObjectType $ unpack name
         makePublicStaticField ("d" <> name) datatype $ \field -> do
             let method = ClassFile.NameType (toLazyBytestring $ "_make" <> name) $ MethodSignature [] (Returns datatype)
-            invokeStatic (toLazyBytestring datatypeClassName) method
+            invokeStatic (toLazyBytestring name) method
             putStaticField cname field
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
@@ -305,7 +307,7 @@ compileExp (ExpConApp con args) = do
     case find (\d -> con `elem` map fst (branches d)) ds of
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
         Just datatype -> do
-            let cname = "_" <> convertName (typeName datatype)
+            let cname = convertName (typeName datatype)
                 methodname = "_make" <> convertName con
                 methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
                 numArgs = length args
@@ -323,13 +325,13 @@ compileExp (ExpCase head vs alts) = do
     -- Branch: if the head object is a boxed data, we extract its branch value. Otherwise, we pop it and push 0 instead.
     dup
     instanceOf boxedData -- Crashes: why?
-    i0 $ IF C_EQ 12 -- If instanceof returned 0, the head's not data. Jump to the "else" block
+    i0 $ IF C_EQ 13 -- If instanceof returned 0, the head's not data. Jump to the "else" block
     do -- The "then" block
+        dup
         checkCast boxedData
         getField boxedData boxedDataBranch
-        goto 5 -- Jump past the "else" block
+        goto 4 -- Jump past the "else" block
     do -- The "else" block
-        pop
         iconst_0
     -- Compile the actual case expression
     compileCase alts
@@ -357,7 +359,7 @@ compileCase as = case partition isDefaultAlt as of
 bindDataVariables :: [VariableName] -> Converter ()
 bindDataVariables vs = do
     -- Replace the head expression with a ref to its data array
-    getField heapObject $ NameType "data" (arrayOf boxedDataClass)
+    getField boxedData boxedDataData
     zipOverM_ vs [0..] $ \var index -> do
         -- Store the data at the given index into the given variable
         dup

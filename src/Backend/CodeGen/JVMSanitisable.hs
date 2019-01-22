@@ -10,7 +10,7 @@ import           Data.Text                   (pack, unpack)
 import           Data.Bifunctor              (bimap)
 import qualified Data.Map.Strict as M
 
-import Names (VariableName(..))
+import Names (VariableName(..), TypeVariableName(..))
 import Backend.ILA (Binding(..), Alt(..), Datatype(..), AltConstructor(..))
 import Backend.ILB (Arg(..), Exp(..), Rhs(..))
 
@@ -30,6 +30,8 @@ instance JVMSanitisable String where
         where validChar c = isAlphaNum c || c == '$' || c == '_'
 instance JVMSanitisable Text where
     jvmSanitise = pack . jvmSanitise . unpack
+instance JVMSanitisable TypeVariableName where
+    jvmSanitise (TypeVariableName n) = TypeVariableName (jvmSanitise n)
 instance JVMSanitisable VariableName where
     jvmSanitise (VariableName n) = VariableName (jvmSanitise n)
 instance JVMSanitisable Arg where
@@ -55,4 +57,6 @@ instance JVMSanitisable a => JVMSanitisable (Binding a) where
     jvmSanitise (Rec m) = Rec $ M.fromList $ map (bimap jvmSanitise jvmSanitise) $ M.toList m
 
 instance JVMSanitisable Datatype where
-    jvmSanitise d = d { branches = [ (jvmSanitise v, as) | (v, as) <- branches d ] }
+    jvmSanitise d = d
+        { typeName = jvmSanitise $ typeName d
+        , branches = [ (jvmSanitise v, as) | (v, as) <- branches d ] }

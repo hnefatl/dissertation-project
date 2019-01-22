@@ -121,7 +121,7 @@ data Expr = Var VariableName Type -- Variable/function
     deriving (Eq, Ord)
 instance TextShow Expr where
     showb (Var n t) = showb n <> " :: " <> showb t
-    showb (Con n t) = showb n <> " :: " <> showb t
+    showb (Con n t) = showb n <> " ;; " <> showb t
     showb (Lit l t) = showb l <> " :: " <> showb t
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
@@ -216,7 +216,7 @@ makeTuple ps = makeTuple' es t
         t        = T.makeFun ts (T.makeTuple ts)
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the tuple
 makeTuple' :: [Expr] -> Type -> Expr
-makeTuple' es t = foldl' App base es where base = Var "(,)" t
+makeTuple' es t = foldl' App base es where base = Con "(,)" t
 
 makeList :: MonadError Text m => [(Expr, Type)] -> m Expr
 makeList [] = throwError "Empty list passed to makeList"
@@ -337,7 +337,11 @@ rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
-expToIla (HsExpTypeSig _ (HsVar v) t) = Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
+expToIla (HsExpTypeSig loc (HsVar v) t) = case v of
+    Special{}          -> expToIla (HsExpTypeSig loc (HsCon v) t)
+    UnQual HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
+    Qual _ HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
+    _                  -> Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
 expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
 expToIla (HsExpTypeSig _ (HsLit l) t) = Lit <$> litToIla l <*> getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2

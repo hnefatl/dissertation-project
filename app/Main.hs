@@ -67,9 +67,12 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             m <- embedExceptIOIntoResult $ parse f
             (renamedModule, reverseRenames1) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
             mainName <- case M.toList $ M.filter (== "_main") reverseRenames1 of
-                [] -> throwError "No _main symbol found."
+                []       -> throwError "No _main symbol found."
                 [(n, _)] -> return n
-                ns -> throwError $ "Multiple _main symbols found: " <> showt (map fst ns)
+                ns       -> throwError $ "Multiple _main symbols found: " <> showt (map fst ns)
+            putStrLn $ pretty m
+            putStrLn "-------------------------------------------"
+            putStrLn $ pretty renamedModule
             (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]

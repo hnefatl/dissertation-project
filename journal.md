@@ -144,6 +144,8 @@ peephole.
 Deoverloader does a source-to-source translation to replace typeclasses with datatypes, and instances with datatypes and
 functions.
 
+Should write some tests for jvmsanitise: make sure the alphabet's correct, make sure it's idempotent.
+
 For the record: spent ages rewriting bits of hs-java and tweaking stuff to try to get invokeDynamic to work correctly.
 Need to generate bootstrap methods and stuff...
 Also added `checkcast` instruction, `putstaticfield`, `invokedynamic`.

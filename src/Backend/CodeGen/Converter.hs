@@ -170,7 +170,7 @@ toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringCla
 makeInt :: NameType Method
 makeInt = NameType "_makeInt" $ MethodSignature [IntType] (Returns intClass)
 boxedDataBranch :: NameType Field
-boxedDataBranch = NameType "branch" $ IntType
+boxedDataBranch = NameType "branch" IntType
 boxedDataData :: NameType Field
 boxedDataData = NameType "data" $ arrayOf heapObjectClass
 
