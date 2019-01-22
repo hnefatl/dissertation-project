@@ -22,7 +22,7 @@ import qualified Backend.CodeGen         as CodeGen (convert, writeClass)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
 import qualified Backend.ILA             as ILA (datatypes, reverseRenamings, runConverter, toIla)
 import qualified Backend.ILAANF          as ILAANF (ilaToAnf)
-import qualified Backend.ILB             as ILB (anfToIlb, runConverter)
+import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
@@ -66,6 +66,10 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
           x = do
             m <- embedExceptIOIntoResult $ parse f
             (renamedModule, reverseRenames1) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
+            mainName <- case M.toList $ M.filter (== "_main") reverseRenames1 of
+                [] -> throwError "No _main symbol found."
+                [(n, _)] -> return n
+                ns -> throwError $ "Multiple _main symbols found: " <> showt (map fst ns)
             (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
@@ -76,9 +80,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila]
             ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
-            ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.runConverter (ILB.anfToIlb ilaanf) (M.keysSet builtinConstructors)
+            ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb reverseRenames (ILA.datatypes ilaState)
+            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
 

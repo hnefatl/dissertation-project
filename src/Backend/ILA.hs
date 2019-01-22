@@ -44,6 +44,9 @@ data Datatype = Datatype
 instance TextShow Datatype where
     showb = fromString . show
 
+getBranchNames :: Datatype -> S.Set VariableName
+getBranchNames d = S.fromList $ map fst $ branches d
+
 -- TODO(kc506): Not sure if we need... maybe for instances?
 data Typeclass = Typeclass
     { head    :: TypePredicate
@@ -107,7 +110,8 @@ getBindingVariables (NonRec v _) = S.singleton v
 getBindingVariables (Rec m)      = M.keysSet m
 
 -- |The AST of ILA
-data Expr = Var VariableName Type -- Variable/function/data constructor
+data Expr = Var VariableName Type -- Variable/function
+          | Con VariableName Type -- Data constructor
           | Lit Literal Type
           | App Expr Expr -- Application of terms or types
           | Lam VariableName Type Expr -- Abstraction of terms or types
@@ -117,6 +121,7 @@ data Expr = Var VariableName Type -- Variable/function/data constructor
     deriving (Eq, Ord)
 instance TextShow Expr where
     showb (Var n t) = showb n <> " :: " <> showb t
+    showb (Con n t) = showb n <> " :: " <> showb t
     showb (Lit l t) = showb l <> " :: " <> showb t
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
@@ -127,6 +132,7 @@ instance TextShow Expr where
 
 getExprType :: MonadError Text m => Expr -> m Type
 getExprType (Var _ t)                = return t
+getExprType (Con _ t)                = return t
 getExprType (Lit _ t)                = return t
 getExprType (App e1 _)               = snd <$> (T.unwrapFun =<< getExprType e1)
 getExprType (Lam _ t e)              = T.makeFun [t] <$> getExprType e
@@ -332,7 +338,7 @@ rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
 
 expToIla :: HsExp -> Converter Expr
 expToIla (HsExpTypeSig _ (HsVar v) t) = Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
-expToIla (HsExpTypeSig _ (HsCon c) t) = Var (convertName c) <$> getSimpleFromSynType t
+expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
 expToIla (HsExpTypeSig _ (HsLit l) t) = Lit <$> litToIla l <*> getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"

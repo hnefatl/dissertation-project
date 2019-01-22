@@ -498,7 +498,7 @@ inferConDecl conType d@(HsConDecl _ name args) = do
     qt <- synToQuantType $ HsQualType [] (makeSynFun argTypes conType)
     insertQuantifiedType (convertName name) qt
     return d
-inferConDecl _ HsRecDecl{} = throwError $ "Record data declarations not supported in typechecker"
+inferConDecl _ HsRecDecl{} = throwError "Record data declarations not supported in typechecker"
 
 -- |Returns True if the given declaration can contain recursive references with other declarations
 needsRecursiveBinding :: MonadError Text m => Syntax.HsDecl -> m Bool
@@ -524,9 +524,11 @@ inferDecls ds = do
 inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
+    prettyGroups <- mapM (fmap showtSet . getBoundVariables) dependencyGroups
+    writeLog $ "Dependency groups: " <> showt prettyGroups
     declExps <- forM dependencyGroups $ \group -> do
-        boundNames <- S.toList <$> getBoundVariables group
-        writeLog $ "Processing binding group {" <> mconcat (intersperse "," $ map showt boundNames) <> "}"
+        boundNames <- getBoundVariables group
+        writeLog $ "Processing binding group " <> showtSet boundNames
         inferDecls group
     return $ concat declExps
 

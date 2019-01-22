@@ -27,8 +27,9 @@ extra-deps:
 - binary-state-0.1.1
 - text-show-3.7.5
 - text-show-instances-3.7
-- github: hnefatl/hs-java
-  commit: 0b0920be4bdd7ecb272c4d383584513997a1ba96
+- ../hs-java
+#- github: hnefatl/hs-java
+#  commit: 0b0920be4bdd7ecb272c4d383584513997a1ba96
 - github: hnefatl/haskell-src
   commit: 0b47aff4835b84697cf5cbcf9c90db19486363e8
 

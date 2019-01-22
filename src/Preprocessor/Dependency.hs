@@ -10,10 +10,11 @@ import           Data.List                   (nub)
 import qualified Data.Set                    as S
 import           Language.Haskell.Syntax
 
+import           Logger                      (MonadLogger)
 import           NameGenerator
 import           Preprocessor.ContainedNames
 
-dependencyOrder :: (MonadNameGenerator m, MonadError Text m) => [HsDecl] -> m [[HsDecl]]
+dependencyOrder :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [HsDecl] -> m [[HsDecl]]
 dependencyOrder ds = do
     declBindings <- getBoundVariables ds -- The names bound in this declaration group
     let declToNodes d = do

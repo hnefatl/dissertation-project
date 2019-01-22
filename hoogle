@@ -2,3 +2,8 @@
 
 
 (stack hoogle --rebuild ; stack hoogle --server) &>> hoogle.log &
+
+# Wait for the hoogle server to start
+while ! nc -z localhost 8080; do   
+  sleep 1
+done

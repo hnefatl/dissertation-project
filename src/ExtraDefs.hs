@@ -79,3 +79,6 @@ setMapIntersect s m = M.elems $ M.intersection m (M.fromSet (const ()) s)
 
 inverseMap :: (Ord a, Ord b) => M.Map a b -> M.Map b a
 inverseMap = M.fromList . map swap . M.toList
+
+showtSet :: TextShow a => S.Set a -> Text
+showtSet s = "{" <> mconcat (intersperse "," $ map showt $ S.toList s) <> "}"

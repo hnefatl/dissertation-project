@@ -21,7 +21,7 @@ import           JVM.ClassFile               hiding (Class, Field, Method, toStr
 import qualified JVM.ClassFile               as ClassFile
 
 import           Backend.ILA                 (Literal(..), Datatype(..))
-import           Backend.ILB                 hiding (Converter, ConverterState)
+import           Backend.ILB
 import           ExtraDefs                   (toLazyBytestring)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
@@ -41,7 +41,9 @@ instance TextShow NamedClass where
     showb = fromString . show
 
 data ConverterState = ConverterState
-    { -- Which JVM local variable we're up to
+    { -- The variable name that the entry point "_main" has been renamed to
+      mainName :: VariableName
+    ,  -- Which JVM local variable we're up to
       localVarCounter :: LocalVar
     , datatypes       :: M.Map TypeVariableName Datatype
     , -- Top-level variable names. Eg `x = 1 ; y = let z = 2 in z` has top-level variable names x and y. This is used

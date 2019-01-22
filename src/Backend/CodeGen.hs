@@ -31,10 +31,11 @@ import           JVM.Converter
 
 import           Backend.CodeGen.Converter
 import           Backend.CodeGen.Hooks          (compilerGeneratedHooks)
-import           Backend.CodeGen.JVMSanitisable (jvmSanitises)
+import           Backend.CodeGen.JVMSanitisable (jvmSanitise, jvmSanitises)
 import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
-                                                 getBindingVariables, isDataAlt, isDefaultAlt, isLiteralAlt)
-import           Backend.ILB                    hiding (Converter, ConverterState)
+                                                 getBindingVariables, getBranchNames, isDataAlt, isDefaultAlt,
+                                                 isLiteralAlt)
+import           Backend.ILB
 import           ExtraDefs                      (toLazyBytestring, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
 import           NameGenerator
@@ -56,14 +57,15 @@ freeVariables name args x = do
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs reverseRenames ds = do
+convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname primitiveClassDir bs main reverseRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let bindings = jvmSanitises bs
         initialState = ConverterState
-            { localVarCounter = 0
+            { mainName = main
+            , localVarCounter = 0
             , datatypes = jvmSanitises ds
-            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings
+            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings <> map (S.map jvmSanitise . getBranchNames) (M.elems ds)
             , reverseRenames = reverseRenames
             , localSymbols = M.empty
             , initialisers = map (\gen -> gen cname) $ M.elems compilerGeneratedHooks
@@ -97,7 +99,8 @@ addMainMethod = do
         -- Perform any initialisation actions
         sequence_ =<< gets initialisers
         getStaticField Java.Lang.system Java.IO.out
-        pushGlobalSymbol "_main" heapObjectClass
+        main <- jvmSanitise <$> gets mainName
+        pushGlobalSymbol main heapObjectClass
         invokeVirtual heapObject force
         invokeVirtual heapObject toString
         invokeVirtual Java.IO.printStream Java.IO.println
@@ -111,34 +114,39 @@ compileDatatypes ds classpath = do
         let dname = "_" <> convertName (typeName datatype)
             dclass = toLazyBytestring dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
-            compileDatatype = zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
-                void $ addToPool (CClass boxedData)
-                let numArgs = length args
-                    methName = toLazyBytestring $ "_make" <> convertName branchName
-                    methArgs = replicate numArgs heapObjectClass
-                    methRet = Returns $ ObjectType $ unpack dname
-                newMethod methFlags methName methArgs methRet $ do
-                    -- Create a new instance of the class representing this datatype
-                    new dclass
-                    dup
-                    invokeSpecial dclass Java.Lang.objectInit
-                    -- Fill out the branch field with eg. 0 for Nothing or 1 for Just.
-                    dup
-                    pushInt branchTag
-                    putField dclass boxedDataBranch
-                    -- Create a data array, fill it with the arguments
-                    dup
-                    pushInt numArgs
-                    allocNewArray heapObject
-                    forM_ [0..numArgs - 1] $ \i -> do
+            compileDatatype = do
+                void $ newMethod [ACC_PUBLIC] "<init>" [] ReturnsVoid $ do
+                    aload_ I0
+                    invokeSpecial boxedData Java.Lang.objectInit
+                    i0 RETURN
+                zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
+                    void $ addToPool (CClass boxedData)
+                    let numArgs = length args
+                        methName = toLazyBytestring $ "_make_" <> convertName branchName
+                        methArgs = replicate numArgs heapObjectClass
+                        methRet = Returns $ ObjectType $ unpack dname
+                    newMethod methFlags methName methArgs methRet $ do
+                        -- Create a new instance of the class representing this datatype
+                        new dclass
                         dup
-                        pushInt i
-                        loadLocal (fromIntegral i)
-                        aastore
-                    -- Assign it to the datatype's data field
-                    putField dclass boxedDataData
-                    -- Return the instance of our class, fully initialised
-                    i0 ARETURN
+                        invokeSpecial dclass Java.Lang.objectInit
+                        -- Fill out the branch field with eg. 0 for Nothing or 1 for Just.
+                        dup
+                        pushInt branchTag
+                        putField dclass boxedDataBranch
+                        -- Create a data array, fill it with the arguments
+                        dup
+                        pushInt numArgs
+                        allocNewArray heapObject
+                        forM_ [0..numArgs - 1] $ \i -> do
+                            dup
+                            pushInt i
+                            loadLocal (fromIntegral i)
+                            aastore
+                        -- Assign it to the datatype's data field
+                        putField dclass boxedDataData
+                        -- Return the instance of our class, fully initialised
+                        i0 ARETURN
         case runExcept $ generate classpath dclass compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
@@ -214,7 +222,8 @@ compileGlobalClosure :: VariableName -> Rhs -> Converter (ClassFile.NameType Fie
 compileGlobalClosure v (RhsClosure args body) = do
     -- We're compiling a global function, so it shouldn't have any non top-level free variables
     fvs <- freeVariables v args body
-    unless (null fvs) $ throwTextError $ unlines ["Top-level function has free variables: " <> showt v, showt fvs, showt args, showt body]
+    tls <- gets (M.keysSet . topLevelSymbols)
+    unless (null fvs) $ throwTextError $ unlines ["Top-level function has free variables: " <> showt v, "FVs: " <> showt fvs, "Args: " <> showt args, "Body: " <> showt body, "Top-level symbols:" <> showt tls]
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
     -- Get a function instance using f, then store it as a static field
@@ -254,7 +263,7 @@ compileFunction :: VariableName -> [VariableName] -> Exp -> Converter (ClassFile
 compileFunction name args body = do
     freeVars <- freeVariables name args body
     writeLog $ "Function " <> showt name <> " has free variables " <> showt freeVars
-    let implName = "_" <> convertName name <> "Impl"
+    let implName = convertName name <> "Impl"
         implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
         implAccs = [ACC_PRIVATE, ACC_STATIC]
     inScope $ do
@@ -304,7 +313,6 @@ compileExp (ExpConApp con args) = do
             forM_ args pushArg
             invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
 compileExp (ExpCase head vs alts) = do
-    nop
     compileExp head
     -- Evaluate the expression
     invokeVirtual heapObject enter
@@ -313,7 +321,8 @@ compileExp (ExpCase head vs alts) = do
         dup -- Copy the head expression
         storeLocal var -- Store it locally
     -- Branch: if the head object is a boxed data, we extract its branch value. Otherwise, we pop it and push 0 instead.
-    instanceOf boxedData
+    dup
+    instanceOf boxedData -- Crashes: why?
     i0 $ IF C_EQ 12 -- If instanceof returned 0, the head's not data. Jump to the "else" block
     do -- The "then" block
         checkCast boxedData

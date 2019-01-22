@@ -8,9 +8,7 @@ module Backend.ILB where
 import           Backend.ILA                 (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILAANF              as ANF
 import           BasicPrelude
-import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
-import           Control.Monad.Extra         (ifM)
-import           Control.Monad.Reader        (Reader, asks, runReader)
+import           Control.Monad.Except        (MonadError, throwError)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           ExtraDefs                   (secondM)
@@ -48,41 +46,28 @@ instance TextShow Exp where
 instance TextShow Rhs where
     showb (RhsClosure vs e) = "\\" <> showb vs <> " -> " <> showb e
 
-data ConverterState = ConverterState
-    { constructors :: S.Set VariableName }
-    deriving (Eq, Ord, Show)
-instance TextShow ConverterState where
-    showb = fromString . show
-newtype Converter a = Converter (ExceptT Text (Reader ConverterState) a)
-    deriving (Functor, Applicative, Monad, MonadError Text)
-
-runConverter :: Converter a -> S.Set VariableName -> Except Text a
-runConverter (Converter inner) s = liftEither $ runReader (runExceptT inner) (ConverterState s)
-
-isConstructor :: VariableName -> Converter Bool
-isConstructor n = Converter $ asks (S.member n . constructors)
-
-anfToIlb :: [Binding ANF.AnfRhs] -> Converter [Binding Rhs]
+anfToIlb :: MonadError Text m => [Binding ANF.AnfRhs] -> m [Binding Rhs]
 anfToIlb = mapM anfBindingToIlbBinding
-anfBindingToIlbBinding :: Binding ANF.AnfRhs -> Converter (Binding Rhs)
+anfBindingToIlbBinding :: MonadError Text m => Binding ANF.AnfRhs -> m (Binding Rhs)
 anfBindingToIlbBinding (NonRec v r) = NonRec v <$> anfRhsToIlbRhs r
 anfBindingToIlbBinding (Rec m)      = Rec . M.fromList <$> mapM (secondM anfRhsToIlbRhs) (M.toList m)
 
-anfRhsToIlbRhs :: ANF.AnfRhs -> Converter Rhs
+anfRhsToIlbRhs :: MonadError Text m => ANF.AnfRhs -> m Rhs
 anfRhsToIlbRhs (ANF.Lam arg _ e) = do -- Aggregate any nested lambdas into one
     RhsClosure args body <- anfRhsToIlbRhs e -- TODO(kc506): If we add more constructors to RHS, update
     return $ RhsClosure (arg:args) body
 anfRhsToIlbRhs (ANF.Complex e) = RhsClosure [] <$> anfComplexToIlbExp e
 
-anfComplexToIlbExp :: ANF.AnfComplex -> Converter Exp
+anfComplexToIlbExp ::  MonadError Text m => ANF.AnfComplex -> m Exp
 anfComplexToIlbExp (ANF.Let v _ r b)  = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
 anfComplexToIlbExp (ANF.Case s bs as) = ExpCase <$> anfComplexToIlbExp s <*> pure bs <*> mapM anfAltToIlbAlt as
 anfComplexToIlbExp (ANF.CompApp a)    = anfComplexToIlbApp a
 anfComplexToIlbExp (ANF.Trivial t)    = maybe (throwError "Unexpected type in expression") return (anfTrivialToExp t)
 
-anfComplexToIlbApp :: ANF.AnfApplication -> Converter Exp
+anfComplexToIlbApp :: MonadError Text m => ANF.AnfApplication -> m Exp
 anfComplexToIlbApp (ANF.TrivApp a) = case a of
-    ANF.Var n _ -> ifM (isConstructor n) (return $ ExpConApp n []) (return $ ExpApp n [])
+    ANF.Var n _ -> return $ ExpApp n []
+    ANF.Con n _ -> return $ ExpConApp n []
     e           -> throwError $ "Application to a " <> showt e
 anfComplexToIlbApp (ANF.App a e) = (anfTrivialToArg e,) <$> anfComplexToIlbApp a >>= \case
     (Just arg, ExpConApp n args) -> return $ ExpConApp n (args ++ [arg])
@@ -92,15 +77,17 @@ anfComplexToIlbApp (ANF.App a e) = (anfTrivialToArg e,) <$> anfComplexToIlbApp a
 
 anfTrivialToArg :: ANF.AnfTrivial -> Maybe Arg
 anfTrivialToArg (ANF.Var v _) = Just $ ArgVar v
+anfTrivialToArg ANF.Con{}     = Nothing
 anfTrivialToArg (ANF.Lit l _) = Just $ ArgLit l
 anfTrivialToArg ANF.Type{}    = Nothing
 
 anfTrivialToExp :: ANF.AnfTrivial -> Maybe Exp
 anfTrivialToExp (ANF.Var v _) = Just $ ExpVar v
+anfTrivialToExp (ANF.Con n _) = Just $ ExpConApp n []
 anfTrivialToExp (ANF.Lit l _) = Just $ ExpLit l
 anfTrivialToExp ANF.Type{}    = Nothing
 
-anfAltToIlbAlt :: Alt ANF.AnfComplex -> Converter (Alt Exp)
+anfAltToIlbAlt :: MonadError Text m => Alt ANF.AnfComplex -> m (Alt Exp)
 anfAltToIlbAlt (Alt c vs e) = Alt c vs <$> anfComplexToIlbExp e
 
 

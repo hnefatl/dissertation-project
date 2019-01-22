@@ -18,6 +18,7 @@ import qualified Typechecker.Types    as T
 -- These datatypes are inspired by the grammar in https://github.com/ghc/ghc/blob/6353efc7694ba8ec86c091918e02595662169ae2/compiler/coreSyn/CorePrep.hs#L144-L160
 -- |Trivial ANF expressions are "atoms": variables, literals, types.
 data AnfTrivial = Var VariableName Type
+                | Con VariableName Type
                 | Lit Literal Type
                 | Type Type
     deriving (Eq, Ord)
@@ -38,6 +39,7 @@ data AnfRhs = Lam VariableName Type AnfRhs -- Lambdas are only allowed at top-le
     deriving (Eq, Ord)
 instance TextShow AnfTrivial where
     showb (Var v t) = showb v <> " :: " <> showb t
+    showb (Con v t) = showb v <> " :: " <> showb t
     showb (Lit l t) = showb l <> " :: " <> showb t
     showb (Type t)  = showb t
 instance TextShow AnfApplication where
@@ -58,6 +60,7 @@ instance TextShow AnfRhs where
 
 getAnfTrivialType :: MonadError Text m => AnfTrivial -> m Type
 getAnfTrivialType (Var _ t) = return t
+getAnfTrivialType (Con _ t) = return t
 getAnfTrivialType (Lit _ t) = return t
 getAnfTrivialType (Type t)  = return t
 getAnfAppType :: MonadError Text m => AnfApplication -> m Type
@@ -100,6 +103,7 @@ ilaBindingToAnf (Rec m)      = Rec . M.fromList <$> mapM (secondM ilaExpToRhs) (
 
 ilaExpToTrivial :: MonadError Text m => ILA.Expr -> m AnfTrivial
 ilaExpToTrivial (ILA.Var v t) = return $ Var v t
+ilaExpToTrivial (ILA.Con v t) = return $ Con v t
 ilaExpToTrivial (ILA.Lit l t) = return $ Lit l t
 ilaExpToTrivial (ILA.Type t)  = return $ Type t
 ilaExpToTrivial e             = throwError $ "Non-trivial ILA to be converted to an ILA-ANF trivial: " <> showt e
@@ -113,6 +117,7 @@ ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF 
 
 ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
 ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Con{}        = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.App{}        = ilaExpToApp e

@@ -210,7 +210,7 @@ instance Renameable HsPat where
 
 instance Renameable HsExp where
     rename (HsVar n) = HsVar <$> rename n
-    rename (HsCon c) = return $ HsCon c
+    rename (HsCon c) = HsCon <$> rename c
     rename l@(HsLit _) = return l
     rename (HsInfixApp e1 op e2) = HsInfixApp <$> rename e1 <*> rename op <*> rename e2
     rename (HsApp e1 e2) = HsApp <$> rename e1 <*> rename e2

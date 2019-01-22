@@ -76,7 +76,7 @@ instance HasFreeVariables HsRhs where
     getFreeVariables (HsGuardedRhss _)  = throwError "Guarded rhss not supported"
 instance HasFreeVariables HsExp where
     getFreeVariables (HsVar name)          = return $ S.singleton $ convertName name
-    getFreeVariables (HsCon _)             = return S.empty
+    getFreeVariables (HsCon name)          = return $ S.singleton $ convertName name
     getFreeVariables (HsLit _)             = return S.empty
     getFreeVariables (HsInfixApp e1 op e2) = S.insert (convertName op) <$> getFreeVariables [e1, e2]
     getFreeVariables (HsApp e1 e2)         = S.union <$> getFreeVariables e1 <*> getFreeVariables e2
