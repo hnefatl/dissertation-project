@@ -356,7 +356,7 @@ inferExpression (HsCase scrut alts) = do
     (scrut', scrutVar) <- inferExpression scrut
     scrutType <- nameToType scrutVar
     (alts', commonType) <- inferAlts scrutType alts
-    return (HsCase scrut' alts', commonType)
+    makeExpTypeWrapper (HsCase scrut' alts') commonType
 inferExpression (HsIf cond e1 e2) = do
     (condExp, condVar) <- inferExpression cond
     condType <- getQuantifiedType condVar
