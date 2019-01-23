@@ -351,6 +351,12 @@ inferExpression (HsLet decls body) = do
     declExps <- inferDeclGroup decls
     (bodyExp, bodyVar) <- inferExpression body
     makeExpTypeWrapper (HsLet declExps bodyExp) bodyVar
+inferExpression (HsCase scrut alts) = do
+    -- Oh boy. Get head type, check pattern types match, check alt types match, return common alt type?
+    (scrut', scrutVar) <- inferExpression scrut
+    scrutType <- nameToType scrutVar
+    (alts', commonType) <- inferAlts scrutType alts
+    return (HsCase scrut' alts', commonType)
 inferExpression (HsIf cond e1 e2) = do
     (condExp, condVar) <- inferExpression cond
     condType <- getQuantifiedType condVar
@@ -419,6 +425,40 @@ inferPattern p = throwError $ "Unsupported pattern: " <> showt p
 inferPatterns :: [Syntax.HsPat] -> TypeInferrer [TypeVariableName]
 inferPatterns = mapM inferPattern
 
+inferAlt :: Type -> HsAlt -> TypeInferrer (HsAlt, TypeVariableName)
+inferAlt patType (HsAlt loc pat galt wheres) = do
+    wheres' <- inferDeclGroup wheres
+    patType' <- nameToType =<< inferPattern pat
+    unify patType patType'
+    (galt', altVar) <- inferGuardedAlts galt
+    return (HsAlt loc pat galt' wheres', altVar)
+inferAlts :: Type -> [HsAlt] -> TypeInferrer ([HsAlt], TypeVariableName)
+inferAlts patType alts = do
+    (alts', vs) <- unzip <$> mapM (inferAlt patType) alts
+    commonVar <- freshTypeVarName
+    commonType <- nameToType commonVar
+    mapM_ (unify commonType) =<< mapM nameToType vs
+    return (alts', commonVar)
+
+inferGuardedAlts :: HsGuardedAlts -> TypeInferrer (HsGuardedAlts, TypeVariableName)
+inferGuardedAlts (HsUnGuardedAlt e) = do
+    (e', v) <- inferExpression e
+    return (HsUnGuardedAlt e', v)
+inferGuardedAlts (HsGuardedAlts guards) = do
+    (guards', vs) <- unzip <$> mapM inferGuardedAlt guards
+    commonVar <- freshTypeVarName
+    commonType <- nameToType commonVar
+    mapM_ (unify commonType) =<< mapM nameToType vs
+    return (HsGuardedAlts guards', commonVar)
+
+inferGuardedAlt :: HsGuardedAlt -> TypeInferrer (HsGuardedAlt, TypeVariableName)
+inferGuardedAlt (HsGuardedAlt loc cond e) = do
+    (cond', condVar) <- inferExpression cond
+    condType <- getQuantifiedType condVar
+    unless (condType == Quantified S.empty (Qualified S.empty typeBool)) $
+        throwError $ unlines ["Expression in case guard has non-boolean type:", synPrint cond, showt condType]
+    (e', eVar) <- inferExpression e
+    return (HsGuardedAlt loc cond' e', eVar)
 
 -- |Infer the type of a branch of an alternative (as used in case statements and partial defns of functions). The
 -- returned expression is the given expression wrapped in an explicit type signature

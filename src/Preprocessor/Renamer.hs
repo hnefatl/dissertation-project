@@ -7,7 +7,7 @@
 
 module Preprocessor.Renamer where
 
-import           BasicPrelude
+import           BasicPrelude                hiding (head)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
 import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
@@ -220,13 +220,20 @@ instance Renameable HsExp where
         bindVariableForScope names (HsLambda l <$> renames ps <*> rename e)
     rename (HsLet decls e) = uncurry HsLet <$> renameDeclGroupWith decls (rename e)
     rename (HsIf e1 e2 e3) = HsIf <$> rename e1 <*> rename e2 <*> rename e3
-    rename (HsCase _ _) = throwError "Case expression not supported"
+    rename (HsCase head alts) = HsCase <$> rename head <*> renames alts
     rename (HsDo _) = throwError "Do expression not supported"
     rename (HsTuple es) = HsTuple <$> renames es
     rename (HsList es) = HsList <$> renames es
     rename (HsParen e) = HsParen <$> rename e
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename _ = throwError "Renaming expression not supported"
+instance Renameable HsAlt where
+    rename (HsAlt loc pat alts wheres) = HsAlt loc pat <$> rename alts <*> renames wheres
+instance Renameable HsGuardedAlts where
+    rename (HsUnGuardedAlt e) = HsUnGuardedAlt <$> rename e
+    rename (HsGuardedAlts as) = HsGuardedAlts <$> renames as
+instance Renameable HsGuardedAlt where
+    rename (HsGuardedAlt loc cond e) = HsGuardedAlt loc <$> rename cond <*> rename e
 
 renameQualTypeWithExistingScope :: HsQualType -> Renamer HsQualType
 renameQualTypeWithExistingScope qt@(HsQualType quals t) = do

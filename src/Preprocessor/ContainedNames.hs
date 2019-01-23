@@ -96,6 +96,7 @@ instance HasFreeVariables HsExp where
     getFreeVariables (HsNegApp e)          = getFreeVariables e
     getFreeVariables (HsLambda _ pats e)   = S.difference <$> getFreeVariables e <*> getBoundVariables pats
     getFreeVariables (HsLet ds e)          = S.union <$> getFreeVariables ds <*> getFreeVariables e
+    getFreeVariables (HsCase scrut alts)   = S.union <$> getFreeVariables scrut <*> getFreeVariables alts
     getFreeVariables (HsIf e1 e2 e3)       = getFreeVariables [e1, e2, e3]
     getFreeVariables (HsTuple es)          = getFreeVariables es
     getFreeVariables (HsList es)           = getFreeVariables es
@@ -115,6 +116,13 @@ instance HasFreeVariables HsPat where
     getFreeVariables (HsPTuple ps)           = getFreeVariables ps
     getFreeVariables (HsPList ps)            = getFreeVariables ps
     getFreeVariables HsPRec{}                = throwError "Pattern records not supported"
+instance HasFreeVariables HsAlt where
+    getFreeVariables (HsAlt _ _ as ds) = S.union <$> getFreeVariables as <*> getFreeVariables ds
+instance HasFreeVariables HsGuardedAlts where
+    getFreeVariables (HsUnGuardedAlt e) = getFreeVariables e
+    getFreeVariables (HsGuardedAlts as) = getFreeVariables as
+instance HasFreeVariables HsGuardedAlt where
+    getFreeVariables (HsGuardedAlt _ e1 e2) = S.union <$> getFreeVariables e1 <*> getFreeVariables e2
 
 instance HasFreeTypeVariables HsQualType where
     getFreeTypeVariables (HsQualType quals t) = S.union (getFreeTypeVariables quals) (getFreeTypeVariables t)

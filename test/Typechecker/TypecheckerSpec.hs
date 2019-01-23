@@ -331,4 +331,13 @@ test = let
     ,
         testBindings "f 0 0 = 1 ; f x y = x + y"
             [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta, ta] ta) ]
+    ,
+        testBindings "x = case True of { True -> 0 ; False -> 1 }"
+            [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
+    ,
+        testBindingsFail "x = case True of { True -> 0 ; 1 -> 1 }"
+    ,
+        testBindingsFail "x = case True of { True -> 0 ; False -> False }"
+    ,
+        testBindingsFail "x = case 0 of { True -> 0 ; False -> False }"
     ]
