@@ -52,4 +52,6 @@ test = testGroup "Dependency Analysis"
     , makeTest "_ = 1" [[]]
     , makeTest "data Bool = True | False ; x = True" [["True", "False"], ["x"]]
     , makeTest "x = True ; data Bool = True | False " [["True", "False"], ["x"]]
+    , makeTest "data Bool = True | False ; x True = 0" [["True", "False"], ["x"]]
+    , makeTest "x 1 () = 0 ; data () = ()" [["()"], ["x"]]
     ]

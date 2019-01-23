@@ -146,6 +146,12 @@ instance AlphaEq HsDecl where
         alphaEq' pat1 pat2
         alphaEq' rhs1 rhs2
         alphaEq' ds1 ds2
+    alphaEq' (HsFunBind matches1) (HsFunBind matches2) = alphaEq' matches1 matches2
+    alphaEq' (HsDataDecl _ _ name1 args1 cons1 derivings1) (HsDataDecl _ _ name2 args2 cons2 derivings2) = do
+        alphaEq' name1 name2
+        alphaEq' args1 args2
+        alphaEq' cons1 cons2
+        alphaEq' derivings1 derivings2
     alphaEq' (HsTypeSig _ names1 t1) (HsTypeSig _ names2 t2) = alphaEq' names1 names2 >> alphaEq' t1 t2
     alphaEq' (HsClassDecl _ ctx1 name1 args1 ds1) (HsClassDecl _ ctx2 name2 args2 ds2) = do
         alphaEq' ctx1 ctx2
@@ -153,6 +159,16 @@ instance AlphaEq HsDecl where
         alphaEq' args1 args2
         alphaEq' ds1 ds2
     alphaEq' d1 d2 = throwError $ unlines [ "Different declaration types:", showt d1, "vs", showt d2 ]
+instance AlphaEq HsConDecl where
+    alphaEq' (HsConDecl _ name1 ts1) (HsConDecl _ name2 ts2) = alphaEq' name1 name2 >> alphaEq' ts1 ts2
+    alphaEq' HsRecDecl{} HsRecDecl{} = throwError "Record data constructors not supported"
+    alphaEq' d1 d2 = throwError $ unlines ["Data constructor mismatch:", showt d1, "vs", showt d2]
+instance AlphaEq HsMatch where
+    alphaEq' (HsMatch _ name1 pats1 rhs1 wheres1) (HsMatch _ name2 pats2 rhs2 wheres2) = do
+        alphaEq' name1 name2
+        alphaEq' pats1 pats2
+        alphaEq' rhs1 rhs2
+        alphaEq' wheres1 wheres2
 instance AlphaEq HsPat where
     alphaEq' (HsPVar n1) (HsPVar n2) = alphaEq' (convertName n1 :: Text) (convertName n2)
     alphaEq' (HsPLit l1) (HsPLit l2) =
@@ -197,6 +213,10 @@ instance AlphaEq HsType where
     alphaEq' t1 t2 = throwError $ "Type mismatch: " <> synPrint t1 <> " vs " <> synPrint t2
 instance AlphaEq HsQualType where
     alphaEq' (HsQualType c1 t1) (HsQualType c2 t2) = alphaEq' c1 c2 >> alphaEq' t1 t2
+instance AlphaEq HsBangType where
+    alphaEq' (HsBangedTy t1) (HsBangedTy t2) = alphaEq' t1 t2
+    alphaEq' (HsUnBangedTy t1) (HsUnBangedTy t2) = alphaEq' t1 t2
+    alphaEq' t1 t2 = throwError $ unlines ["Banged type mismatch", showt t1, "vs", showt t2]
 
 
 -- ILA instances

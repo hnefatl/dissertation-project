@@ -455,7 +455,16 @@ inferDecl (HsPatBind l pat rhs ds) = do
     rhsType <- nameToType rhsVar
     unify patType rhsType
     return $ HsPatBind l pat rhsExp ds
-inferDecl (HsFunBind _) = throwError "Functions not yet supported"
+inferDecl (HsFunBind matches) = do
+    funName <- case matches of
+        [] -> throwError "Function binding with no matches"
+        HsMatch _ name _ _ _:_ -> return $ convertName name
+    (matches', vs) <- unzip <$> mapM inferMatch matches
+    commonVar <- getVariableTypeVariableOrAdd funName
+    commonType <- nameToType commonVar
+    writeLog $ "Function bind " <> showt funName <> ": commonVar = " <> showt commonVar <> " vs = " <> showt vs
+    mapM_ (unify commonType) =<< mapM nameToType vs
+    return $ HsFunBind matches'
 inferDecl d@(HsTypeSig _ names t) = do
     ks <- getKinds
     t' <- synToQualType ks t
@@ -490,9 +499,23 @@ inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     return $ HsDataDecl loc ctx name args decls' derivings
 inferDecl _ = throwError "Declaration not yet supported"
 
+inferMatch :: Syntax.HsMatch -> TypeInferrer (Syntax.HsMatch, TypeVariableName)
+inferMatch (HsMatch loc name args rhs wheres) = do
+    writeLog $ "Inferring match " <> convertName name <> " at " <> showt loc
+    retVar <- freshTypeVarName
+    retType <- nameToType retVar
+    argVars <- inferPatterns args
+    argTypes <- mapM nameToType argVars
+    (rhs', rhsVar) <- inferRhs rhs
+    rhsType <- nameToType rhsVar
+    unify (makeFun argTypes rhsType) retType
+    retInferred <- getQualifiedType retVar
+    writeLog $ "Got match type " <> showt retInferred
+    return (HsMatch loc name args rhs' wheres, retVar)
+
 inferConDecl :: HsType -> Syntax.HsConDecl -> TypeInferrer Syntax.HsConDecl
 inferConDecl conType d@(HsConDecl _ name args) = do
-    let argTypes = flip map args $ \arg -> case arg of
+    let argTypes = flip map args $ \case
             HsBangedTy t   -> t
             HsUnBangedTy t -> t
     qt <- synToQuantType $ HsQualType [] (makeSynFun argTypes conType)
@@ -576,6 +599,8 @@ updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDecls
 
 updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
+updateDeclTypeTags (HsFunBind matches)      = HsFunBind <$> mapM updateMatchTypeTags matches
+updateDeclTypeTags d@HsTypeSig{}            = return d
 updateDeclTypeTags d@HsClassDecl{}          = return d
 updateDeclTypeTags d@HsDataDecl{}           = return d
 updateDeclTypeTags _                        = throwError "Unsupported declaration when updating type tags"
@@ -585,6 +610,9 @@ updateDeclsTypeTags = mapM updateDeclTypeTags
 updateRhsTypeTags :: Syntax.HsRhs -> TypeInferrer Syntax.HsRhs
 updateRhsTypeTags (HsUnGuardedRhs e) = HsUnGuardedRhs <$> updateExpTypeTags e
 updateRhsTypeTags (HsGuardedRhss _)  = throwError "Unsupported RHS when updating type tags"
+
+updateMatchTypeTags :: Syntax.HsMatch -> TypeInferrer Syntax.HsMatch
+updateMatchTypeTags (HsMatch loc name args rhs wheres) = HsMatch loc name args <$> updateRhsTypeTags rhs <*> updateDeclsTypeTags wheres
 
 updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
 updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
@@ -603,6 +631,8 @@ checkModuleExpTypes :: MonadError Text m => Syntax.HsModule -> m ()
 checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
 checkDeclExpTypes :: MonadError Text m => Syntax.HsDecl -> m ()
 checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
+checkDeclExpTypes (HsFunBind matches) = mapM_ checkMatchExpTypes matches
+checkDeclExpTypes HsTypeSig{}          = return ()
 checkDeclExpTypes HsClassDecl{}          = return ()
 checkDeclExpTypes HsDataDecl{}           = return ()
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
@@ -611,6 +641,9 @@ checkDeclsExpTypes = mapM_ checkDeclExpTypes
 checkRhsExpTypes :: MonadError Text m => Syntax.HsRhs -> m ()
 checkRhsExpTypes (HsUnGuardedRhs e) = checkExpExpTypes e
 checkRhsExpTypes (HsGuardedRhss _) = throwError "Unsupported RHS when checking user-defined explicit type signatures."
+checkMatchExpTypes :: MonadError Text m => Syntax.HsMatch -> m ()
+checkMatchExpTypes (HsMatch _ _ _ rhs wheres) = checkRhsExpTypes rhs >> checkDeclsExpTypes wheres
+
 checkExpExpTypes :: MonadError Text m => Syntax.HsExp -> m ()
 checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
     | alphaEq manualType autoType = checkExpExpTypes e

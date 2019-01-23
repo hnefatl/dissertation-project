@@ -30,8 +30,8 @@ parse s = case parseModule (unpack s) of
     ParseOk m           -> return m
     ParseFailed loc msg -> throwError $ pack msg <> ": " <> showt loc
 
-inferModule' :: Text -> (Either Text (M.Map VariableName QuantifiedType), InferrerState)
-inferModule' s = (runExcept out, state)
+inferModule' :: Text -> (Either Text (M.Map VariableName QuantifiedType), InferrerState, [Text])
+inferModule' s = (runExcept out, state, logs)
     where ((out, state), logs) = evalNameGenerator (runLoggerT $ runTypeInferrer $ catchError infer handler) 0
           handler err = get >>= \st -> throwError $ unlines [err, pretty st, "Logs:", unlines logs]
           infer = do
@@ -41,20 +41,20 @@ inferModule' s = (runExcept out, state)
 
 testBindings :: Text -> [(VariableName, QuantifiedType)] -> TestTree
 testBindings s cases = testCase (unpack $ deline s) $ do
-    let (etypes, state) = inferModule' s
+    let (etypes, state, logs) = inferModule' s
     ts <- unpackEither etypes
     let getResult (name, qt1) = runExcept $ addDebugInfo $ case M.lookup name ts of
             Nothing  -> throwError "Variable not in environment"
-            Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ "Got " <> showt qt2 <> " expected " <> showt qt1
+            Just qt2 -> unless (alphaEq qt1 qt2) $ throwError $ unlines ["Got", showt qt2, "expected", showt qt1, unlines logs]
         addDebugInfo action = catchError action (\err -> throwError $ unlines [err, pretty state])
-        check x@(name, _) = either (\e -> assertFailure $ unpack $ showt name <> ": " <> showt e) return (getResult x)
+        check x@(name, _) = either (\e -> assertFailure $ unpack $ showt name <> ": " <> e) return (getResult x)
     mapM_ check cases
 
 testBindingsFail :: Text -> TestTree
 testBindingsFail s = testCase ("Fails: " <> unpack s') $ assertBool errMsg (isLeft result)
     where s' = deline s
-          (result, state) = inferModule' s
-          errMsg = unpack $ unlines [s', "Got:", pretty result, "vs", pretty state]
+          (result, state, logs) = inferModule' s
+          errMsg = unpack $ unlines [s', "Got:", pretty result, "vs", pretty state, unlines logs]
 
 unpackEither :: Either Text b -> IO b
 unpackEither = either (assertFailure . unpack) return
@@ -326,4 +326,9 @@ test = let
         testBindings "class Foo a where { bar :: a -> a } ; x = bar 5"
             [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) $ makeFun [ta] ta)
             , ("x", Quantified (S.singleton b) $ Qualified (S.fromList [IsInstance "Foo" tb, IsInstance "Num" tb]) tb) ]
+    ,
+        testBindings "f x = x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta) ]
+    ,
+        testBindings "f 0 0 = 1 ; f x y = x + y"
+            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta, ta] ta) ]
     ]

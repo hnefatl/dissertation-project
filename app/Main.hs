@@ -70,7 +70,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 []       -> throwError "No _main symbol found."
                 [(n, _)] -> return n
                 ns       -> throwError $ "Multiple _main symbols found: " <> showt (map fst ns)
-            (taggedModule, types) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
+            (taggedModule, types) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types
@@ -92,7 +92,9 @@ combineReverseRenamings xs ys = M.unions [xToz, xs, ys]
     where xToz = M.fromList $ flip map (M.toList xs) $ \(x,y) -> maybe (x,y) (x,) (M.lookup y ys)
 
 catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
-catchAdd x = withExceptT (\e -> unlines [e, showt x])
+catchAdd x = catchAddText (showt x)
+catchAddText :: Monad m => Text -> ExceptT Text m b -> ExceptT Text m b
+catchAddText x = withExceptT (\e -> unlines [e, x])
 
 -- Utility functions for converting between various monad transformer stacks...
 embedExceptIOIntoResult :: ExceptT e IO a -> ExceptT e (LoggerT (NameGeneratorT IO)) a

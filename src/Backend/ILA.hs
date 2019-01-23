@@ -302,6 +302,7 @@ declToIla (HsPatBind _ pat rhs _) = do
             return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)") tempNames body , Alt Default [] (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
     return $ Rec (M.singleton resultName resultExpr):extractors
+declToIla (HsFunBind matches) = throwError "Functions not supported in ILA"
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do

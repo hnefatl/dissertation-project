@@ -5,9 +5,9 @@
 module Backend.Deoverload where
 
 import           BasicPrelude               hiding (exp)
-import           Control.Monad.Except       (Except, ExceptT, MonadError, liftEither, runExceptT, throwError)
+import           Control.Monad.Except       (Except, ExceptT, MonadError, runExceptT, throwError)
 import           Control.Monad.Extra        (concatForM, concatMapM)
-import           Control.Monad.State.Strict (MonadState, StateT, evalStateT, gets, modify, runStateT)
+import           Control.Monad.State.Strict (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default               (Default, def)
 import           Data.Foldable              (null, toList)
 import qualified Data.Map.Strict            as M
@@ -131,6 +131,7 @@ deoverloadDecls = concatMapM deoverloadDecl
 
 deoverloadDecl :: HsDecl -> Deoverload [HsDecl]
 deoverloadDecl (HsPatBind loc pat rhs ds) = pure <$> (HsPatBind loc pat <$> deoverloadRhs rhs <*> pure ds)
+deoverloadDecl (HsFunBind matches) = pure <$> (HsFunBind <$> mapM deoverloadMatch matches)
 deoverloadDecl (HsTypeSig loc names t) = return [HsTypeSig loc names (HsQualType [] $ deoverloadType t)]
 deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     writeLog $ "Deoverloading class declaration " <> showt cname
@@ -161,6 +162,9 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     return $ dataDecl:methodDecls
 deoverloadDecl d@HsDataDecl{} = return [d]
 deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
+
+deoverloadMatch :: HsMatch -> Deoverload HsMatch
+deoverloadMatch (HsMatch loc name pats rhs wheres) = HsMatch loc name pats <$> deoverloadRhs rhs <*> deoverloadDecls wheres
 
 isTypeSig :: HsDecl -> Bool
 isTypeSig HsTypeSig{} = True

@@ -199,7 +199,7 @@ instance Renameable HsPat where
     rename l@HsPLit{}            = return l
     rename (HsPNeg p)            = HsPNeg <$> rename p
     rename (HsPInfixApp p1 n p2) = HsPInfixApp <$> rename p1 <*> rename n <*> rename p2
-    rename (HsPApp con ps)       = HsPApp con <$> renames ps
+    rename (HsPApp con ps)       = HsPApp <$> rename con <*> renames ps
     rename (HsPTuple ps)         = HsPTuple <$> renames ps
     rename (HsPList ps)          = HsPList <$> renames ps
     rename (HsPParen p)          = HsPParen <$> rename p

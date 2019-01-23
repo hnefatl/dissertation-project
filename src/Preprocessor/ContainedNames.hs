@@ -40,20 +40,22 @@ instance {-# Overlappable #-} (Functor f, Foldable f, HasFreeTypeVariables a) =>
 instance HasBoundVariables HsDecl where
     getBoundVariables (HsPatBind _ pat _ _) = getBoundVariables pat
     getBoundVariables (HsFunBind matches) = do
-        let names = map (\(HsMatch _ name _ _ _) -> convertName name) matches
-            funName = head names
+        names <- S.toList . S.unions <$> mapM getBoundVariables matches
+        let funName = head names
             allNamesMatch = all (== funName) names
         if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
     getBoundVariables (HsTypeSig _ names _) = return $ S.fromList $ map convertName names
     getBoundVariables (HsClassDecl _ _ _ _ decls) = S.unions <$> mapM getBoundVariables decls
     getBoundVariables (HsDataDecl _ _ _ _ conDecls _) = getBoundVariables conDecls
     getBoundVariables d = throwError $ unlines ["Declaration not supported:", synPrint d]
+instance HasBoundVariables HsMatch where
+    getBoundVariables (HsMatch _ n _ _ _) = return $ S.singleton $ convertName n
 instance HasBoundVariables HsConDecl where
     getBoundVariables (HsConDecl _ n _) = return $ S.singleton $ convertName n
     getBoundVariables (HsRecDecl _ n _) = return $ S.singleton $ convertName n
 instance HasBoundVariables HsPat where
     getBoundVariables (HsPVar v)            = return $ S.singleton (convertName v)
-    getBoundVariables (HsPLit _)            = return S.empty
+    getBoundVariables HsPLit{}              = return S.empty
     getBoundVariables HsPWildCard           = return S.empty
     getBoundVariables (HsPNeg p)            = getBoundVariables p
     getBoundVariables (HsPParen p)          = getBoundVariables p
@@ -63,14 +65,25 @@ instance HasBoundVariables HsPat where
     getBoundVariables (HsPApp _ ps)         = getBoundVariables ps
     getBoundVariables (HsPTuple ps)         = getBoundVariables ps
     getBoundVariables (HsPList ps)          = getBoundVariables ps
-    getBoundVariables (HsPRec _ _)          = throwError "Pattern records not supported"
+    getBoundVariables HsPRec{}              = throwError "Pattern records not supported"
 
 instance HasFreeVariables HsDecl where
-    getFreeVariables (HsPatBind _ _ rhs _)      = getFreeVariables rhs
+    getFreeVariables (HsPatBind _ pat rhs _)    = S.union <$> getFreeVariables pat <*> getFreeVariables rhs
     getFreeVariables (HsClassDecl _ _ _ _ args) = S.unions <$> mapM getFreeVariables args
-    getFreeVariables HsTypeSig{}                = return S.empty
+    getFreeVariables (HsTypeSig _ names _)      = return $ S.fromList $ map convertName names
     getFreeVariables HsDataDecl{}               = return S.empty
+    getFreeVariables (HsFunBind matches)        = do
+        names <- S.toList . S.unions <$> mapM getBoundVariables matches
+        let funName = head names
+            allNamesMatch = all (== funName) names
+        if allNamesMatch then getFreeVariables matches else throwError "Mismatched function names"
     getFreeVariables _                          = throwError "Not supported"
+instance HasFreeVariables HsMatch where
+    getFreeVariables (HsMatch _ name pats rhs _) = do
+        rhsFree <- getFreeVariables rhs
+        patFree <- getFreeVariables pats
+        patBound <- getBoundVariables pats
+        return $ S.difference (S.union rhsFree patFree) $ S.insert (convertName name) patBound
 instance HasFreeVariables HsRhs where
     getFreeVariables (HsUnGuardedRhs e) = getFreeVariables e
     getFreeVariables (HsGuardedRhss _)  = throwError "Guarded rhss not supported"
@@ -89,6 +102,19 @@ instance HasFreeVariables HsExp where
     getFreeVariables (HsParen e)           = getFreeVariables e
     getFreeVariables (HsExpTypeSig _ e _)  = getFreeVariables e
     getFreeVariables e                     = throwError $ pack $ "Unsupported expression " <> show e
+instance HasFreeVariables HsPat where
+    getFreeVariables HsPVar{}                = return S.empty
+    getFreeVariables HsPLit{}                = return S.empty
+    getFreeVariables HsPWildCard             = return S.empty
+    getFreeVariables (HsPNeg p)              = getFreeVariables p
+    getFreeVariables (HsPParen p)            = getFreeVariables p
+    getFreeVariables (HsPIrrPat p)           = getFreeVariables p
+    getFreeVariables (HsPAsPat v p)          = S.insert (convertName v) <$> getFreeVariables p
+    getFreeVariables (HsPInfixApp p1 con p2) = S.insert (convertName con) <$> getFreeVariables [p1, p2]
+    getFreeVariables (HsPApp con ps)         = S.insert (convertName con) <$> getFreeVariables ps
+    getFreeVariables (HsPTuple ps)           = getFreeVariables ps
+    getFreeVariables (HsPList ps)            = getFreeVariables ps
+    getFreeVariables HsPRec{}                = throwError "Pattern records not supported"
 
 instance HasFreeTypeVariables HsQualType where
     getFreeTypeVariables (HsQualType quals t) = S.union (getFreeTypeVariables quals) (getFreeTypeVariables t)

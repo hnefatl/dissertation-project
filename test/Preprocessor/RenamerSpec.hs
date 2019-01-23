@@ -71,6 +71,12 @@ test = testGroup "Renamer"
         "class Foo a where { bar :: Int -> a -> a }"
         "class Foo t0 where { v1 :: Int -> t0 -> t0 }"
     , makeTest
-        "f = \\x (Foo y z@(w, u)) -> (y, u)"
-        "f = \\v0 (Foo v1 v2@(v3, v4)) -> (v1, v4)"
+        "data Foo a b = Foo a b ; f = \\x (Foo y z@(w, u)) -> (y, u)"
+        "data Foo a b = Foo a b ; f = \\v0 (Foo v1 v2@(v3, v4)) -> (v1, v4)"
+    , makeTest
+        "f x = x"
+        "v0 v1 = v1"
+    , makeTest
+        "data Bool = True | False ; f True x 0 = x"
+        "data Bool = True | False ; v0 True v2 0 = v2"
     ]
