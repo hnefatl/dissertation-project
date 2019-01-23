@@ -373,7 +373,10 @@ expToIla (HsIf cond e1 e2) = do
     e2Exp   <- expToIla e2
     let alts = [ Alt (DataCon "True") [] e1Exp , Alt (DataCon "False") [] e2Exp ]
     return $ Case condExp [] alts
-expToIla (HsCase _ _) = throwError "Urgh case not yet supported"
+expToIla (HsCase scrut alts) = do
+    scrut' <- expToIla scrut
+    alts' <- mapM altToIla alts
+    return $ Case scrut' [] alts'
 expToIla (HsTuple exps) = do
     es <- mapM expToIla exps
     ts <- mapM getExprType es
@@ -386,6 +389,16 @@ expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
 
+altToIla :: HsAlt -> Converter (Alt Expr)
+altToIla (HsAlt _ pat alts wheres) = case pat of
+    HsPApp con vs -> Alt (DataCon $ convertName con) [] <$> guardedAltsToIla alts
+    HsPLit l -> Alt <$> (LitCon <$> litToIla l) <*> pure [] <*> guardedAltsToIla alts
+    HsPWildCard -> Alt Default [] <$> guardedAltsToIla alts
+    _ -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
+
+guardedAltsToIla :: HsGuardedAlts -> Converter Expr
+guardedAltsToIla (HsUnGuardedAlt e) = expToIla e
+guardedAltsToIla HsGuardedAlts{} = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
 
 litToIla :: HsLiteral -> Converter Literal
 litToIla (HsChar c)   = return $ LiteralChar c

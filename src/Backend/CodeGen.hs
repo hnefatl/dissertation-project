@@ -342,17 +342,19 @@ compileExp (ExpLet var rhs body) = do
     compileExp body
 
 compileCase :: [Alt Exp] -> Converter ()
-compileCase as = case partition isDefaultAlt as of
-    ([defaultAlt], otherAlts) -> do
-        -- altKeys are the branch numbers of each alt's constructor
-        (altKeys, alts) <- unzip <$> sortAlts otherAlts
-        s <- get
-        let defaultAltGenerator = (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) defaultAlt
-            altGenerators = map (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) alts
-            unwrap (Converter x) = x
-            runner x = evalStateT x s
-        Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
-    _ -> throwTextError "Expected single default alt in case statement"
+compileCase as = do
+    (defaultAlt, otherAlts) <- case partition isDefaultAlt as of
+        ([], alt:otherAlts) -> return (alt, otherAlts) -- Select the first given constructor as the default one
+        ([defaultAlt], otherAlts) -> return (defaultAlt, otherAlts)
+        (defaultAlts, _) -> throwTextError $ unlines ["Expected single default alt in case statement, got " <> showt (length defaultAlts), unlines $ map showt defaultAlts]
+    -- altKeys are the branch numbers of each alt's constructor
+    (altKeys, alts) <- unzip <$> sortAlts otherAlts
+    s <- get
+    let defaultAltGenerator = (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) defaultAlt
+        altGenerators = map (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) alts
+        unwrap (Converter x) = x
+        runner x = evalStateT x s
+    Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
 
 -- TODO(kc506): Change to `Maybe VariableName` to allow us to compile `Alt`s without storing all their data parameters,
 -- only the ones we use.

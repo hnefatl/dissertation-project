@@ -78,11 +78,11 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila]
-            ilaanf <- catchAdd ila $ ILAANF.ilaToAnf ila
+            ilaanf <- catchAddText (unlines $ map showt ila) $ ILAANF.ilaToAnf ila
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf]
-            ilb <- catchAdd ilaanf $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
+            ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb]
-            compiled <- catchAdd ilaanf $ CodeGen.convert "Output" "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert "Output" "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
             let outputDir = "out"
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass outputDir) compiled
 
