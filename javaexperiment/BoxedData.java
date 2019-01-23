@@ -5,6 +5,10 @@ public abstract class BoxedData extends Data {
 
     @Override 
     public String toString() {
-        return String.valueOf(branch) + " " + data.toString();
+        String res = String.valueOf(branch);
+        for (HeapObject o : data) {
+            res += "(" + o.toString() + ")";
+        }
+        return res;
     }
 }
