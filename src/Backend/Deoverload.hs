@@ -249,11 +249,22 @@ deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
 deoverloadExp (HsList  es) = HsList <$> mapM deoverloadExp es
-deoverloadExp (HsParen e ) = HsParen <$> deoverloadExp e
+deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
+deoverloadExp (HsCase scrut alts) = HsCase <$> deoverloadExp scrut <*> mapM deoverloadAlt alts
 -- We can ignore any qualifiers: any expression needing them further down the tree will have had the dictionaries passed
 -- appropriately and now just have the simple type: we should propagate this change up the tree.
 deoverloadExp (HsExpTypeSig l e (HsQualType _ t)) = HsExpTypeSig l <$> deoverloadExp e <*> pure (HsQualType [] t)
 deoverloadExp e = throwError $ "Unsupported expression in deoverloader: " <> showt e
+
+deoverloadAlt :: HsAlt -> Deoverload HsAlt
+deoverloadAlt (HsAlt loc pat alts wheres) = HsAlt loc pat <$> deoverloadGuardedAlts alts <*> deoverloadDecls wheres
+
+deoverloadGuardedAlts :: HsGuardedAlts -> Deoverload HsGuardedAlts
+deoverloadGuardedAlts (HsUnGuardedAlt e) = HsUnGuardedAlt <$> deoverloadExp e
+deoverloadGuardedAlts (HsGuardedAlts as) = HsGuardedAlts <$> mapM deoverloadGuardedAlt as
+
+deoverloadGuardedAlt :: HsGuardedAlt -> Deoverload HsGuardedAlt
+deoverloadGuardedAlt (HsGuardedAlt loc cond e) = HsGuardedAlt loc <$> deoverloadExp cond <*> deoverloadExp e
 
 -- |Convert eg. `(Num a, Monoid b) => a -> b -> ()` into `Num a -> Monoid b -> a -> b -> ()` to represent the dicts.
 deoverloadType :: HsQualType -> HsType
