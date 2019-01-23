@@ -61,7 +61,7 @@ data Literal = LiteralInt Integer
              | LiteralFrac Rational
              | LiteralChar Char
              | LiteralString String
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 instance TextShow Literal where
     showb (LiteralInt i)    = showb i <> " :: Int"
     showb (LiteralFrac r)   = showb r <> " :: Rational"
@@ -73,7 +73,7 @@ instance TextShow Literal where
 -- If there's a literal or nested data constructor then it needs to be bound to a variable
 -- and checked subsequently, as the alternatives can only contain variable names.
 data Alt a = Alt AltConstructor [VariableName] a
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 instance TextShow a => TextShow (Alt a) where
     showb (Alt con vs e) = showb con <> (if null vs then "" else " ") <> args <> " -> " <> showb e
         where args = mconcat $ intersperse " " $ map showb vs
@@ -81,7 +81,7 @@ getAltConstructor :: Alt a -> AltConstructor
 getAltConstructor (Alt c _ _) = c
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName | LitCon Literal | Default
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 instance TextShow AltConstructor where
     showb (DataCon n) = showb n
     showb (LitCon l)  = showb l
@@ -98,7 +98,7 @@ isLiteralAlt _                    = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 instance TextShow a => TextShow (Binding a) where
     showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
     showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines
@@ -118,7 +118,7 @@ data Expr = Var VariableName Type -- Variable/function
           | Let VariableName Type Expr Expr
           | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to e.
           | Type Type
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 instance TextShow Expr where
     showb (Var n t) = showb n <> " :: " <> showb t
     showb (Con n t) = showb n <> " ;; " <> showb t
@@ -227,8 +227,8 @@ makeList ps = case S.toList uniqueTypes of
           uniqueTypes = S.fromList ts
 makeList' :: [Expr] -> Type -> Expr
 makeList' es t = foldr (\x y -> App (App cons x) y) nil es
-    where cons = Var ":" (T.makeFun [t, T.makeList t] $ T.makeList t)
-          nil  = Var "[]" (T.makeList t)
+    where cons = Con ":" (T.makeFun [t, T.makeList t] $ T.makeList t)
+          nil  = Con "[]" (T.makeList t)
 
 makeError :: Type -> Expr
 makeError = Var "compilerError"
