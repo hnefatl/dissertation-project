@@ -321,6 +321,7 @@ declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
         return []
     (_, []) -> throwError $ "Datatype contexts not supported:\n" <> showt d
     (_, _) -> throwError $ "Deriving clauses not supported:\n" <> showt d
+declToIla HsTypeSig{} = return []
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
 conDeclToBranch :: HsConDecl -> Converter (VariableName, [(Type, Strictness)])
@@ -397,6 +398,7 @@ expToIla e = throwError $ "Unsupported expression: " <> showt e
 altToIla :: HsAlt -> Converter (Alt Expr)
 altToIla (HsAlt _ pat alts wheres) = case pat of
     HsPApp con vs -> Alt (DataCon (convertName con) []) <$> guardedAltsToIla alts
+    HsPInfixApp p1 con p2 -> Alt (DataCon (convertName con) []) <$> guardedAltsToIla alts
     HsPLit l      -> Alt <$> (LitCon <$> litToIla l) <*> guardedAltsToIla alts
     HsPWildCard   -> Alt Default <$> guardedAltsToIla alts
     _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
