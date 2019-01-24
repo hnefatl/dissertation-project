@@ -47,9 +47,9 @@ instance JVMSanitisable Exp where
 instance JVMSanitisable Rhs where
     jvmSanitise (RhsClosure vs e) = RhsClosure (jvmSanitises vs) (jvmSanitise e)
 instance JVMSanitisable a => JVMSanitisable (Alt a) where
-    jvmSanitise (Alt c vs e) = Alt (jvmSanitise c) (jvmSanitises vs) (jvmSanitise e)
+    jvmSanitise (Alt c e) = Alt (jvmSanitise c) (jvmSanitise e)
 instance JVMSanitisable AltConstructor where
-    jvmSanitise (DataCon v) = DataCon (jvmSanitise v)
+    jvmSanitise (DataCon v vs) = DataCon (jvmSanitise v) (jvmSanitises vs)
     jvmSanitise l@LitCon{} = l
     jvmSanitise Default = Default
 instance JVMSanitisable a => JVMSanitisable (Binding a) where

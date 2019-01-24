@@ -33,8 +33,8 @@ import           Backend.CodeGen.Converter
 import           Backend.CodeGen.Hooks          (compilerGeneratedHooks)
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise, jvmSanitises)
 import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
-                                                 getBindingVariables, getBranchNames, isDataAlt, isDefaultAlt,
-                                                 isLiteralAlt)
+                                                 getBindingVariables, getBranchNames, getConstructorVariables,
+                                                 isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB
 import           ExtraDefs                      (toLazyBytestring, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
@@ -350,8 +350,8 @@ compileCase as = do
     -- altKeys are the branch numbers of each alt's constructor
     (altKeys, alts) <- unzip <$> sortAlts otherAlts
     s <- get
-    let defaultAltGenerator = (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) defaultAlt
-        altGenerators = map (\(Alt _ vs e) -> unwrap $ bindDataVariables vs >> compileExp e) alts
+    let defaultAltGenerator = (\(Alt c e) -> unwrap $ bindDataVariables (getConstructorVariables c) >> compileExp e) defaultAlt
+        altGenerators = map (\(Alt c e) -> unwrap $ bindDataVariables (getConstructorVariables c) >> compileExp e) alts
         unwrap (Converter x) = x
         runner x = evalStateT x s
     Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
@@ -374,20 +374,20 @@ bindDataVariables vs = do
 -- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
 sortAlts :: [Alt a] -> Converter [(Word32, Alt a)]
 sortAlts [] = return []
-sortAlts alts@(Alt (DataCon con) _ _:_) = do
+sortAlts alts@(Alt (DataCon con _) _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
     case find (con `elem`) $ map (map fst . branches) $ M.elems ds of
         Nothing -> throwTextError $ "Unknown data constructor: " <> showt con <> "\n" <> showt ds
         Just branches -> do
-            let getDataCon (Alt (DataCon c) _ _) = c
+            let getDataCon (Alt (DataCon c _) _) = c
                 getDataCon _                     = error "Compiler error: can only have datacons here"
                 okay = all ((`elem` branches) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
             let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` branches, a)) alts
             return $ sortOn fst alts'
-sortAlts alts@(Alt (LitCon _) _ _:_) = do
+sortAlts alts@(Alt (LitCon _) _:_) = do
     unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"
     throwTextError "Need to refactor literals to only be int/char before doing this"
-sortAlts (Alt Default _ _:_) = throwTextError "Can't have Default constructor"
+sortAlts (Alt Default _:_) = throwTextError "Can't have Default constructor"

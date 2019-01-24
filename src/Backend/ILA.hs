@@ -72,29 +72,32 @@ instance TextShow Literal where
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
 -- If there's a literal or nested data constructor then it needs to be bound to a variable
 -- and checked subsequently, as the alternatives can only contain variable names.
-data Alt a = Alt AltConstructor [VariableName] a
+data Alt a = Alt AltConstructor a
     deriving (Eq, Ord, Show)
 instance TextShow a => TextShow (Alt a) where
-    showb (Alt con vs e) = showb con <> (if null vs then "" else " ") <> args <> " -> " <> showb e
-        where args = mconcat $ intersperse " " $ map showb vs
+    showb (Alt con e) = showb con <> " -> " <> showb e
 getAltConstructor :: Alt a -> AltConstructor
-getAltConstructor (Alt c _ _) = c
+getAltConstructor (Alt c _) = c
+getConstructorVariables :: AltConstructor -> [VariableName]
+getConstructorVariables (DataCon _ vs) = vs
+getConstructorVariables _              = []
 -- |A constructor that can be used in an alternative statement
-data AltConstructor = DataCon VariableName | LitCon Literal | Default
+data AltConstructor = DataCon VariableName [VariableName] | LitCon Literal | Default
     deriving (Eq, Ord, Show)
 instance TextShow AltConstructor where
-    showb (DataCon n) = showb n
+    showb (DataCon n vs) = showb n <> (if null vs then "" else " " <> args)
+        where args = mconcat $ intersperse " " $ map showb vs
     showb (LitCon l)  = showb l
     showb Default     = "default"
 isDefaultAlt :: Alt a -> Bool
-isDefaultAlt (Alt Default _ _) = True
-isDefaultAlt _                 = False
+isDefaultAlt (Alt Default _) = True
+isDefaultAlt _               = False
 isDataAlt :: Alt a -> Bool
-isDataAlt (Alt (DataCon _) _ _) = True
-isDataAlt _                     = False
+isDataAlt (Alt DataCon{} _) = True
+isDataAlt _                 = False
 isLiteralAlt :: Alt a -> Bool
-isLiteralAlt (Alt (LitCon _) _ _) = True
-isLiteralAlt _                    = False
+isLiteralAlt (Alt (LitCon _) _) = True
+isLiteralAlt _                  = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
@@ -131,15 +134,15 @@ instance TextShow Expr where
     showb (Type t) = "Type " <> showb t
 
 getExprType :: MonadError Text m => Expr -> m Type
-getExprType (Var _ t)                = return t
-getExprType (Con _ t)                = return t
-getExprType (Lit _ t)                = return t
-getExprType (App e1 _)               = snd <$> (T.unwrapFun =<< getExprType e1)
-getExprType (Lam _ t e)              = T.makeFun [t] <$> getExprType e
-getExprType (Let _ _ _ e)            = getExprType e
-getExprType (Case _ _ [])            = throwError "No alts in case"
-getExprType (Case _ _ (Alt _ _ e:_)) = getExprType e
-getExprType (Type t)                 = return t
+getExprType (Var _ t)              = return t
+getExprType (Con _ t)              = return t
+getExprType (Lit _ t)              = return t
+getExprType (App e1 _)             = snd <$> (T.unwrapFun =<< getExprType e1)
+getExprType (Lam _ t e)            = T.makeFun [t] <$> getExprType e
+getExprType (Let _ _ _ e)          = getExprType e
+getExprType (Case _ _ [])          = throwError "No alts in case"
+getExprType (Case _ _ (Alt _ e:_)) = getExprType e
+getExprType (Type t)               = return t
 
 data ConverterReadableState = ConverterReadableState
     { types     :: M.Map VariableName QuantifiedSimpleType
@@ -299,7 +302,7 @@ declToIla (HsPatBind _ pat rhs _) = do
             let tempName = tempNames !! index -- Get the temporary name in the right position in the tuple
                 body = Var tempName bindingType
             -- Just retrieve the specific output variable
-            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)") tempNames body , Alt Default [] (makeError bindingType) ]
+            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)" tempNames) body , Alt Default (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
     return $ Rec (M.singleton resultName resultExpr):extractors
 declToIla (HsFunBind matches) = throwError "Functions not supported in ILA"
@@ -371,7 +374,7 @@ expToIla (HsIf cond e1 e2) = do
     condExp <- expToIla cond
     e1Exp   <- expToIla e1
     e2Exp   <- expToIla e2
-    let alts = [ Alt (DataCon "True") [] e1Exp , Alt (DataCon "False") [] e2Exp ]
+    let alts = [ Alt (DataCon "True" []) e1Exp , Alt (DataCon "False" []) e2Exp ]
     return $ Case condExp [] alts
 expToIla (HsCase scrut alts) = do
     scrut' <- expToIla scrut
@@ -393,14 +396,14 @@ expToIla e = throwError $ "Unsupported expression: " <> showt e
 -- Handle anything other than these types by using patToIla and using altToIla in the body?
 altToIla :: HsAlt -> Converter (Alt Expr)
 altToIla (HsAlt _ pat alts wheres) = case pat of
-    HsPApp con vs -> Alt (DataCon $ convertName con) [] <$> guardedAltsToIla alts
-    HsPLit l -> Alt <$> (LitCon <$> litToIla l) <*> pure [] <*> guardedAltsToIla alts
-    HsPWildCard -> Alt Default [] <$> guardedAltsToIla alts
-    _ -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
+    HsPApp con vs -> Alt (DataCon (convertName con) []) <$> guardedAltsToIla alts
+    HsPLit l      -> Alt <$> (LitCon <$> litToIla l) <*> guardedAltsToIla alts
+    HsPWildCard   -> Alt Default <$> guardedAltsToIla alts
+    _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
 
 guardedAltsToIla :: HsGuardedAlts -> Converter Expr
 guardedAltsToIla (HsUnGuardedAlt e) = expToIla e
-guardedAltsToIla HsGuardedAlts{} = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
+guardedAltsToIla HsGuardedAlts{}    = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
 
 litToIla :: HsLiteral -> Converter Literal
 litToIla (HsChar c)   = return $ LiteralChar c
@@ -419,25 +422,25 @@ litToIla l            = throwError $ "Unboxed primitives not supported: " <> sho
 patToIla :: HsPat -> Type -> Expr -> Expr -> Type -> Converter Expr
 patToIla (HsPVar n) _ head body _ = do
     renamedVar <- getRenamed $ convertName n
-    return $ Case head [renamedVar] [Alt Default [] body]
+    return $ Case head [renamedVar] [Alt Default body]
 patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
 patToIla (HsPApp con args) t head body bodyType = do
     argNames <- replicateM (length args) freshVarName
     let (_, argTypes) = T.unmakeApp t
         argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
-    return $ Case head [] [ Alt (DataCon $ convertName con) argNames body', Alt Default [] $ makeError bodyType ]
+    return $ Case head [] [ Alt (DataCon (convertName con) argNames) body', Alt Default $ makeError bodyType ]
 patToIla (HsPTuple pats) t head body bodyType = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body bodyType
 patToIla (HsPList []) _ head body bodyType =
-    return $ Case head [] [Alt nilCon [] body, Alt Default [] $ makeError bodyType ]
-    where nilCon = DataCon "[]"
+    return $ Case head [] [Alt nilCon body, Alt Default $ makeError bodyType ]
+    where nilCon = DataCon "[]" []
 patToIla (HsPList (p:ps)) listType head body bodyType = do
     elementType <- T.unmakeList listType
     headName <- freshVarName
     tailName <- freshVarName
     headExpr <- patToIla p elementType (Var headName elementType) body bodyType
     tailExpr <- patToIla (HsPList ps) listType (Var tailName listType) headExpr bodyType
-    return $ Case head [] [ Alt (DataCon ":") [headName, tailName] tailExpr , Alt Default [] $ makeError bodyType ]
+    return $ Case head [] [ Alt (DataCon ":" [headName, tailName]) tailExpr , Alt Default $ makeError bodyType ]
 patToIla (HsPParen pat) t head body bodyType = patToIla pat t head body bodyType
 patToIla (HsPAsPat name pat) t head body bodyType = do
     expr <- patToIla pat t head body bodyType
@@ -445,13 +448,21 @@ patToIla (HsPAsPat name pat) t head body bodyType = do
     case expr of
         Case head' captures alts' -> return $ Case head' (asArgName : captures) alts'
         _                         -> throwError "@ pattern binding non-case translation"
-patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default [] body]
+patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default body]
 patToIla p _ _ _ _ = throwError $ "Unsupported pattern: " <> showt p
 
 instance HasFreeVariables a => HasFreeVariables (Alt a) where
-    getFreeVariables (Alt _ vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)
+    getFreeVariables (Alt c e) = S.difference <$> getFreeVariables e <*> getFreeVariables c
+instance HasFreeVariables AltConstructor where
+    getFreeVariables Default        = return S.empty
+    getFreeVariables LitCon{}       = return S.empty
+    getFreeVariables (DataCon _ vs) = return $ S.fromList vs
 instance HasBoundVariables (Alt a) where
-    getBoundVariables (Alt _ vs _) = return $ S.fromList vs
+    getBoundVariables (Alt c _) = getBoundVariables c
+instance HasBoundVariables AltConstructor where
+    getBoundVariables Default          = return S.empty
+    getBoundVariables LitCon{}         = return S.empty
+    getBoundVariables (DataCon con vs) = return $ S.fromList $ con:vs
 instance HasBoundVariables (Binding a) where
     getBoundVariables (NonRec v _) = return $ S.singleton v
     getBoundVariables (Rec m)      = return $ M.keysSet m

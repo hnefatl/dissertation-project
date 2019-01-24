@@ -497,7 +497,7 @@ inferDecl (HsPatBind l pat rhs ds) = do
     return $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind matches) = do
     funName <- case matches of
-        [] -> throwError "Function binding with no matches"
+        []                     -> throwError "Function binding with no matches"
         HsMatch _ name _ _ _:_ -> return $ convertName name
     (matches', vs) <- unzip <$> mapM inferMatch matches
     commonVar <- getVariableTypeVariableOrAdd funName

@@ -88,7 +88,7 @@ anfTrivialToExp (ANF.Lit l _) = Just $ ExpLit l
 anfTrivialToExp ANF.Type{}    = Nothing
 
 anfAltToIlbAlt :: MonadError Text m => Alt ANF.AnfComplex -> m (Alt Exp)
-anfAltToIlbAlt (Alt c vs e) = Alt c vs <$> anfComplexToIlbExp e
+anfAltToIlbAlt (Alt c e) = Alt c <$> anfComplexToIlbExp e
 
 
 instance HasFreeVariables Arg where

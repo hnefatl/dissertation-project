@@ -71,11 +71,11 @@ getAnfAppType (App e1 e2) = do
     when (argType /= e2Type) $ throwError "Invalid arg type"
     return retType
 getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
-getAnfComplexType (Trivial e)              = getAnfTrivialType e
-getAnfComplexType (CompApp e)              = getAnfAppType e
-getAnfComplexType (Let _ _ _ e)            = getAnfComplexType e
-getAnfComplexType (Case _ _ [])            = throwError "No alts in case"
-getAnfComplexType (Case _ _ (Alt _ _ e:_)) = getAnfComplexType e
+getAnfComplexType (Trivial e)            = getAnfTrivialType e
+getAnfComplexType (CompApp e)            = getAnfAppType e
+getAnfComplexType (Let _ _ _ e)          = getAnfComplexType e
+getAnfComplexType (Case _ _ [])          = throwError "No alts in case"
+getAnfComplexType (Case _ _ (Alt _ e:_)) = getAnfComplexType e
 getAnfRhsType :: MonadError Text m => AnfRhs -> m Type
 getAnfRhsType (Lam _ t e) = T.makeFun [t] <$> getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
@@ -130,7 +130,7 @@ ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b
 ilaExpToRhs e               = Complex <$> ilaExpToComplex e
 
 ilaAltToAnf :: (MonadNameGenerator m, MonadError Text m) => Alt ILA.Expr -> m (Alt AnfComplex)
-ilaAltToAnf (Alt c vs e) = Alt c vs <$> ilaExpToComplex e
+ilaAltToAnf (Alt c e) = Alt c <$> ilaExpToComplex e
 
 
 makeBinding :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> (AnfTrivial -> m AnfComplex) -> m AnfComplex

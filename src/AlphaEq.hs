@@ -237,7 +237,7 @@ instance (AlphaEq a, Ord a) => AlphaEq (ILA.Binding a) where
     alphaEq' (ILA.Rec m1) (ILA.Rec m2) = alphaEq' m1 m2
     alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
 instance AlphaEq a => AlphaEq (ILA.Alt a) where
-    alphaEq' (ILA.Alt ac1 vs1 e1) (ILA.Alt ac2 vs2 e2) = alphaEq' ac1 ac2 >> alphaEq' vs1 vs2 >> alphaEq' e1 e2
+    alphaEq' (ILA.Alt ac1 e1) (ILA.Alt ac2 e2) = alphaEq' ac1 ac2 >> alphaEq' e1 e2
 instance AlphaEq ILA.Literal where
     alphaEq' (ILA.LiteralInt i1) (ILA.LiteralInt i2) =
         unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
@@ -249,7 +249,7 @@ instance AlphaEq ILA.Literal where
         unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
 instance AlphaEq ILA.AltConstructor where
-    alphaEq' (ILA.DataCon v1) (ILA.DataCon v2) = alphaEq' v1 v2
+    alphaEq' (ILA.DataCon con1 vs1) (ILA.DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
     alphaEq' (ILA.LitCon l1) (ILA.LitCon l2) = alphaEq' l1 l2
     alphaEq' ILA.Default ILA.Default = return ()
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
