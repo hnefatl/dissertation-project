@@ -389,6 +389,8 @@ expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
 
+-- Need to handle any pattern, not just this subset. So need to find a way to reuse patToIla to construct alts....
+-- Handle anything other than these types by using patToIla and using altToIla in the body?
 altToIla :: HsAlt -> Converter (Alt Expr)
 altToIla (HsAlt _ pat alts wheres) = case pat of
     HsPApp con vs -> Alt (DataCon $ convertName con) [] <$> guardedAltsToIla alts

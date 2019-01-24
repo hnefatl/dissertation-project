@@ -200,9 +200,21 @@ instance AlphaEq HsExp where
     alphaEq' (HsIf e1a e1b e1c) (HsIf e2a e2b e2c) = alphaEq' [e1a, e1b, e1c] [e2a, e2b, e2c]
     alphaEq' (HsTuple es1) (HsTuple es2) = alphaEq' es1 es2
     alphaEq' (HsList es1) (HsList es2) = alphaEq' es1 es2
+    alphaEq' (HsCase scrut1 as1) (HsCase scrut2 as2) = alphaEq' scrut1 scrut2 >> alphaEq' as1 as2
     alphaEq' (HsParen e1) (HsParen e2) = alphaEq' e1 e2
     alphaEq' (HsExpTypeSig _ e1 t1) (HsExpTypeSig _ e2 t2) = alphaEq' e1 e2 >> alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "Expression mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq HsAlt where
+    alphaEq' (HsAlt _ pat1 as1 wheres1) (HsAlt _ pat2 as2 wheres2) = do
+        alphaEq' pat1 pat2
+        alphaEq' as1 as2
+        alphaEq' wheres1 wheres2
+instance AlphaEq HsGuardedAlts where
+    alphaEq' (HsUnGuardedAlt e1) (HsUnGuardedAlt e2) = alphaEq' e1 e2
+    alphaEq' (HsGuardedAlts guards1) (HsGuardedAlts guards2) = alphaEq' guards1 guards2
+    alphaEq' a1 a2 = throwError $ unlines [ "Alt mismatch:", showt a1, showt a2 ]
+instance AlphaEq HsGuardedAlt where
+    alphaEq' (HsGuardedAlt _ scrut1 e1) (HsGuardedAlt _ scrut2 e2) = alphaEq' scrut1 scrut2 >> alphaEq' e1 e2
 instance AlphaEq HsType where
     alphaEq' (HsTyFun t1a t1b) (HsTyFun t2a t2b) = alphaEq' t1a t2a >> alphaEq' t1b t2b
     alphaEq' (HsTyTuple ts1) (HsTyTuple ts2) = alphaEq' ts1 ts2

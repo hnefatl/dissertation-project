@@ -79,4 +79,7 @@ test = testGroup "Renamer"
     , makeTest
         "data Bool = True | False ; f True x 0 = x"
         "data Bool = True | False ; v0 True v2 0 = v2"
+    , makeTest
+        "data Bool = False | True ; data Maybe a = Nothing | Just a ; f = \\x -> case x of { Nothing -> False ; Just x -> x }"
+        "data Bool = False | True ; data Maybe a = Nothing | Just a ; f = \\v0 -> case v0 of { Nothing -> False ; Just v1 -> v1 }"
     ]

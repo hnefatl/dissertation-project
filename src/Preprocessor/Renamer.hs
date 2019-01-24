@@ -228,7 +228,9 @@ instance Renameable HsExp where
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename _ = throwError "Renaming expression not supported"
 instance Renameable HsAlt where
-    rename (HsAlt loc pat alts wheres) = HsAlt loc <$> rename pat <*> rename alts <*> renames wheres
+    rename (HsAlt loc pat alts wheres) = do
+        names <- getBoundVariables pat
+        bindVariableForScope names (HsAlt loc <$> rename pat <*> rename alts <*> renames wheres)
 instance Renameable HsGuardedAlts where
     rename (HsUnGuardedAlt e) = HsUnGuardedAlt <$> rename e
     rename (HsGuardedAlts as) = HsGuardedAlts <$> renames as

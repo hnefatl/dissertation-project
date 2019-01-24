@@ -117,7 +117,7 @@ instance HasFreeVariables HsPat where
     getFreeVariables (HsPList ps)            = getFreeVariables ps
     getFreeVariables HsPRec{}                = throwError "Pattern records not supported"
 instance HasFreeVariables HsAlt where
-    getFreeVariables (HsAlt _ _ as ds) = S.union <$> getFreeVariables as <*> getFreeVariables ds
+    getFreeVariables (HsAlt _ pat as ds) = S.unions <$> sequence [getFreeVariables pat, getFreeVariables as, getFreeVariables ds]
 instance HasFreeVariables HsGuardedAlts where
     getFreeVariables (HsUnGuardedAlt e) = getFreeVariables e
     getFreeVariables (HsGuardedAlts as) = getFreeVariables as
