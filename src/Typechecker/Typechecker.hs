@@ -70,7 +70,7 @@ runTypeInferrer :: TypeInferrer a -> LoggerT NameGenerator (Except Text a, Infer
 runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
     let z = case y of
-            Left err -> throwError $ unlines [err, showt s]
+            Left err -> throwError $ unlines [err, pretty s]
             Right w  -> return w
     return (z, s)
 
@@ -78,7 +78,7 @@ evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
 evalTypeInferrer (TypeInferrer x) = do
     (y, s) <- lift $ runStateT (runExceptT x) def
     case y of
-        Left err -> throwError $ unlines [err, showt s]
+        Left err -> throwError $ unlines [err, pretty s]
         Right z  -> return z
 
 
@@ -352,7 +352,6 @@ inferExpression (HsLet decls body) = do
     (bodyExp, bodyVar) <- inferExpression body
     makeExpTypeWrapper (HsLet declExps bodyExp) bodyVar
 inferExpression (HsCase scrut alts) = do
-    -- Oh boy. Get head type, check pattern types match, check alt types match, return common alt type?
     (scrut', scrutVar) <- inferExpression scrut
     scrutType <- nameToType scrutVar
     (alts', commonType) <- inferAlts scrutType alts
@@ -394,6 +393,7 @@ inferPattern (HsPAsPat name pat) = do
     unify t vt
     return v
 inferPattern (HsPParen pat) = inferPattern pat
+inferPattern (HsPInfixApp p1 con p2) = inferPattern $ HsPApp con [p1, p2]
 inferPattern (HsPApp con pats) = do
     t <- instantiateToVar =<< getVariableQuantifiedType (convertName con)
     conType <- applyCurrentSubstitution =<< nameToType t

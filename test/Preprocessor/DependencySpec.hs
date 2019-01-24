@@ -54,4 +54,6 @@ test = testGroup "Dependency Analysis"
     , makeTest "x = True ; data Bool = True | False " [["True", "False"], ["x"]]
     , makeTest "data Bool = True | False ; x True = 0" [["True", "False"], ["x"]]
     , makeTest "x 1 () = 0 ; data () = ()" [["()"], ["x"]]
+    , makeTest "data [] a = [] | a :+ [a] ; f = \\x -> case x of { [] -> False ; _:+_ -> True }" [["[]", ":+"], ["f"]]
+    , makeTest "data [] a = [] | a :+ [a] ; data Bool = False | True ; x = True:+False:+[]" [["False", "True"], ["[]", ":+"], ["x"]]
     ]

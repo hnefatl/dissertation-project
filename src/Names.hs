@@ -9,6 +9,7 @@ import BasicPrelude
 import Data.Text               (pack, unpack)
 import Language.Haskell.Syntax as Syntax
 import TextShow                (TextShow, fromText, showb)
+import Tuples                  (makeTupleName)
 
 newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
@@ -46,7 +47,7 @@ instance NameConvertible Syntax.HsSpecialCon Text where
     convertName HsListCon      = "[]"
     convertName HsCons         = ":"
     convertName HsFunCon       = "->"
-    convertName (HsTupleCon _) = "(,)" -- TODO(kc506): Could support (,,) syntax etc...
+    convertName (HsTupleCon n) = makeTupleName n
 instance NameConvertible Syntax.HsName Text where
     convertName (HsIdent name)  = pack name
     convertName (HsSymbol name) = pack name
@@ -55,6 +56,12 @@ instance NameConvertible Syntax.HsQName Text where
     convertName (Qual _ name)            = convertName name
     convertName (UnQual name)            = convertName name
     convertName (Special s)              = convertName s
+instance NameConvertible Syntax.HsOp Text where
+    convertName (HsVarOp v) = convertName v
+    convertName (HsConOp c) = convertName c
+instance NameConvertible Syntax.HsQOp Text where
+    convertName (HsQVarOp v) = convertName v
+    convertName (HsQConOp c) = convertName c
 instance NameConvertible VariableName Text where
     convertName (VariableName n) = n
 instance NameConvertible TypeVariableName Text where

@@ -19,11 +19,13 @@ import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 
+import           AlphaEq                     (stripModuleParens)
 import           ExtraDefs                   (synPrint)
+import           Logger                      (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames
-import           Typechecker.Hardcoded
+import           Tuples                      (makeTupleName)
 
 data RenamerState = RenamerState
       -- Used to generate unique variable names
@@ -46,15 +48,15 @@ instance Default RenamerState where
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }
 
-newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState NameGenerator) a)
-    deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadNameGenerator)
+newtype Renamer a = Renamer (ExceptT Text (StateT RenamerState (LoggerT NameGenerator)) a)
+    deriving (Applicative, Functor, Monad, MonadError Text, MonadState RenamerState, MonadLogger, MonadNameGenerator)
 
-runRenamer :: Renamer a -> NameGenerator (Except Text a, RenamerState)
+runRenamer :: Renamer a -> LoggerT NameGenerator (Except Text a, RenamerState)
 runRenamer (Renamer inner) = do
     (x, s) <- runStateT (runExceptT inner) def
     return (liftEither x, s)
 
-evalRenamer :: Renamer a -> ExceptT Text NameGenerator a
+evalRenamer :: Renamer a -> ExceptT Text (LoggerT NameGenerator) a
 evalRenamer (Renamer inner) = do
     x <- lift $ evalStateT (runExceptT inner) def
     liftEither x
@@ -75,6 +77,7 @@ bindVariableForScope names action = do
     mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueVarName) (S.toList names)
     -- Add new bindings to scope
     modify (\s -> s { variableBindings = M.unionWith (++) (M.map pure mapping) (variableBindings s) })
+    writeLog $ "Entered new scope: bindings = " <> showt mapping
     -- Add reverse mappings
     let reverseMapping = M.fromList $ map swap $ M.toList mapping
     modify (\s -> s { variableReverseMapping = M.union (variableReverseMapping s) reverseMapping })
@@ -118,30 +121,32 @@ renames = mapM rename
 renameVariable :: HsName -> Renamer HsName
 renameVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@HsSpecial{} = return n
+renameVariable n@HsSpecial{} = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameTypeVariable :: HsName -> Renamer HsName
 renameTypeVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 renameTypeVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@HsSpecial{} = return n
+renameTypeVariable n@HsSpecial{} = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 
--- Renaming a module is a special case: we want to capture the renamings we used on the top-level variables for later
--- (used during CodeGen).
+-- Returns the renamed module along with the reverse variable renaming mapping
 renameModule :: HsModule -> Renamer (HsModule, M.Map VariableName VariableName)
 renameModule (HsModule a b c d decls) = do
-    -- TODO(kc506): Remove when we get rid of hardcoded variables
-    bindVariableForScope (M.keysSet builtinFunctions) $ do
-        (decls', reverseMappings) <- renameDeclGroupWith decls (gets variableReverseMapping)
-        let reverseRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMappings
-        return (HsModule a b c d decls', reverseRenames)
+    writeLog "-----------"
+    writeLog "- Renamer -"
+    writeLog "-----------"
+    (decls', reverseMappings) <- renameDeclGroupWith decls (gets variableReverseMapping)
+    let reverseRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMappings
+    writeLog "Renames"
+    forM_ (M.toList reverseRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
+    return (stripModuleParens $ HsModule a b c d decls', reverseRenames)
 
 instance Renameable HsQName where
     rename (Qual m n)  = Qual m <$> renameVariable n
     rename (UnQual n)  = UnQual <$> renameVariable n
-    rename (Special _) = throwError "Special forms not supported"
+    rename n@Special{} = UnQual <$> renameVariable (HsSymbol $ unpack $ convertName n)
 
 instance Renameable HsQOp where
     rename (HsQVarOp n) = HsQVarOp <$> rename n
-    rename (HsQConOp c) = return $ HsQConOp c
+    rename (HsQConOp c) = HsQConOp <$> rename c
 
 -- |Rename a horizontally-grouped list of declarations, like in:
 -- > x = y + 1
@@ -200,8 +205,12 @@ instance Renameable HsPat where
     rename (HsPNeg p)            = HsPNeg <$> rename p
     rename (HsPInfixApp p1 n p2) = HsPInfixApp <$> rename p1 <*> rename n <*> rename p2
     rename (HsPApp con ps)       = HsPApp <$> rename con <*> renames ps
-    rename (HsPTuple ps)         = HsPTuple <$> renames ps
-    rename (HsPList ps)          = HsPList <$> renames ps
+    rename (HsPTuple es) = do
+        let tupleCon = UnQual $ HsSymbol $ unpack $ makeTupleName $ length es
+        HsPApp <$> rename tupleCon <*> renames es
+    rename (HsPList es) = do
+        let listCon = UnQual $ HsSymbol "[]"
+        HsPApp <$> rename listCon <*> renames es
     rename (HsPParen p)          = HsPParen <$> rename p
     rename HsPRec{}              = throwError "Record fields not supported"
     rename (HsPAsPat n p)        = HsPAsPat <$> renameVariable n <*> rename p
@@ -222,8 +231,14 @@ instance Renameable HsExp where
     rename (HsIf e1 e2 e3) = HsIf <$> rename e1 <*> rename e2 <*> rename e3
     rename (HsCase head alts) = HsCase <$> rename head <*> renames alts
     rename (HsDo _) = throwError "Do expression not supported"
-    rename (HsTuple es) = HsTuple <$> renames es
-    rename (HsList es) = HsList <$> renames es
+    -- We rename the builtin tuple/list syntax to an application of the appropriate constructor, as otherwise they
+    -- remain list/tuple constructors later when the actual list/tuple constructors have been renamed to something else.
+    rename (HsTuple es) = do
+        let tupleCon = HsCon $ UnQual $ HsSymbol $ unpack $ makeTupleName $ length es
+        foldl' HsApp <$> rename tupleCon <*> renames es
+    rename (HsList es) = do
+        let listCon = HsCon $ UnQual $ HsSymbol "[]"
+        foldl' HsApp <$> rename listCon <*> renames es
     rename (HsParen e) = HsParen <$> rename e
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename _ = throwError "Renaming expression not supported"

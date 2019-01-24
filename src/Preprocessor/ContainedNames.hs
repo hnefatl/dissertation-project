@@ -14,6 +14,7 @@ import           TextShow                (TextShow, showt)
 
 import           ExtraDefs               (synPrint)
 import           Names
+import           Tuples                  (makeTupleName)
 
 
 disjointUnion :: (MonadError Text m, Ord a, TextShow a) => S.Set a -> S.Set a -> m (S.Set a)
@@ -90,7 +91,7 @@ instance HasFreeVariables HsRhs where
 instance HasFreeVariables HsExp where
     getFreeVariables (HsVar name)          = return $ S.singleton $ convertName name
     getFreeVariables (HsCon name)          = return $ S.singleton $ convertName name
-    getFreeVariables (HsLit _)             = return S.empty
+    getFreeVariables HsLit{}               = return S.empty
     getFreeVariables (HsInfixApp e1 op e2) = S.insert (convertName op) <$> getFreeVariables [e1, e2]
     getFreeVariables (HsApp e1 e2)         = S.union <$> getFreeVariables e1 <*> getFreeVariables e2
     getFreeVariables (HsNegApp e)          = getFreeVariables e
@@ -98,8 +99,8 @@ instance HasFreeVariables HsExp where
     getFreeVariables (HsLet ds e)          = S.union <$> getFreeVariables ds <*> getFreeVariables e
     getFreeVariables (HsCase scrut alts)   = S.union <$> getFreeVariables scrut <*> getFreeVariables alts
     getFreeVariables (HsIf e1 e2 e3)       = getFreeVariables [e1, e2, e3]
-    getFreeVariables (HsTuple es)          = getFreeVariables es
-    getFreeVariables (HsList es)           = getFreeVariables es
+    getFreeVariables (HsTuple es)          = S.insert (VariableName $ makeTupleName $ length es) <$> getFreeVariables es
+    getFreeVariables (HsList es)           = S.insert "[]" <$> getFreeVariables es
     getFreeVariables (HsParen e)           = getFreeVariables e
     getFreeVariables (HsExpTypeSig _ e _)  = getFreeVariables e
     getFreeVariables e                     = throwError $ pack $ "Unsupported expression " <> show e
@@ -113,8 +114,8 @@ instance HasFreeVariables HsPat where
     getFreeVariables (HsPAsPat v p)          = S.insert (convertName v) <$> getFreeVariables p
     getFreeVariables (HsPInfixApp p1 con p2) = S.insert (convertName con) <$> getFreeVariables [p1, p2]
     getFreeVariables (HsPApp con ps)         = S.insert (convertName con) <$> getFreeVariables ps
-    getFreeVariables (HsPTuple ps)           = getFreeVariables ps
-    getFreeVariables (HsPList ps)            = getFreeVariables ps
+    getFreeVariables (HsPTuple ps)           = S.insert (VariableName $ makeTupleName $ length ps) <$> getFreeVariables ps
+    getFreeVariables (HsPList ps)            = S.insert "[]" <$> getFreeVariables ps
     getFreeVariables HsPRec{}                = throwError "Pattern records not supported"
 instance HasFreeVariables HsAlt where
     getFreeVariables (HsAlt _ pat as ds) = S.unions <$> sequence [getFreeVariables pat, getFreeVariables as, getFreeVariables ds]

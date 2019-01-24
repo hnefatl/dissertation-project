@@ -65,7 +65,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
             m <- embedExceptIOIntoResult $ parse f
-            (renamedModule, reverseRenames1) <- embedExceptNGIntoResult $ evalRenamer $ renameModule m
+            (renamedModule, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             mainName <- case M.toList $ M.filter (== "_main") reverseRenames1 of
                 []       -> throwError "No _main symbol found."
                 [(n, _)] -> return n

@@ -14,7 +14,9 @@ builtinConstructors = M.fromList
     , ("False", Quantified S.empty $ Qualified S.empty typeBool)
     , ("Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeA)
     , ("Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA)
-    , ("(,)", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] $ makeTuple [ta, tb]) ]
+    , ("(,)", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] $ makeTuple [ta, tb])
+    , (":", Quantified (S.fromList [a]) $ Qualified S.empty $ makeFun [ta, makeList ta] $ makeList ta)
+    , ("[]", Quantified (S.fromList [a]) $ Qualified S.empty $ makeList ta) ]
     where a = TypeVariable "a" KindStar
           b = TypeVariable "b" KindStar
           ta = TypeVar a

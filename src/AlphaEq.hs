@@ -132,13 +132,9 @@ instance AlphaEq HsName where
 instance AlphaEq HsQName where
     alphaEq' n1 n2 = alphaEq' (convertName n1 :: Text) (convertName n2)
 instance AlphaEq HsOp where
-    alphaEq' (HsVarOp n1) (HsVarOp n2) = alphaEq' n1 n2
-    alphaEq' (HsConOp n1) (HsConOp n2) = unless (n1 == n2) $ throwError $ "HsConOp mismatch" <> showt n1 <> showt n2
-    alphaEq' op1 op2 = throwError $ "HsOp mismatch: " <> showt op1 <> showt op2
+    alphaEq' op1 op2 = alphaEq' (convertName op1 :: Text) (convertName op2)
 instance AlphaEq HsQOp where
-    alphaEq' (HsQVarOp n1) (HsQVarOp n2) = alphaEq' n1 n2
-    alphaEq' (HsQConOp n1) (HsQConOp n2) = unless (n1 == n2) $ throwError $ "HsQConOp mismatch" <> showt n1 <> showt n2
-    alphaEq' op1 op2 = throwError $ "HsQOp mismatch: " <> showt op1 <> showt op2
+    alphaEq' op1 op2 = alphaEq' (convertName op1 :: Text) (convertName op2)
 instance AlphaEq HsModule where
     alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEq' ds1 ds2
 instance AlphaEq HsDecl where
@@ -296,10 +292,16 @@ instance AlphaEq ILAANF.AnfRhs where
 stripModuleParens :: HsModule -> HsModule
 stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)
 stripDeclParens :: HsDecl -> HsDecl
-stripDeclParens (HsPatBind l p r ds) = HsPatBind l p (stripRhsParens r) (stripDeclsParens ds)
+stripDeclParens (HsPatBind l p r ds) = HsPatBind l (stripPatParens p) (stripRhsParens r) (stripDeclsParens ds)
+stripDeclParens (HsFunBind ms) = HsFunBind $ map stripMatchParens ms
+stripDeclParens d@HsDataDecl{} = d
+stripDeclParens d@HsTypeSig{} = d
+stripDeclParens (HsClassDecl l ctx name args ds) = HsClassDecl l ctx name args (map stripDeclParens ds)
 stripDeclParens _                    = error "Unsupported declaration in paren strip"
 stripDeclsParens :: [HsDecl] -> [HsDecl]
 stripDeclsParens = map stripDeclParens
+stripMatchParens :: HsMatch -> HsMatch
+stripMatchParens (HsMatch l n ps rhs ds) = HsMatch l n (map stripPatParens ps) (stripRhsParens rhs) (stripDeclsParens ds)
 stripRhsParens :: HsRhs -> HsRhs
 stripRhsParens (HsUnGuardedRhs e) = HsUnGuardedRhs (stripExpParens e)
 stripRhsParens _                  = error "Unsupported RHS in paren strip"
@@ -308,10 +310,23 @@ stripExpParens (HsParen e)           = stripExpParens e
 stripExpParens (HsApp e1 e2)         = HsApp (stripExpParens e1) (stripExpParens e2)
 stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
 stripExpParens (HsNegApp e)          = HsNegApp (stripExpParens e)
-stripExpParens (HsLambda l ps e)     = HsLambda l ps (stripExpParens e)
+stripExpParens (HsLambda l ps e)     = HsLambda l (map stripPatParens ps) (stripExpParens e)
 stripExpParens (HsIf c e1 e2)        = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
-stripExpParens (HsLet ds e)          = HsLet ds (stripExpParens e)
+stripExpParens (HsLet ds e)          = HsLet (stripDeclsParens ds) (stripExpParens e)
 stripExpParens (HsTuple es)          = HsTuple (map stripExpParens es)
 stripExpParens (HsList es)           = HsList (map stripExpParens es)
 stripExpParens (HsExpTypeSig l e t)  = HsExpTypeSig l (stripExpParens e) t
 stripExpParens e                     = e
+stripPatParens :: HsPat -> HsPat
+stripPatParens (HsPParen p) = stripPatParens p
+stripPatParens p@HsPVar{}            = p
+stripPatParens p@HsPLit{}            = p
+stripPatParens (HsPNeg p)            = HsPNeg $ stripPatParens p
+stripPatParens (HsPInfixApp p1 n p2) = HsPInfixApp (stripPatParens p1) n (stripPatParens p2)
+stripPatParens (HsPApp con ps)       = HsPApp con $ map stripPatParens ps
+stripPatParens (HsPTuple ps) = HsPTuple $ map stripPatParens ps
+stripPatParens (HsPList ps) = HsPList $ map stripPatParens ps
+stripPatParens (HsPAsPat n p)        = HsPAsPat n $ stripPatParens p
+stripPatParens HsPWildCard           = HsPWildCard
+stripPatParens (HsPIrrPat p)         = HsPIrrPat $ stripPatParens p
+stripPatParens HsPRec{} = error "HsPRec in stripPatParens"
