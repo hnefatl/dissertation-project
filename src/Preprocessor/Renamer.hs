@@ -119,13 +119,11 @@ renames :: (Renameable a, Traversable f) => f a -> Renamer (f a)
 renames = mapM rename
 
 renameVariable :: HsName -> Renamer HsName
-renameVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
-renameVariable n@HsSpecial{} = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n@HsIdent{} = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
+renameVariable n           = HsSymbol . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
 renameTypeVariable :: HsName -> Renamer HsName
-renameTypeVariable n@HsIdent{}   = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@HsSymbol{}  = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
-renameTypeVariable n@HsSpecial{} = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n@HsIdent{} = HsIdent . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
+renameTypeVariable n           = HsSymbol . unpack . convertName <$> getUniqueScopedTypeVariableName (convertName n)
 
 -- Returns the renamed module along with the reverse variable renaming mapping
 renameModule :: HsModule -> Renamer (HsModule, M.Map VariableName VariableName)

@@ -96,9 +96,9 @@ test = testGroup "Renamer"
     , makeVanillaTest
         "data Bool = True | False ; data [] a = E | C a [a] ; f = \\x -> x ; y = f (C True (C False E))"
         "data Bool = True | False ; data [] a = V0 | V1 a [a] ; f = \\x -> x ; y = f (V1 True (V1 False V0))"
-    --, makeVanillaTest
-    --    "data Bool = True | False ; data [] a = [] | a :+ [a] ; f = \\x -> x ; y = f (True:+(False:+[]))"
-    --    "data Bool = True | False ; data [] a = V0 | V1 a [a] ; f = \\x -> x ; y = f (True `V1` (False `V1` V0))"
+    , makeVanillaTest
+        "data Bool = True | False ; data [] a = [] | a :+ [a] ; f = \\x -> x ; y = f (True:+(False:+[]))"
+        "data Bool = True | False ; data [] a = V0 | V1 a [a] ; f = \\x -> x ; y = f (True `V1` (False `V1` V0))"
     , makeVanillaTest
         "data [] a = [] | a :+ [a] ; x = []"
         "data [] a = V0 | V1 a [a] ; x = V0"

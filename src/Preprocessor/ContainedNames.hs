@@ -30,6 +30,10 @@ class HasFreeVariables a where
     getFreeVariables :: MonadError Text m => a -> m (S.Set VariableName)
 class HasFreeTypeVariables a where
     getFreeTypeVariables :: a -> S.Set TypeVariableName
+class HasFreeTypeConstants a where
+    getFreeTypeConstants :: a -> S.Set TypeVariableName
+class HasBoundTypeConstants a where
+    getBoundTypeConstants :: a -> S.Set TypeVariableName
 
 instance {-# Overlappable #-} (Traversable t, HasBoundVariables a) => HasBoundVariables (t a) where
     getBoundVariables = disjointUnions <=< mapM getBoundVariables
@@ -37,6 +41,10 @@ instance {-# Overlappable #-} (Traversable t, HasFreeVariables a) => HasFreeVari
     getFreeVariables = fmap S.unions . mapM getFreeVariables
 instance {-# Overlappable #-} (Functor f, Foldable f, HasFreeTypeVariables a) => HasFreeTypeVariables (f a) where
     getFreeTypeVariables = S.unions . fmap getFreeTypeVariables
+instance {-# Overlappable #-} (Functor f, Foldable f, HasFreeTypeConstants a) => HasFreeTypeConstants (f a) where
+    getFreeTypeConstants = S.unions . fmap getFreeTypeConstants
+instance {-# Overlappable #-} (Functor f, Foldable f, HasBoundTypeConstants a) => HasBoundTypeConstants (f a) where
+    getBoundTypeConstants = S.unions . fmap getBoundTypeConstants
 
 instance HasBoundVariables HsDecl where
     getBoundVariables (HsPatBind _ pat _ _) = getBoundVariables pat
@@ -71,7 +79,7 @@ instance HasBoundVariables HsPat where
 instance HasFreeVariables HsDecl where
     getFreeVariables (HsPatBind _ pat rhs _)    = S.union <$> getFreeVariables pat <*> getFreeVariables rhs
     getFreeVariables (HsClassDecl _ _ _ _ args) = S.unions <$> mapM getFreeVariables args
-    getFreeVariables (HsTypeSig _ names _)      = return $ S.fromList $ map convertName names
+    getFreeVariables HsTypeSig{}                = return S.empty
     getFreeVariables HsDataDecl{}               = return S.empty
     getFreeVariables (HsFunBind matches)        = do
         names <- S.toList . S.unions <$> mapM getBoundVariables matches
@@ -132,4 +140,25 @@ instance HasFreeTypeVariables HsType where
     getFreeTypeVariables (HsTyTuple ts)  = getFreeTypeVariables ts
     getFreeTypeVariables (HsTyApp t1 t2) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
     getFreeTypeVariables (HsTyVar n)     = S.singleton $ convertName n
-    getFreeTypeVariables (HsTyCon _)     = S.empty
+    getFreeTypeVariables HsTyCon{}       = S.empty
+
+instance HasFreeTypeConstants HsDecl where
+    getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = S.unions $ map getFreeTypeConstants ds
+    getFreeTypeConstants (HsTypeSig _ _ t)        = getFreeTypeConstants t
+    getFreeTypeConstants _                        = S.empty
+instance HasFreeTypeConstants HsQualType where
+    getFreeTypeConstants (HsQualType quals t) = S.union qualConsts (getFreeTypeConstants t)
+        where qualConsts = S.unions $ map (S.singleton . convertName . fst) quals
+instance HasFreeTypeConstants HsType where
+    getFreeTypeConstants (HsTyFun t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
+    getFreeTypeConstants (HsTyTuple ts)  = getFreeTypeConstants ts
+    getFreeTypeConstants (HsTyApp t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
+    getFreeTypeConstants HsTyVar{}       = S.empty
+    getFreeTypeConstants (HsTyCon n)     = S.singleton $ convertName n
+
+instance HasBoundTypeConstants HsDecl where
+    getBoundTypeConstants (HsDataDecl _ _ name _ _ _) = S.singleton $ convertName name
+    getBoundTypeConstants (HsClassDecl _ _ name _ _) = S.singleton $ convertName name
+    getBoundTypeConstants (HsTypeDecl _ name _ _) = S.singleton $ convertName name
+    getBoundTypeConstants (HsNewTypeDecl _ _ name _ _ _) = S.singleton $ convertName name
+    getBoundTypeConstants _ = S.empty

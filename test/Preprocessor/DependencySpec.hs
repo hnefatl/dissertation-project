@@ -32,7 +32,7 @@ makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpa
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
                 case runExcept (getBoundVariables actualGroup) of
                     Left err         -> assertFailure $ unpack err
-                    Right boundNames -> assertEqual (unpack $ unlines logs) boundNames (S.fromList expectedGroup)
+                    Right boundNames -> assertEqual (unpack $ unlines logs) (S.fromList expectedGroup) boundNames
 
 
 
@@ -56,4 +56,6 @@ test = testGroup "Dependency Analysis"
     , makeTest "x 1 () = 0 ; data () = ()" [["()"], ["x"]]
     , makeTest "data [] a = [] | a :+ [a] ; f = \\x -> case x of { [] -> False ; _:+_ -> True }" [["[]", ":+"], ["f"]]
     , makeTest "data [] a = [] | a :+ [a] ; data Bool = False | True ; x = True:+False:+[]" [["False", "True"], ["[]", ":+"], ["x"]]
+    , makeTest "data Bool = False | True ; x :: Bool" [["False", "True"], ["x"]]
+    , makeTest "data () = () ; x :: () -> ()" [["()"], ["x"]]
     ]
