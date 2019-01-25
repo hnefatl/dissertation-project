@@ -146,12 +146,11 @@ getExprType (Type t)               = return t
 
 data ConverterReadableState = ConverterReadableState
     { types     :: M.Map VariableName QuantifiedSimpleType
-    , renamings :: M.Map VariableName VariableName }
+    , renamings :: M.Map VariableName VariableName
+      -- The renamings from the renamer stage: used to get the right name for eg. tuple constructors if they've been
+      -- renamed
+    , topLevelRenames :: M.Map VariableName VariableName }
     deriving (Eq, Show)
-instance Default ConverterReadableState where
-    def = ConverterReadableState
-        { types = M.empty
-        , renamings = M.empty }
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
@@ -170,11 +169,12 @@ instance TextShow ConverterState where
 newtype Converter a = Converter (ReaderT ConverterReadableState (StateT ConverterState (ExceptT Text (LoggerT NameGenerator))) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
-runConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter x ts ks = runStateT (runReaderT (local (addTypes ts) inner) def) def
+runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
+runConverter x rs ts ks = runStateT (runReaderT inner rState) def
     where Converter inner = addKinds ks >> x
-evalConverter :: Converter a -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
-evalConverter x ts ks = fst <$> runConverter x ts ks
+          rState = ConverterReadableState { renamings = M.empty, topLevelRenames = rs, types = ts }
+evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
+evalConverter x rs ts ks = fst <$> runConverter x rs ts ks
 
 addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
@@ -212,26 +212,35 @@ getSimpleFromSynType t = do
     unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
     return t'
 
+getTupleName :: Converter VariableName
+getTupleName = maybe (throwError "No top-level rename found for \"(,)\"") return =<< asks (M.lookup "(,)" . topLevelRenames)
+
 -- |Construct an expression representing a tuple given the expressions and types of each element
-makeTuple :: [(Expr, Type)] -> Expr
+makeTuple :: [(Expr, Type)] -> Converter Expr
 makeTuple ps = makeTuple' es t
   where (es, ts) = unzip ps
         t        = T.makeFun ts (T.makeTuple ts)
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the tuple
-makeTuple' :: [Expr] -> Type -> Expr
-makeTuple' es t = foldl' App base es where base = Con "(,)" t
+makeTuple' :: [Expr] -> Type -> Converter Expr
+makeTuple' es t = foldl' App <$> (Con <$> getTupleName <*> pure t) <*> pure es
 
-makeList :: MonadError Text m => [(Expr, Type)] -> m Expr
+getListNilName :: Converter VariableName
+getListNilName = maybe (throwError "No top-level rename found for \"[]\"") return =<< asks (M.lookup "[]" . topLevelRenames)
+getListConsName :: Converter VariableName
+getListConsName = maybe (throwError "No top-level rename found for \":\"") return =<< asks (M.lookup ":" . topLevelRenames)
+
+makeList :: [(Expr, Type)] -> Converter Expr
 makeList [] = throwError "Empty list passed to makeList"
 makeList ps = case S.toList uniqueTypes of
-        [t] -> return $ makeList' es t
+        [t] -> makeList' es t
         uts -> throwError $ "Mismatching types passed to makeList: " <> showt uts
     where (es, ts)    = unzip ps
           uniqueTypes = S.fromList ts
-makeList' :: [Expr] -> Type -> Expr
-makeList' es t = foldr (\x y -> App (App cons x) y) nil es
-    where cons = Con ":" (T.makeFun [t, T.makeList t] $ T.makeList t)
-          nil  = Con "[]" (T.makeList t)
+makeList' :: [Expr] -> Type -> Converter Expr
+makeList' es t = do
+    cons <- Con <$> getListConsName <*> pure (T.makeFun [t, T.makeList t] $ T.makeList t)
+    nil  <- Con <$> getListNilName <*> pure (T.makeList t)
+    return $ foldr (\x y -> App (App cons x) y) nil es
 
 makeError :: Type -> Expr
 makeError = Var "compilerError"
@@ -249,13 +258,8 @@ getPatVariableTypes (HsPApp _ ps) t = do
     let (_, argTypes) = T.unmakeApp t
     unless (length ps == length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
     M.unions <$> zipWithM getPatVariableTypes ps argTypes
-getPatVariableTypes (HsPTuple ps) t = do
-    argTypes <- T.unmakeTuple t
-    unless (length ps == length argTypes) $ throwError "Partially applied tuple in ILA lowering"
-    M.unions <$> zipWithM getPatVariableTypes ps argTypes
-getPatVariableTypes (HsPList ps) t = do
-    elementType <- T.unmakeList t
-    M.unions <$> mapM (flip getPatVariableTypes elementType) ps
+getPatVariableTypes (HsPTuple ps) t = throwError "HsPTuple should've been removed in the renamer"
+getPatVariableTypes (HsPList ps) t = throwError "HsPList should've been removed in the renamer"
 getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
 getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
 getPatVariableTypes HsPWildCard _ = return M.empty
@@ -287,7 +291,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     let renamedExps = zipWith (\name t -> Var (renames M.! name) t) boundNames boundTypes
     -- Generate an expression that matches the patterns then returns a tuple of every variable
     let resultType  = T.makeTuple boundTypes
-        resultTuple = makeTuple (zip renamedExps boundTypes)
+    resultTuple <- makeTuple (zip renamedExps boundTypes)
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
     resultExpr <- addRenamings renames $ local (addTypes ts) $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
@@ -302,7 +306,8 @@ declToIla (HsPatBind _ pat rhs _) = do
             let tempName = tempNames !! index -- Get the temporary name in the right position in the tuple
                 body = Var tempName bindingType
             -- Just retrieve the specific output variable
-            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon "(,)" tempNames) body , Alt Default (makeError bindingType) ]
+            tupleName <- getTupleName
+            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon tupleName tempNames) body , Alt Default (makeError bindingType) ]
     extractors <- mapM extractorMap (zip boundNames [0 ..])
     return $ Rec (M.singleton resultName resultExpr):extractors
 declToIla (HsFunBind matches) = throwError "Functions not supported in ILA"
@@ -380,14 +385,8 @@ expToIla (HsCase scrut alts) = do
     scrut' <- expToIla scrut
     alts' <- mapM altToIla alts
     return $ Case scrut' [] alts'
-expToIla (HsTuple exps) = do
-    es <- mapM expToIla exps
-    ts <- mapM getExprType es
-    return $ makeTuple $ zip es ts
-expToIla (HsList exps) = do
-    es <- mapM expToIla exps
-    ts <- mapM getExprType es
-    makeList $ zip es ts
+expToIla (HsTuple exps) = throwError "HsTuple should've been removed in renamer"
+expToIla (HsList exps) = throwError "HsList should've been removed in renamer"
 expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
@@ -430,17 +429,8 @@ patToIla (HsPApp con args) t head body bodyType = do
         argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
     body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
     return $ Case head [] [ Alt (DataCon (convertName con) argNames) body', Alt Default $ makeError bodyType ]
-patToIla (HsPTuple pats) t head body bodyType = patToIla (HsPApp (UnQual $ HsIdent "(,)") pats) t head body bodyType
-patToIla (HsPList []) _ head body bodyType =
-    return $ Case head [] [Alt nilCon body, Alt Default $ makeError bodyType ]
-    where nilCon = DataCon "[]" []
-patToIla (HsPList (p:ps)) listType head body bodyType = do
-    elementType <- T.unmakeList listType
-    headName <- freshVarName
-    tailName <- freshVarName
-    headExpr <- patToIla p elementType (Var headName elementType) body bodyType
-    tailExpr <- patToIla (HsPList ps) listType (Var tailName listType) headExpr bodyType
-    return $ Case head [] [ Alt (DataCon ":" [headName, tailName]) tailExpr , Alt Default $ makeError bodyType ]
+patToIla HsPTuple{} _ _ _ _ = throwError "HsPTuple should've been removed in the renamer"
+patToIla HsPList{} _ _ _ _ = throwError "HsPTuple should've been removed in the renamer"
 patToIla (HsPParen pat) t head body bodyType = patToIla pat t head body bodyType
 patToIla (HsPAsPat name pat) t head body bodyType = do
     expr <- patToIla pat t head body bodyType

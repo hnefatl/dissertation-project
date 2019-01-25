@@ -65,16 +65,15 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
             m <- embedExceptIOIntoResult $ parse f
-            (renamedModule, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
-            mainName <- case M.toList $ M.filter (== "_main") reverseRenames1 of
-                []       -> throwError "No _main symbol found."
-                [(n, _)] -> return n
-                ns       -> throwError $ "Multiple _main symbols found: " <> showt (map fst ns)
+            (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
+            mainName <- case M.lookup "_main" topLevelRenames of
+                Nothing -> throwError "No _main symbol found."
+                Just n       -> return n
             (taggedModule, types) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
             deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types
-            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) deoverloadedTypes builtinKinds
+            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes builtinKinds
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]

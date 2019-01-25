@@ -35,10 +35,3 @@ compilerGeneratedHooks = M.fromList
             putStaticField (toLazyBytestring cname) field
       )
     ]
---
---compilerGeneratedDatatypes :: MonadNameGenerator m => [m Datatype]
---compilerGeneratedDatatypes =
---    [
---        do
---            Datatype "(,)" []
---    ]

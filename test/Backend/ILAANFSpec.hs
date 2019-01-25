@@ -44,7 +44,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             let dets = map deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
-            evalConverter (toIla m'' >>= ilaToAnf) dets builtinKinds
+            evalConverter (toIla m'' >>= ilaToAnf) M.empty dets builtinKinds
 
 
 test :: TestTree
