@@ -94,7 +94,9 @@ instance {-# Overlappable #-} (Functor f, Foldable f, HasBoundTypeConstants a) =
 instance HasBoundVariables HsDecl where
     getBoundVariablesAndConflicts (HsPatBind _ pat _ _) = getBoundVariablesAndConflicts pat
     getBoundVariablesAndConflicts (HsFunBind matches) = do
-        names <- S.toList <$> getBoundVariables matches
+        -- Specifically mapM over the matches so we don't disjoint union the bound match variables: they all bind the
+        -- same name so we'll get an error.
+        names <- S.toList . S.unions <$> mapM getBoundVariables matches
         let funName = head names
             allNamesMatch = all (== funName) names
         if allNamesMatch then return $ singleton funName SymDef else throwError "Mismatched function names"

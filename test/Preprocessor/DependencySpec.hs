@@ -58,4 +58,7 @@ test = testGroup "Dependency Analysis"
     , makeTest "data [] a = [] | a :+ [a] ; data Bool = False | True ; x = True:+False:+[]" [["False", "True"], ["[]", ":+"], ["x"]]
     , makeTest "data Bool = False | True ; x :: Bool" [["False", "True"], ["x"]]
     , makeTest "data () = () ; x :: () -> ()" [["()"], ["x"]]
+    --, makeTest
+    --    "data () = () ; class F a where { f :: a -> a } ; instance F () where { f () = () }"
+    --    [["()"], ["f"], ["f"]]
     ]
