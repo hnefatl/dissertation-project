@@ -524,13 +524,24 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
                 quantType <- synToQuantType (HsQualType (classPred:quals) t)
                 forM_ varNames (\v -> insertQuantifiedType v quantType)
                 writeLog $ "Processed " <> showt names <> ", got " <> showt quantType
-            _ -> throwError "Non-type signature declaration found in typeclass"
+            _ -> throwError "Only support type signature declarations in typeclasses"
         -- Update our running class environment
         -- TODO(kc506): When we support contexts, update this to include the superclasses
         addClasses $ M.singleton className (Class S.empty S.empty)
         return d
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
+inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
+    ([], [arg]) -> do
+        ks <- getKinds
+        t <- synToType ks arg
+        addTypePredicate $ IsInstance (convertName name) t
+        decls' <- forM decls $ \case
+            d@HsPatBind{} -> inferDecl d
+            _ -> throwError "Only support pattern binding declarations in typeclasse instances"
+        return $ HsInstDecl loc ctx name args decls'
+    ([], _) -> throwError "Multiparameter typeclasse instances not supported"
+    (_, _) -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     let typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
     addKinds $ M.singleton (convertName name) typeKind
@@ -567,6 +578,7 @@ inferConDecl _ HsRecDecl{} = throwError "Record data declarations not supported 
 needsRecursiveBinding :: MonadError Text m => Syntax.HsDecl -> m Bool
 needsRecursiveBinding HsPatBind{}   = return True
 needsRecursiveBinding HsFunBind{}   = return True
+needsRecursiveBinding HsInstDecl{}  = return True
 needsRecursiveBinding HsClassDecl{} = return False
 needsRecursiveBinding HsTypeSig{}   = return False
 needsRecursiveBinding HsDataDecl{}  = return False
@@ -642,6 +654,7 @@ updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeT
 updateDeclTypeTags (HsFunBind matches)      = HsFunBind <$> mapM updateMatchTypeTags matches
 updateDeclTypeTags d@HsTypeSig{}            = return d
 updateDeclTypeTags d@HsClassDecl{}          = return d
+updateDeclTypeTags (HsInstDecl loc ctx name ts ds) = HsInstDecl loc ctx name ts <$> updateDeclsTypeTags ds
 updateDeclTypeTags d@HsDataDecl{}           = return d
 updateDeclTypeTags _                        = throwError "Unsupported declaration when updating type tags"
 updateDeclsTypeTags :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
@@ -674,6 +687,7 @@ checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExp
 checkDeclExpTypes (HsFunBind matches) = mapM_ checkMatchExpTypes matches
 checkDeclExpTypes HsTypeSig{}          = return ()
 checkDeclExpTypes HsClassDecl{}          = return ()
+checkDeclExpTypes (HsInstDecl _ _ _ _ ds) = checkDeclsExpTypes ds
 checkDeclExpTypes HsDataDecl{}           = return ()
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
 checkDeclsExpTypes :: MonadError Text m => [Syntax.HsDecl] -> m ()

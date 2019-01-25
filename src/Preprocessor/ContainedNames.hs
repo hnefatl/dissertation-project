@@ -1,5 +1,6 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# Language FlexibleContexts  #-}
+{-# Language TupleSections     #-}
+{-# Language FlexibleInstances #-}
 
 -- |Utility functions for getting variable names from the parse tree
 module Preprocessor.ContainedNames where
@@ -8,24 +9,68 @@ import           BasicPrelude
 import           Control.Monad.Except    (MonadError, throwError)
 import           Data.Foldable           (foldlM)
 import qualified Data.Set                as S
-import           Data.Text               (pack)
+import qualified Data.Map.Strict         as M
+import           Data.Text               (pack, unpack)
 import           Language.Haskell.Syntax
-import           TextShow                (TextShow, showt)
+import           TextShow                (showt)
 
 import           ExtraDefs               (synPrint)
 import           Names
+import           Typechecker.Types       (Type)
 import           Tuples                  (makeTupleName)
 
 
-disjointUnion :: (MonadError Text m, Ord a, TextShow a) => S.Set a -> S.Set a -> m (S.Set a)
-disjointUnion s1 s2 = if S.null inter then return (S.union s1 s2) else throwError err
-    where inter = S.intersection s1 s2
-          err = "Duplicate binding names in same level: " <> showt (S.toList inter)
-disjointUnions :: (MonadError Text m, Foldable f, Ord a, TextShow a) => f (S.Set a) -> m (S.Set a)
-disjointUnions = foldlM disjointUnion S.empty
+type VariableConflictInfo = M.Map VariableName (S.Set ConflictInfo)
+singleton :: VariableName -> ConflictInfo -> VariableConflictInfo
+singleton v = M.singleton v . S.singleton
+
+disjointInsert :: MonadError Text m => VariableName -> ConflictInfo -> VariableConflictInfo -> m VariableConflictInfo
+disjointInsert v c m = case M.lookup v m of
+    Nothing -> return $ M.insert v (S.singleton c) m
+    Just cs
+        | any (conflict c) cs -> throwError $ "Conflict over bound symbol " <> showt v
+        | otherwise -> return $ M.insert v (S.insert c cs) m
+
+disjointInserts :: MonadError Text m => VariableName -> S.Set ConflictInfo -> VariableConflictInfo -> m VariableConflictInfo
+disjointInserts v cs m = foldlM (flip $ disjointInsert v) m cs
+
+disjointUnion :: MonadError Text m => VariableConflictInfo -> VariableConflictInfo -> m VariableConflictInfo
+disjointUnion m1 m2 = foldM (\m (v, cs) -> disjointInserts v cs m) m2 (M.toList m1) 
+
+disjointUnions :: (MonadError Text m, Foldable f) => f VariableConflictInfo -> m VariableConflictInfo
+disjointUnions = foldlM disjointUnion M.empty
+
+-- Describes how different names conflict with each other
+data ConflictInfo = SymDef | SymType | ClassSymDef Text | ClassSymType Text | InstSymDef Text Type
+    deriving (Eq, Ord, Show)
+
+-- |Predicate should return True iff a bound variable with the first conflict info would conflict with a bound variable
+-- in the same scope with the second conflict info. Predicate must be symmetric otherwise the world will end.
+conflict :: ConflictInfo -> ConflictInfo -> Bool
+conflict SymDef SymDef = True
+conflict SymDef ClassSymDef{} = True
+conflict SymDef ClassSymType{} = True
+conflict SymDef InstSymDef{} = True
+conflict SymType ClassSymDef{} = True
+conflict SymType ClassSymType{} = True
+conflict SymType InstSymDef{} = True
+conflict ClassSymDef{} SymDef = True
+conflict ClassSymDef{} SymType = True
+conflict (ClassSymDef c1) (ClassSymDef c2) = c1 /= c2
+conflict ClassSymType{} SymDef = True
+conflict ClassSymType{} SymType = True
+conflict (ClassSymType c1) (ClassSymType c2) = c1 /= c2
+conflict InstSymDef{} SymDef = True
+conflict InstSymDef{} SymType = True
+conflict (InstSymDef c1 t1) (InstSymDef c2 t2) = c1 /= c2 && t1 /= t2
+conflict _ _ = False
 
 class HasBoundVariables a where
+    -- Returns a set of pairs of a bound variable along with True iff the variable can conflict with other variables
+    -- defined in the same horizontal scope.
+    getBoundVariablesAndConflicts :: MonadError Text m => a -> m VariableConflictInfo
     getBoundVariables :: MonadError Text m => a -> m (S.Set VariableName)
+    getBoundVariables = fmap M.keysSet . getBoundVariablesAndConflicts
 class HasFreeVariables a where
     getFreeVariables :: MonadError Text m => a -> m (S.Set VariableName)
 class HasFreeTypeVariables a where
@@ -36,7 +81,7 @@ class HasBoundTypeConstants a where
     getBoundTypeConstants :: a -> S.Set TypeVariableName
 
 instance {-# Overlappable #-} (Traversable t, HasBoundVariables a) => HasBoundVariables (t a) where
-    getBoundVariables = disjointUnions <=< mapM getBoundVariables
+    getBoundVariablesAndConflicts = disjointUnions <=< mapM getBoundVariablesAndConflicts
 instance {-# Overlappable #-} (Traversable t, HasFreeVariables a) => HasFreeVariables (t a) where
     getFreeVariables = fmap S.unions . mapM getFreeVariables
 instance {-# Overlappable #-} (Functor f, Foldable f, HasFreeTypeVariables a) => HasFreeTypeVariables (f a) where
@@ -47,38 +92,48 @@ instance {-# Overlappable #-} (Functor f, Foldable f, HasBoundTypeConstants a) =
     getBoundTypeConstants = S.unions . fmap getBoundTypeConstants
 
 instance HasBoundVariables HsDecl where
-    getBoundVariables (HsPatBind _ pat _ _) = getBoundVariables pat
-    getBoundVariables (HsFunBind matches) = do
-        names <- S.toList . S.unions <$> mapM getBoundVariables matches
+    getBoundVariablesAndConflicts (HsPatBind _ pat _ _) = getBoundVariablesAndConflicts pat
+    getBoundVariablesAndConflicts (HsFunBind matches) = do
+        names <- S.toList <$> getBoundVariables matches
         let funName = head names
             allNamesMatch = all (== funName) names
-        if allNamesMatch then return $ S.singleton funName else throwError "Mismatched function names"
-    getBoundVariables (HsTypeSig _ names _) = return $ S.fromList $ map convertName names
-    getBoundVariables (HsClassDecl _ _ _ _ decls) = S.unions <$> mapM getBoundVariables decls
-    getBoundVariables (HsDataDecl _ _ _ _ conDecls _) = getBoundVariables conDecls
-    getBoundVariables d = throwError $ unlines ["Declaration not supported:", synPrint d]
+        if allNamesMatch then return $ singleton funName SymDef else throwError "Mismatched function names"
+    getBoundVariablesAndConflicts (HsTypeSig _ names _) =
+        disjointUnions $ map (\n -> singleton (convertName n) SymType) names
+    getBoundVariablesAndConflicts (HsDataDecl _ _ _ _ conDecls _) = getBoundVariablesAndConflicts conDecls
+    getBoundVariablesAndConflicts (HsClassDecl _ _ name _ decls) =
+        M.map (S.map move) <$> getBoundVariablesAndConflicts decls
+        where move SymDef = ClassSymDef $ convertName name
+              move SymType = ClassSymType $ convertName name
+              move c = error $ unpack ("Invalid conflict type in class " <> convertName name <> ": ") <> show c
+    getBoundVariablesAndConflicts (HsInstDecl _ _ name _ decls) =
+        M.map (S.map move) <$> getBoundVariablesAndConflicts decls
+        where move SymDef = ClassSymDef $ convertName name
+              move c = error $ unpack ("Invalid conflict type in instance " <> convertName name <> ": ") <> show c
+    getBoundVariablesAndConflicts d = throwError $ unlines ["Declaration not supported:", synPrint d]
 instance HasBoundVariables HsMatch where
-    getBoundVariables (HsMatch _ n _ _ _) = return $ S.singleton $ convertName n
+    getBoundVariablesAndConflicts (HsMatch _ n _ _ _) = return $ singleton (convertName n) SymDef
 instance HasBoundVariables HsConDecl where
-    getBoundVariables (HsConDecl _ n _) = return $ S.singleton $ convertName n
-    getBoundVariables (HsRecDecl _ n _) = return $ S.singleton $ convertName n
+    getBoundVariablesAndConflicts (HsConDecl _ n _) = return $ singleton (convertName n) SymDef
+    getBoundVariablesAndConflicts (HsRecDecl _ n _) = return $ singleton (convertName n) SymDef
 instance HasBoundVariables HsPat where
-    getBoundVariables (HsPVar v)            = return $ S.singleton (convertName v)
-    getBoundVariables HsPLit{}              = return S.empty
-    getBoundVariables HsPWildCard           = return S.empty
-    getBoundVariables (HsPNeg p)            = getBoundVariables p
-    getBoundVariables (HsPParen p)          = getBoundVariables p
-    getBoundVariables (HsPIrrPat p)         = getBoundVariables p
-    getBoundVariables (HsPAsPat v p)        = disjointUnion (S.singleton $ convertName v) =<< getBoundVariables p
-    getBoundVariables (HsPInfixApp p1 _ p2) = getBoundVariables [p1, p2]
-    getBoundVariables (HsPApp _ ps)         = getBoundVariables ps
-    getBoundVariables (HsPTuple ps)         = getBoundVariables ps
-    getBoundVariables (HsPList ps)          = getBoundVariables ps
-    getBoundVariables HsPRec{}              = throwError "Pattern records not supported"
+    getBoundVariablesAndConflicts (HsPVar v)            = return $ singleton (convertName v) SymDef
+    getBoundVariablesAndConflicts HsPLit{}              = return M.empty
+    getBoundVariablesAndConflicts HsPWildCard           = return M.empty
+    getBoundVariablesAndConflicts (HsPNeg p)            = getBoundVariablesAndConflicts p
+    getBoundVariablesAndConflicts (HsPParen p)          = getBoundVariablesAndConflicts p
+    getBoundVariablesAndConflicts (HsPIrrPat p)         = getBoundVariablesAndConflicts p
+    getBoundVariablesAndConflicts (HsPAsPat v p)        = disjointInsert (convertName v) SymDef =<< getBoundVariablesAndConflicts p
+    getBoundVariablesAndConflicts (HsPInfixApp p1 _ p2) = getBoundVariablesAndConflicts [p1, p2]
+    getBoundVariablesAndConflicts (HsPApp _ ps)         = getBoundVariablesAndConflicts ps
+    getBoundVariablesAndConflicts (HsPTuple ps)         = getBoundVariablesAndConflicts ps
+    getBoundVariablesAndConflicts (HsPList ps)          = getBoundVariablesAndConflicts ps
+    getBoundVariablesAndConflicts HsPRec{}              = throwError "Pattern records not supported"
 
 instance HasFreeVariables HsDecl where
     getFreeVariables (HsPatBind _ pat rhs _)    = S.union <$> getFreeVariables pat <*> getFreeVariables rhs
     getFreeVariables (HsClassDecl _ _ _ _ args) = S.unions <$> mapM getFreeVariables args
+    getFreeVariables (HsInstDecl _ _ _ _ args) = S.unions <$> mapM getFreeVariables args
     getFreeVariables HsTypeSig{}                = return S.empty
     getFreeVariables HsDataDecl{}               = return S.empty
     getFreeVariables (HsFunBind matches)        = do
@@ -143,7 +198,8 @@ instance HasFreeTypeVariables HsType where
     getFreeTypeVariables HsTyCon{}       = S.empty
 
 instance HasFreeTypeConstants HsDecl where
-    getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = S.unions $ map getFreeTypeConstants ds
+    getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = getFreeTypeConstants ds
+    getFreeTypeConstants (HsInstDecl _ _ _ ts ds) = S.union (getFreeTypeConstants ts) (getFreeTypeConstants ds)
     getFreeTypeConstants (HsTypeSig _ _ t)        = getFreeTypeConstants t
     getFreeTypeConstants _                        = S.empty
 instance HasFreeTypeConstants HsQualType where

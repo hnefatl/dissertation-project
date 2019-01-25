@@ -24,7 +24,7 @@ import           ExtraDefs                   (inverseMap, mapError, middleText, 
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (HasBoundVariables, HasFreeVariables, getBoundVariables, getFreeVariables)
+import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables, getBoundVariablesAndConflicts, getFreeVariables)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
@@ -450,14 +450,14 @@ instance HasFreeVariables AltConstructor where
     getFreeVariables LitCon{}       = return S.empty
     getFreeVariables (DataCon _ vs) = return $ S.fromList vs
 instance HasBoundVariables (Alt a) where
-    getBoundVariables (Alt c _) = getBoundVariables c
+    getBoundVariablesAndConflicts (Alt c _) = getBoundVariablesAndConflicts c
 instance HasBoundVariables AltConstructor where
-    getBoundVariables Default          = return S.empty
-    getBoundVariables LitCon{}         = return S.empty
-    getBoundVariables (DataCon con vs) = return $ S.fromList $ con:vs
+    getBoundVariablesAndConflicts Default          = return M.empty
+    getBoundVariablesAndConflicts LitCon{}         = return M.empty
+    getBoundVariablesAndConflicts (DataCon con vs) = return $ M.fromList $ zip (con:vs) (repeat $ S.singleton SymDef)
 instance HasBoundVariables (Binding a) where
-    getBoundVariables (NonRec v _) = return $ S.singleton v
-    getBoundVariables (Rec m)      = return $ M.keysSet m
+    getBoundVariablesAndConflicts (NonRec v _) = return $ M.singleton v (S.singleton SymDef)
+    getBoundVariablesAndConflicts (Rec m)      = return $ M.fromSet (const $ S.singleton SymDef) (M.keysSet m)
 instance HasFreeVariables a => HasFreeVariables (Binding a) where
     getFreeVariables (NonRec v e) = S.delete v <$> getFreeVariables e
     getFreeVariables (Rec m)      = fmap S.unions $ forM (M.toList m) $ \(v, e) -> S.delete v <$> getFreeVariables e

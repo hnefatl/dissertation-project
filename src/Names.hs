@@ -47,7 +47,7 @@ instance NameConvertible Syntax.HsSpecialCon Text where
     convertName HsListCon      = "[]"
     convertName HsCons         = ":"
     convertName HsFunCon       = "->"
-    convertName (HsTupleCon n) = "(,)" --makeTupleName n
+    convertName (HsTupleCon n) = makeTupleName n
 instance NameConvertible Syntax.HsName Text where
     convertName (HsIdent name)  = pack name
     convertName (HsSymbol name) = pack name

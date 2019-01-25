@@ -182,6 +182,7 @@ instance Renameable HsDecl where
     rename (HsDataDecl loc ctx name args decls derivings) =
         bindTypeVariableForScope (S.fromList $ map convertName args) $
             HsDataDecl loc ctx name <$> mapM renameTypeVariable args <*> renames decls <*> pure derivings
+    rename (HsInstDecl loc ctx cname ts ds) = HsInstDecl loc <$> renames ctx <*> pure cname <*> renames ts <*> renames ds
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
 
 instance Renameable HsConDecl where
@@ -194,9 +195,9 @@ instance Renameable HsBangType where
 
 instance Renameable HsMatch where
     rename (HsMatch loc funName pats rhs decls) = do
-        argVars <- getBoundVariables pats
-        whereVars <- getBoundVariables decls
-        boundVars <- disjointUnion argVars whereVars
+        argVars <- getBoundVariablesAndConflicts pats
+        whereVars <- getBoundVariablesAndConflicts decls
+        boundVars <- M.keysSet <$> disjointUnion argVars whereVars
         let action = HsMatch loc <$> renameVariable funName <*> renames pats <*> rename rhs <*> rename decls
         bindVariableForScope boundVars action
 

@@ -154,6 +154,11 @@ instance AlphaEq HsDecl where
         alphaEq' name1 name2
         alphaEq' args1 args2
         alphaEq' ds1 ds2
+    alphaEq' (HsInstDecl _ ctx1 name1 args1 ds1) (HsInstDecl _ ctx2 name2 args2 ds2) = do
+        alphaEq' ctx1 ctx2
+        alphaEq' name1 name2
+        alphaEq' args1 args2
+        alphaEq' ds1 ds2
     alphaEq' d1 d2 = throwError $ unlines [ "Different declaration types:", showt d1, "vs", showt d2 ]
 instance AlphaEq HsConDecl where
     alphaEq' (HsConDecl _ name1 ts1) (HsConDecl _ name2 ts2) = alphaEq' name1 name2 >> alphaEq' ts1 ts2
@@ -297,6 +302,7 @@ stripDeclParens (HsFunBind ms) = HsFunBind $ map stripMatchParens ms
 stripDeclParens d@HsDataDecl{} = d
 stripDeclParens d@HsTypeSig{} = d
 stripDeclParens (HsClassDecl l ctx name args ds) = HsClassDecl l ctx name args (map stripDeclParens ds)
+stripDeclParens (HsInstDecl l ctx name args ds) = HsInstDecl l ctx name args (map stripDeclParens ds)
 stripDeclParens _                    = error "Unsupported declaration in paren strip"
 stripDeclsParens :: [HsDecl] -> [HsDecl]
 stripDeclsParens = map stripDeclParens
