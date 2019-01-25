@@ -35,7 +35,7 @@ makeTestWith bindings input expected =
     testCase (unpack $ deline input) $ case (,) <$> parseModule (unpack input) <*> parseModule (unpack expected) of
         ParseOk (input', expected') ->
             case runExcept renamedInput of
-                Right (actual, _) -> do
+                Right (actual, _, _) -> do
                     let expected'' = stripModuleParens expected'
                     assertAlphaEq (unlines [showt actual, showt expected'', "", synPrint actual, synPrint expected'', "", pretty state, unlines logs]) expected'' actual
                 Left err     -> assertFailure $ unpack $ unlines [err, pretty state, unlines logs]

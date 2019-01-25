@@ -81,15 +81,6 @@ getAnfRhsType (Lam _ t e) = T.makeFun [t] <$> getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
 
 
-makeTuple :: (MonadNameGenerator m, MonadError Text m) => [AnfTrivial] -> m AnfComplex
-makeTuple es = do
-    ts <- mapM getAnfTrivialType es
-    let conType = T.makeFun ts (T.makeTuple ts)
-        base = TrivApp $ Var "(,)" conType
-    return $ CompApp $ foldl' App base es
-makeTupleUnsafe :: MonadNameGenerator m => [AnfTrivial] -> m AnfComplex
-makeTupleUnsafe es = either (error . unpack) id <$> runExceptT (makeTuple es)
-
 makeError :: Type -> AnfTrivial
 makeError = Var "compilerError"
 
