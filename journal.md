@@ -64,7 +64,7 @@ in the definition have been compiled (eg if 1st def uses `all`).
 Maybe combine with: instances have their defined symbols as being free, use a fresh variable name as the bound variables
 like with `HsPWildCard`. Forces instances to be after their classes, and makes them after any of their free variables.
 Then do on-demand typechecking, with the flakey hopeful guarantee that all the necessary non-typeclass definitions have
-already been checked. Win-win? Find out next episode [linkname](https://www.youtube.com/watch?v=QZXc39hT8t4).
+already been checked. Win-win? Find out [next episode](https://www.youtube.com/watch?v=QZXc39hT8t4).
 
 ## Type Checking
 
