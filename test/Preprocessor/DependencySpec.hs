@@ -25,7 +25,7 @@ tvToV (Left v) = v
 tvToV (Right (TypeVariableName n)) = VariableName n
 
 makeTest :: Text -> [[VariableName]] -> TestTree
-makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpack input) of
+makeTest input cases = testCase (unpack input) $ case parseModule (unpack input) of
     ParseFailed loc msg -> assertFailure $ unpack $ "Failed to parse input: " <> showt loc <> "\n" <> pack msg
     ParseOk (HsModule _ _ _ _ decls) -> case runLogger $ evalNameGeneratorT (runExceptT $ dependencyOrder decls) 0 of
         (Left err, logs) -> assertFailure $ unpack $ unlines [err, unlines logs]
@@ -34,10 +34,9 @@ makeTest input cases = testCase (unpack $ deline input) $ case parseModule (unpa
                 assertFailure $ unpack $ unlines ["Lengths:", pretty cases, "vs", pretty declOrder, unlines logs]
             | otherwise -> forM_ (zip cases declOrder) $ \(expectedGroup, actualGroup) ->
                 --case runExcept (S.union (S.map tvToV $ getBoundTypeConstants actualGroup) <$> getBoundVariables actualGroup) of
-                case runExcept $ evalNameGeneratorT (S.map tvToV . S.unions <$> mapM getDepBoundVariables actualGroup) 0 of
+                case runExcept (S.map tvToV . S.unions <$> mapM getDepBoundVariables actualGroup) of
                     Left err         -> assertFailure $ unpack err
                     Right boundNames -> assertEqual (unpack $ unlines logs) (S.fromList expectedGroup) boundNames
-
 
 
 test :: TestTree
@@ -70,6 +69,6 @@ test = testGroup "Dependency Analysis"
         "data () = () ; class F a where { f :: () -> a } ; instance F () where { f () = () }"
         [["()"], ["F", "f"], []]
     , makeTest
-        "data Bool = False | True ; data [] a = [] | a :+ [a] ; class Foo a where { f :: a -> Bool } ; instance Foo Bool where { f = \\x -> x } ; instance Foo [Bool] where { f = all f } ; any :: (a -> Bool) -> [a] -> Bool"
-        [["Bool", "True", "False"], ["Foo", "f"], [], ["[]", ":+"], ["any"], []]
+        "data B = F | T ; data [] a = [] | a :+ [a] ; class P a where { f :: a -> B } ; instance P B where { f = \\x -> x } ; instance P [B] where { f = all f } ; any :: (a -> B) -> [a] -> B"
+        [["B", "T", "F"], ["P", "f"], [], ["[]", ":+"], ["any"], []]
     ]

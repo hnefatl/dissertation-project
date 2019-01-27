@@ -8,8 +8,6 @@ import           Control.Monad.Except        (MonadError)
 import           Control.Monad.Extra         (concatForM)
 import           Data.Graph                  (flattenSCC, stronglyConnComp)
 import           Data.List                   (nub)
-import           Data.Text.Lazy              (toStrict)
-import           Text.Pretty.Simple          (pShow)
 import qualified Data.Set                    as S
 import           Language.Haskell.Syntax
 import           TextShow                    (showt)
@@ -29,17 +27,24 @@ variableUnion vs tvs = S.union (S.map Left vs) (S.map Right tvs)
 -- bound/free definitions. These functions wrap the conventional getBound/Free functions to match our contextual
 -- definition.
 
-getDepBoundVariables :: (MonadNameGenerator m, MonadError Text m) => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
+getDepBoundVariables :: MonadError Text m => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
 getDepBoundVariables HsInstDecl{} = return S.empty 
 getDepBoundVariables d = variableUnion <$> getBoundVariables d <*> pure (getBoundTypeConstants d)
 
-getDepFreeVariables :: (MonadNameGenerator m, MonadError Text m) => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
+getDepFreeVariables :: MonadError Text m => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
 getDepFreeVariables d@HsInstDecl{} = do
     actualFree <- variableUnion <$> getFreeVariables d <*> pure (getFreeTypeConstants d)
     fakeFree <- variableUnion <$> getBoundVariables d <*> pure (getBoundTypeConstants d)
     return $ S.union actualFree fakeFree
 getDepFreeVariables d = variableUnion <$> getFreeVariables d <*> pure (getFreeTypeConstants d)
 
+
+-- |Return a list of declaration groups: groups are potentially recursively defined, so should be compiled "together".
+-- Groups are sorted in dependency order, all groups after an element in the list should be compiled after it. An
+-- exception is any typeclass instance: these are output in syntactic dependency order (any symbols used in the
+-- typeclass instance are guaranteed to be bound by a preceding group or the same group), but not in semantic dependency
+-- order. Any other typeclass instances it depends on don't necessarily precede it, as that can only be determined
+-- during typechecking.
 dependencyOrder :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [HsDecl] -> m [[HsDecl]]
 dependencyOrder ds = do
     -- We do dependency analysis taking into account bound variables/type variables, as we need to compile eg.
@@ -64,7 +69,5 @@ dependencyOrder ds = do
         -- all other variables bound by the declaration: otherwise vars bound in the same decl are seen as
         -- independent.
         return $ map (d,, S.toList $ S.union contained boundVars') (S.toList boundVars')
-    writeLog $ unlines ["adjacencyList:", toStrict $ pShow adjacencyList]
     let sccs = stronglyConnComp adjacencyList
-    writeLog $ unlines ["SCCs:", toStrict $ pShow sccs]
     return $ map (nub . flattenSCC) sccs
