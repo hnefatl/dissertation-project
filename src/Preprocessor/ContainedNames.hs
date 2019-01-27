@@ -201,7 +201,8 @@ instance HasFreeTypeVariables HsType where
 
 instance HasFreeTypeConstants HsDecl where
     getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = getFreeTypeConstants ds
-    getFreeTypeConstants (HsInstDecl _ _ _ ts ds) = S.union (getFreeTypeConstants ts) (getFreeTypeConstants ds)
+    getFreeTypeConstants (HsInstDecl _ _ name ts ds) =
+            S.unions [S.singleton $ convertName name, getFreeTypeConstants ts, getFreeTypeConstants ds]
     getFreeTypeConstants (HsTypeSig _ _ t)        = getFreeTypeConstants t
     getFreeTypeConstants _                        = S.empty
 instance HasFreeTypeConstants HsQualType where

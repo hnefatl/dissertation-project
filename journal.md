@@ -55,6 +55,17 @@ dependency analysis stage: otherwise we can generate a variable that's not uniqu
 `NameGenerator` monad transformer, to ensure we carry the same counter around throughout the compiler, and don't lose it
 on the way from renaming to dependency analysis during typechecking.
 
+Typeclass instances.... ruin this. They don't provide any new symbols (relevant class provides them all), but the
+compilation order depends on type information: we need to compile eg. `instance Foo [a]` after `instance Foo a` if the
+first uses the 2nd definition in its implementation. Thinking of resolving this by using on-demand typechecking of
+instances: if we search for an instance and can't find it, we typecheck it then. Still need to ensure all symbols used
+in the definition have been compiled (eg if 1st def uses `all`).
+
+Maybe combine with: instances have their defined symbols as being free, use a fresh variable name as the bound variables
+like with `HsPWildCard`. Forces instances to be after their classes, and makes them after any of their free variables.
+Then do on-demand typechecking, with the flakey hopeful guarantee that all the necessary non-typeclass definitions have
+already been checked. Win-win? Find out next episode.
+
 ## Type Checking
 
 Current approach is to traverse the parse tree and build up variable->type variable mappings, with constraints
