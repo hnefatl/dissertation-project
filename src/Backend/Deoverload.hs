@@ -77,8 +77,6 @@ addKinds :: M.Map TypeVariableName Kind -> Deoverload ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
 getKinds :: Deoverload (M.Map TypeVariableName Kind)
 getKinds = gets kinds
-getKind :: TypeVariableName -> Deoverload (Maybe Kind)
-getKind name = M.lookup name <$> getKinds
 
 addClassEnvironment :: ClassEnvironment -> Deoverload ()
 addClassEnvironment ce = modify (\s -> s { classEnvironment = M.union ce (classEnvironment s) })

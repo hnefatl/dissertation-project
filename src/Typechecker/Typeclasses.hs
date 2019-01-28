@@ -53,8 +53,8 @@ addClass name supers ce
 
 -- |Add an instance of a superclass, with the given qualifiers.
 -- Check that the superclass exists, and that there are no overlapping instances
-addInstance :: MonadError Text m => ClassInstance -> ClassEnvironment -> m ClassEnvironment
-addInstance inst@(Qualified _ (IsInstance classname _)) ce =
+addInstance :: MonadError Text m => ClassEnvironment -> ClassInstance -> m ClassEnvironment
+addInstance ce inst@(Qualified _ (IsInstance classname _)) =
     case M.lookup classname ce of -- Find the class we're making an instance of
         Nothing -> throwError $ "Class " <> showt classname <> " doesn't exist"
         Just (Class supers otherInsts) -> do

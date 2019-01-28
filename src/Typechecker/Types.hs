@@ -35,10 +35,10 @@ data Type = TypeVar !TypeVariable
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
 applyTypeFun :: MonadError Text m => Type -> Type -> m Type
-applyTypeFun t1 t2 = case getKind t1 of
+applyTypeFun t1 t2 = case kind t1 of
     KindStar -> throwError $ "Application to type of kind *: " <> showt t1 <> " applied to " <> showt t2
     KindFun argKind resKind
-        | argKind == getKind t2 -> return $ TypeApp t1 t2 resKind
+        | argKind == kind t2 -> return $ TypeApp t1 t2 resKind
         | otherwise -> throwError $ "Kind mismatch: " <> showt t1 <> " applied to " <> showt t2
 
 -- |"Unsafe" version of `applyTypeFun` which uses `error` instead of `throwError`: useful for compiler tests etc where
@@ -71,15 +71,15 @@ type QuantifiedSimpleType = Quantified Type
 -- |A class for things that have a "kind": type variables/constants, types, ...
 class HasKind t where
     -- |Returns the kind of the given `t`
-    getKind :: t -> Kind
+    kind :: t -> Kind
 instance HasKind TypeVariable where
-    getKind (TypeVariable _ k) = k
+    kind (TypeVariable _ k) = k
 instance HasKind TypeConstant where
-    getKind (TypeConstant _ k) = k
+    kind (TypeConstant _ k) = k
 instance HasKind Type where
-    getKind (TypeVar v)     = getKind v
-    getKind (TypeCon c)     = getKind c
-    getKind (TypeApp _ _ k) = k
+    kind (TypeVar v)     = kind v
+    kind (TypeCon c)     = kind c
+    kind (TypeApp _ _ k) = k
 
 instance TextShow Kind where
     showb = assocShow False
@@ -232,7 +232,7 @@ synToType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsType -
 synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
 synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
     Nothing   -> throwError $ "Type constructor not in kind mapping: " <> showt name
-    Just kind -> return $ TypeCon $ TypeConstant (TypeVariableName name) kind
+    Just k -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
     where name = convertName c
 synToType ks (HsTyFun arg body) = makeFun <$> sequence [synToType ks arg] <*> synToType ks body
 synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts

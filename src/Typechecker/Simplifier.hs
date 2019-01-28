@@ -27,7 +27,7 @@ class HasHnf t where
     toHnf :: Simplifier m => ClassEnvironment -> t -> m (S.Set TypePredicate)
 
 instance HasHnf TypePredicate where
-    inHnf (IsInstance _ t) = getKind t == KindStar
+    inHnf (IsInstance _ t) = kind t == KindStar
 
     -- |If the predicate is already in head normal form, return it. Otherwise, get the predicates that can be used to
     -- infer it from the environment.

@@ -9,8 +9,8 @@ module Typechecker.Typechecker where
 import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
-import           Control.Monad.Extra         (whenJust)
-import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
+import           Control.Monad.Extra         (whenJust, foldM)
+import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, put, modify, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -47,12 +47,13 @@ data InferrerState = InferrerState
     , bindings           :: M.Map VariableName QuantifiedType
     , classEnvironment   :: ClassEnvironment
     , kinds              :: M.Map TypeVariableName Kind
-    , typePredicates     :: M.Map TypeVariableName (S.Set ClassName)
+    , typePredicates     :: M.Map Type (S.Set ClassName)
     , variableCounter    :: Int
-    -- Any typeclass instances we find when typechecking: we process these after all the other decls as other decls
-    -- can't syntactically depend on them (dependence is at the type level, which we can't detect, so we just process
-    -- them as late as possible).
-    , typeclassInstances :: [HsDecl] }
+    -- Any typeclass instances we find when typechecking: we process these either after all the other decls or when
+    -- another declaration needs a typeclass instance we can provide by processing one of these. It's weird, but
+    -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
+    -- detect, so we just process them as late as possible.
+    , typeclassInstances :: M.Map (HsQName, [HsType]) HsDecl }
     deriving (Eq, Show)
 
 instance Default InferrerState where
@@ -64,7 +65,7 @@ instance Default InferrerState where
             , kinds = M.empty
             , typePredicates = M.empty
             , variableCounter = 0
-            , typeclassInstances = [] }
+            , typeclassInstances = M.empty }
 instance TextShow InferrerState where
     showb = fromString . show
 
@@ -126,7 +127,7 @@ getTypeVariableKind name = gets (M.findWithDefault KindStar name . kinds)
 getClassEnvironment :: TypeInferrer ClassEnvironment
 getClassEnvironment = gets classEnvironment
 
-getConstraints :: TypeVariableName -> TypeInferrer (S.Set ClassName)
+getConstraints :: Type -> TypeInferrer (S.Set ClassName)
 getConstraints name = gets (M.findWithDefault S.empty name . typePredicates)
 
 addClasses :: ClassEnvironment -> TypeInferrer ()
@@ -178,16 +179,20 @@ instantiate qt@(Quantified _ ql) = do
     return $ applySub sub ql
 
 
-addTypeConstraint :: TypeVariableName -> ClassName -> TypeInferrer ()
-addTypeConstraint varname classname = addTypeConstraints varname (S.singleton classname)
-addTypeConstraints:: TypeVariableName -> S.Set ClassName -> TypeInferrer ()
-addTypeConstraints name preds = mergeTypeConstraints (M.singleton name preds)
-mergeTypeConstraints :: M.Map TypeVariableName (S.Set ClassName) -> TypeInferrer ()
-mergeTypeConstraints ps = modify (\s -> s { typePredicates = M.unionWith S.union ps (typePredicates s) })
+addTypeConstraint :: Type -> ClassName -> TypeInferrer ()
+addTypeConstraint t classname = addTypeConstraints t (S.singleton classname)
+addTypeConstraints:: Type -> S.Set ClassName -> TypeInferrer ()
+addTypeConstraints t preds = mergeTypeConstraints (M.singleton t preds)
+mergeTypeConstraints :: M.Map Type (S.Set ClassName) -> TypeInferrer ()
+mergeTypeConstraints ps = do
+    s <- get
+    let insts = concatMap (\(t,cs) -> map (\c -> Qualified S.empty $ IsInstance c t) (S.toList cs)) (M.toList ps)
+    ce' <- foldM addInstance (classEnvironment s) insts
+    put $ s
+        { typePredicates = M.unionWith S.union ps $ typePredicates s
+        , classEnvironment = ce' }
 addTypePredicate :: TypePredicate -> TypeInferrer ()
-addTypePredicate (IsInstance classname (TypeVar (TypeVariable name _))) = addTypeConstraint name classname
-addTypePredicate (IsInstance classname (TypeCon (TypeConstant name _))) = addTypeConstraint name classname
-addTypePredicate (IsInstance _ TypeApp{})                               = throwError "Not implemented, but should be"
+addTypePredicate (IsInstance classname t) = addTypeConstraint t classname
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
 addTypePredicates = mapM_ addTypePredicate
 
@@ -204,18 +209,35 @@ insertQuantifiedType name t = do
 -- a b)`, `Foo t1` and `[(Maybe t2 t3)/t1]` then we add constraints `Foo t2` and `Bar t3`.
 updateTypeConstraints :: Substitution -> TypeInferrer ()
 updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
-    where helper old (TypeVar (TypeVariable new _)) = addTypeConstraints new =<< getConstraints old
-          --helper old (TypeCon (TypeConstant new _)) = addTypeConstraints new =<< getConstraints old
-          helper old _ = do
+    where helper :: TypeVariableName -> Type -> TypeInferrer ()
+          -- Easy to transfer constraints from a variable to a variable: just copy them over
+          helper old t@(TypeVar TypeVariable{}) = addTypeConstraints t =<< getConstraints =<< nameToType old
+          -- Harder to transfer constraints from a variable to a type
+          helper old t = do
             -- TODO(kc506): If we have eg. `Functor (Maybe a)` and `[Maybe a/t0]` we should be able to infer `Functor
             -- t0`
-            constraints <- S.toList <$> getConstraints old
+            constraints <- S.toList <$> (getConstraints =<< nameToType old)
             newPredicates <- fmap S.unions $ forM constraints $ \classInstance -> do
                 ce <- getClassEnvironment
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
                 predicate <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
                 newPreds <- ifPThenByInstance ce predicate >>= \case
-                    Nothing -> throwError $ "No matching instance for " <> showt predicate
+                    Nothing -> do
+                        -- Failed to find an instance: check if we can create one on-demand from the typeclass instance
+                        -- declarations we've not yet processed
+                        oldSyn <- typeToSyn t
+                        let key = (UnQual $ HsIdent $ unpack $ convertName classInstance, [oldSyn])
+                        gets (M.lookup key . typeclassInstances) >>= \case
+                            Just d -> do
+                                -- We've got a typeclass declaration for the instance we want: remove it, process it,
+                                -- then retry
+                                modify $ \s -> s { typeclassInstances = M.delete key (typeclassInstances s) }
+                                addTypeclassInstance d
+                                ce' <- getClassEnvironment
+                                ifPThenByInstance ce' predicate >>= \case
+                                    Just cs -> return cs -- Cool, the declaration worked
+                                    Nothing -> throwError $ "No matching instance for " <> showt predicate
+                            Nothing -> throwError $ "No typeclass declaration found that provides an instance for " <> showt predicate
                     Just cs -> return cs
                 detectInvalidPredicates ce newPreds
                 return newPreds
@@ -233,10 +255,10 @@ unify t1 t2 = do
     composeSubstitution newSub
 
 
-getTypePredicates :: TypeVariableName -> TypeInferrer (S.Set TypePredicate)
-getTypePredicates name = do
-    constraints <- getConstraints name
-    S.fromList <$> mapM (\classname -> IsInstance classname <$> nameToType name) (S.toList constraints)
+getTypePredicates :: Type -> TypeInferrer (S.Set TypePredicate)
+getTypePredicates t = do
+    constraints <- getConstraints t
+    return $ S.map (\classname -> IsInstance classname t) constraints
 
 getSimpleType :: TypeVariableName -> TypeInferrer Type
 getSimpleType name = applyCurrentSubstitution =<< nameToType name
@@ -244,8 +266,8 @@ getQualifiedType :: TypeVariableName -> TypeInferrer QualifiedType
 getQualifiedType name = do
     ce <- getClassEnvironment
     t <- getSimpleType name
-    let typeVars = getTypeVars t
-    predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates (S.toList typeVars)
+    types <- mapM (\v -> TypeVar . TypeVariable v <$> getTypeVariableKind v) (S.toList $ getTypeVars t)
+    predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates types
     let qt = Qualified predicates t
     writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
@@ -290,11 +312,11 @@ inferLiteral (HsChar _) = nameSimpleType typeChar
 inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVarName
-    addTypeConstraint v (TypeVariableName "Num")
+    addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Num")
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVarName
-    addTypeConstraint v (TypeVariableName "Fractional")
+    addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Fractional")
     return v
 inferLiteral l = throwError $ "Unboxed literals not supported: " <> showt l
 
@@ -494,14 +516,14 @@ inferRhs (HsUnGuardedRhs e) = do
     return (HsUnGuardedRhs newExp, var)
 inferRhs (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
-inferDecl :: Syntax.HsDecl -> TypeInferrer (Maybe Syntax.HsDecl)
+inferDecl :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
 inferDecl (HsPatBind l pat rhs ds) = do
     writeLog $ "Processing declaration for " <> synPrint pat
     patType <- nameToType =<< inferPattern pat
     (rhsExp, rhsVar) <- inferRhs rhs
     rhsType <- nameToType rhsVar
     unify patType rhsType
-    return $ Just $ HsPatBind l pat rhsExp ds
+    return $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind matches) = do
     funName <- case matches of
         []                     -> throwError "Function binding with no matches"
@@ -511,14 +533,14 @@ inferDecl (HsFunBind matches) = do
     commonType <- nameToType commonVar
     writeLog $ "Function bind " <> showt funName <> ": commonVar = " <> showt commonVar <> " vs = " <> showt vs
     mapM_ (unify commonType) =<< mapM nameToType vs
-    return $ Just $ HsFunBind matches'
-inferDecl (HsTypeSig _ names t) = do
+    return $ HsFunBind matches'
+inferDecl d@(HsTypeSig _ names t) = do
     ks <- getKinds
     t' <- synToQualType ks t
     qt <- qualToQuant True t'
     let varNames = map convertName names
     forM_ varNames (\v -> insertQuantifiedType v qt)
-    return Nothing -- We don't need explicit type signatures any more
+    return d
 inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], [arg]) -> do
         let className = convertName name
@@ -535,25 +557,23 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
         -- Update our running class environment
         -- TODO(kc506): When we support contexts, update this to include the superclasses
         addClasses $ M.singleton className (Class S.empty S.empty)
-        return $ Just d
+        return d
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
-inferDecl (HsInstDecl _ ctx name args _) = case (ctx, args) of
-    ([], [arg]) -> do
-        ks <- getKinds
-        t <- synToType ks arg
-        let inst = IsInstance (convertName name) t
-        addTypePredicate inst
-        writeLog $ "Adding type predicate " <> showt inst
-        return Nothing
-    ([], _) -> throwError "Multiparameter typeclasse instances not supported"
+inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
+    ([], [_]) -> do
+        decls' <- forM decls $ \case
+            d@HsPatBind{} -> inferDecl d
+            _ -> throwError "Only support pattern binding declarations in typeclass instances"
+        return $ HsInstDecl loc ctx name args decls'
+    ([], _) -> throwError "Multiparameter typeclass instances not supported"
     (_, _) -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     let typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
     addKinds $ M.singleton (convertName name) typeKind
     let resultType = makeSynApp (HsTyCon $ UnQual name) (map HsTyVar args)
     decls' <- mapM (inferConDecl resultType) decls
-    return $ Just $ HsDataDecl loc ctx name args decls' derivings
+    return $ HsDataDecl loc ctx name args decls' derivings
 inferDecl _ = throwError "Declaration not yet supported"
 
 inferMatch :: Syntax.HsMatch -> TypeInferrer (Syntax.HsMatch, TypeVariableName)
@@ -597,7 +617,7 @@ inferDecls ds = do
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ "Adding " <> showt typeVarMapping <> " to environment for declaration group"
     addVariableTypes typeVarMapping
-    declExps <- catMaybes <$> mapM inferDecl ds
+    declExps <- mapM inferDecl ds
     -- Update our name -> type mappings
     mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
     return declExps
@@ -613,13 +633,19 @@ inferDeclGroup ds = do
 
 -- TODO(kc506): Take advantage of explicit type hints
 inferModule :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule (HsModule a b c d decls) = do
+inferModule (HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
-    -- Infer the declarations, then afterwards process the typeclass instances
-    decls' <- (<>) <$> inferDeclGroup decls <*> (catMaybes <$> mapM inferTypeclassInstance decls)
-    let m = HsModule a b c d decls'
+    let isTypeclassInstance HsInstDecl{} = True
+        isTypeclassInstance _ = False
+        (instanceDecls, decls') = partition isTypeclassInstance decls
+    typePredMap <- M.fromList <$> forM instanceDecls (\d -> (,d) <$> getTypeclassTypePredicate d)
+    modify $ \s -> s { typeclassInstances = typePredMap }
+    -- Process all the non-instance top-level definitions, then process any instance declarations
+    decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
+    mapM_ addTypeclassInstance . M.elems =<< gets typeclassInstances
+    m <- HsModule p1 p2 p3 p4 <$> inferDeclGroup decls''
     writeLog "Inferred module types"
     ts <- gets bindings
     m' <- updateModuleTypeTags m
@@ -628,14 +654,21 @@ inferModule (HsModule a b c d decls) = do
     writeLog "Checked explicit type tags"
     return (m', ts)
 
-inferTypeclassInstance :: HsDecl -> TypeInferrer (Maybe HsDecl)
-inferTypeclassInstance (HsInstDecl loc ctx name args decls) = do
-    writeLog $ unwords $ ["Inferring typeclass instance", showt name] <> map showt args
-    decls' <- fmap catMaybes $ forM decls $ \case
-        d@HsPatBind{} -> inferDecl d
-        _ -> throwError "Only support pattern binding declarations in typeclasse instances"
-    return $ Just $ HsInstDecl loc ctx name args decls'
-inferTypeclassInstance _ = return Nothing
+getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
+getTypeclassTypePredicate (HsInstDecl _ _ name args _) = return (name, args)
+getTypeclassTypePredicate _ = throwError "Unexpected non-typeclass-instance declaration in getTypeclassTypePredicate."
+
+addTypeclassInstance :: HsDecl -> TypeInferrer ()
+addTypeclassInstance (HsInstDecl _ ctx name args _) = case (ctx, args) of
+    ([], [arg]) -> do
+        ks <- getKinds
+        t <- synToType ks arg
+        let inst = IsInstance (convertName name) t
+        writeLog $ "Adding type predicate " <> showt inst
+        addTypePredicate inst
+    ([], _) -> throwError "Multiparameter typeclass instances not supported"
+    (_, _) -> throwError "Contexts not yet supported in instances"
+addTypeclassInstance _ = throwError "Unexpected non-typeclass-instance declaration in addTypeclassInstance."
 
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
