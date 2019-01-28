@@ -14,6 +14,7 @@ import           TextShow                    (showt)
 import           TextShow.Instances          ()
 
 import           Logger                      (MonadLogger, writeLog)
+import           ExtraDefs                   (showtSet)
 import           Names                       (VariableName, TypeVariableName)
 import           NameGenerator               (MonadNameGenerator, freshVarName)
 import           Preprocessor.ContainedNames
@@ -50,6 +51,7 @@ dependencyOrder ds = do
     -- We do dependency analysis taking into account bound variables/type variables, as we need to compile eg.
     -- `data Bool = False | True` before `idBool :: Bool -> Bool`.
     declBindings <- S.unions <$> mapM getDepBoundVariables ds
+    writeLog "---------- Dependency Analysis ----------"
     writeLog $ "declBindings: " <> showt declBindings
     adjacencyList <- concatForM ds $ \d -> do
         -- Names bound by this declaration
@@ -70,4 +72,9 @@ dependencyOrder ds = do
         -- independent.
         return $ map (d,, S.toList $ S.union contained boundVars') (S.toList boundVars')
     let sccs = stronglyConnComp adjacencyList
-    return $ map (nub . flattenSCC) sccs
+        result = map (nub . flattenSCC) sccs
+    groupBoundVars <- mapM (fmap S.unions . mapM getDepBoundVariables) result
+    writeLog "Resulting dependency order:"
+    writeLog $ unlines $ map showtSet groupBoundVars
+    writeLog "-----------------------------------------"
+    return result

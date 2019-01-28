@@ -40,13 +40,19 @@ type TypeMap = M.Map VariableName TypeVariableName
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
 data InferrerState = InferrerState
-    { substitutions    :: Substitution
-    , variableTypes    :: M.Map VariableName TypeVariableName -- "In progress" variable -> type variable mappings
-    , bindings         :: M.Map VariableName QuantifiedType -- "Finished" variable -> fully described quantified type mappings
-    , classEnvironment :: ClassEnvironment
-    , kinds            :: M.Map TypeVariableName Kind
-    , typePredicates   :: M.Map TypeVariableName (S.Set ClassName)
-    , variableCounter  :: Int }
+    { substitutions      :: Substitution
+    -- "In progress" variable -> type variable mappings
+    , variableTypes      :: M.Map VariableName TypeVariableName
+    -- "Finished" variable -> fully described quantified type mappings
+    , bindings           :: M.Map VariableName QuantifiedType
+    , classEnvironment   :: ClassEnvironment
+    , kinds              :: M.Map TypeVariableName Kind
+    , typePredicates     :: M.Map TypeVariableName (S.Set ClassName)
+    , variableCounter    :: Int
+    -- Any typeclass instances we find when typechecking: we process these after all the other decls as other decls
+    -- can't syntactically depend on them (dependence is at the type level, which we can't detect, so we just process
+    -- them as late as possible).
+    , typeclassInstances :: [HsDecl] }
     deriving (Eq, Show)
 
 instance Default InferrerState where
@@ -57,7 +63,8 @@ instance Default InferrerState where
             , classEnvironment = M.empty
             , kinds = M.empty
             , typePredicates = M.empty
-            , variableCounter = 0 }
+            , variableCounter = 0
+            , typeclassInstances = [] }
 instance TextShow InferrerState where
     showb = fromString . show
 
@@ -487,14 +494,14 @@ inferRhs (HsUnGuardedRhs e) = do
     return (HsUnGuardedRhs newExp, var)
 inferRhs (HsGuardedRhss _) = throwError "Guarded patterns aren't yet supported"
 
-inferDecl :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
+inferDecl :: Syntax.HsDecl -> TypeInferrer (Maybe Syntax.HsDecl)
 inferDecl (HsPatBind l pat rhs ds) = do
     writeLog $ "Processing declaration for " <> synPrint pat
     patType <- nameToType =<< inferPattern pat
     (rhsExp, rhsVar) <- inferRhs rhs
     rhsType <- nameToType rhsVar
     unify patType rhsType
-    return $ HsPatBind l pat rhsExp ds
+    return $ Just $ HsPatBind l pat rhsExp ds
 inferDecl (HsFunBind matches) = do
     funName <- case matches of
         []                     -> throwError "Function binding with no matches"
@@ -504,18 +511,18 @@ inferDecl (HsFunBind matches) = do
     commonType <- nameToType commonVar
     writeLog $ "Function bind " <> showt funName <> ": commonVar = " <> showt commonVar <> " vs = " <> showt vs
     mapM_ (unify commonType) =<< mapM nameToType vs
-    return $ HsFunBind matches'
-inferDecl d@(HsTypeSig _ names t) = do
+    return $ Just $ HsFunBind matches'
+inferDecl (HsTypeSig _ names t) = do
     ks <- getKinds
     t' <- synToQualType ks t
     qt <- qualToQuant True t'
     let varNames = map convertName names
     forM_ varNames (\v -> insertQuantifiedType v qt)
-    return d
+    return Nothing -- We don't need explicit type signatures any more
 inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], [arg]) -> do
         let className = convertName name
-        writeLog $ unwords ["Processing decl for", showt className, showt arg]
+        writeLog $ unwords ["Processing class decl for", showt className, showt arg]
         forM_ decls $ \case
             HsTypeSig _ names (HsQualType quals t) -> do
                 let classPred = (UnQual name, [HsTyVar arg])
@@ -528,18 +535,17 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
         -- Update our running class environment
         -- TODO(kc506): When we support contexts, update this to include the superclasses
         addClasses $ M.singleton className (Class S.empty S.empty)
-        return d
+        return $ Just d
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
-inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
+inferDecl (HsInstDecl _ ctx name args _) = case (ctx, args) of
     ([], [arg]) -> do
         ks <- getKinds
         t <- synToType ks arg
-        addTypePredicate $ IsInstance (convertName name) t
-        decls' <- forM decls $ \case
-            d@HsPatBind{} -> inferDecl d
-            _ -> throwError "Only support pattern binding declarations in typeclasse instances"
-        return $ HsInstDecl loc ctx name args decls'
+        let inst = IsInstance (convertName name) t
+        addTypePredicate inst
+        writeLog $ "Adding type predicate " <> showt inst
+        return Nothing
     ([], _) -> throwError "Multiparameter typeclasse instances not supported"
     (_, _) -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
@@ -547,7 +553,7 @@ inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     addKinds $ M.singleton (convertName name) typeKind
     let resultType = makeSynApp (HsTyCon $ UnQual name) (map HsTyVar args)
     decls' <- mapM (inferConDecl resultType) decls
-    return $ HsDataDecl loc ctx name args decls' derivings
+    return $ Just $ HsDataDecl loc ctx name args decls' derivings
 inferDecl _ = throwError "Declaration not yet supported"
 
 inferMatch :: Syntax.HsMatch -> TypeInferrer (Syntax.HsMatch, TypeVariableName)
@@ -591,7 +597,7 @@ inferDecls ds = do
     typeVarMapping <- M.fromList <$> mapM (\n -> (n,) <$> freshTypeVarName) (S.toList names)
     writeLog $ "Adding " <> showt typeVarMapping <> " to environment for declaration group"
     addVariableTypes typeVarMapping
-    declExps <- mapM inferDecl ds
+    declExps <- catMaybes <$> mapM inferDecl ds
     -- Update our name -> type mappings
     mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
     return declExps
@@ -599,8 +605,6 @@ inferDecls ds = do
 inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
 inferDeclGroup ds = do
     dependencyGroups <- dependencyOrder ds
-    prettyGroups <- mapM (fmap showtSet . getBoundVariables) dependencyGroups
-    writeLog $ "Dependency groups: " <> showt prettyGroups
     declExps <- forM dependencyGroups $ \group -> do
         boundNames <- getBoundVariables group
         writeLog $ "Processing binding group " <> showtSet boundNames
@@ -613,14 +617,25 @@ inferModule (HsModule a b c d decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
-    m <- HsModule a b c d <$> inferDeclGroup decls
+    -- Infer the declarations, then afterwards process the typeclass instances
+    decls' <- (<>) <$> inferDeclGroup decls <*> (catMaybes <$> mapM inferTypeclassInstance decls)
+    let m = HsModule a b c d decls'
     writeLog "Inferred module types"
-    ts <- getBoundVariableTypes
+    ts <- gets bindings
     m' <- updateModuleTypeTags m
     writeLog "Updated explicit type tags"
     checkModuleExpTypes m'
     writeLog "Checked explicit type tags"
     return (m', ts)
+
+inferTypeclassInstance :: HsDecl -> TypeInferrer (Maybe HsDecl)
+inferTypeclassInstance (HsInstDecl loc ctx name args decls) = do
+    writeLog $ unwords $ ["Inferring typeclass instance", showt name] <> map showt args
+    decls' <- fmap catMaybes $ forM decls $ \case
+        d@HsPatBind{} -> inferDecl d
+        _ -> throwError "Only support pattern binding declarations in typeclasse instances"
+    return $ Just $ HsInstDecl loc ctx name args decls'
+inferTypeclassInstance _ = return Nothing
 
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
@@ -628,20 +643,6 @@ inferModuleWithBuiltins m = do
     addKinds builtinKinds
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     inferModule m
-
--- |Get the types of all decl-bound variables, ie. {f, x} in `f = let x = 1 in \y -> x + y`
-getBoundVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
-getBoundVariableTypes = gets bindings
--- |Get all the variable types, so {f, x, y} from `f = let x = 1 in \y -> x + y`. The types of non decl-bound variables
--- aren't guaranteed to really make sense (although they should) (ie, not necessarily have all the constraints they
--- should etc).
-getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
-getAllVariableTypes = do
-    binds <- getBoundVariableTypes
-    -- Get the qualified types of each unbound but present variable (and give it an empty quantifier set)
-    unboundVariables <- M.toList <$> gets variableTypes
-    unbound <- forM unboundVariables $ \(v, t) -> (v,) . Quantified S.empty <$> getQualifiedType t
-    return $ M.union binds (M.fromList unbound)
 
 
 -- |After the 1st pass (`inferModule`) which produced an AST with explicit type tags for each expression, we need to
