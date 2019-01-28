@@ -9,7 +9,7 @@ module Typechecker.Typechecker where
 import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
-import           Control.Monad.Extra         (whenJust, foldM)
+import           Control.Monad.Extra         (whenJust)
 import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, put, modify, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
@@ -184,13 +184,7 @@ addTypeConstraint t classname = addTypeConstraints t (S.singleton classname)
 addTypeConstraints:: Type -> S.Set ClassName -> TypeInferrer ()
 addTypeConstraints t preds = mergeTypeConstraints (M.singleton t preds)
 mergeTypeConstraints :: M.Map Type (S.Set ClassName) -> TypeInferrer ()
-mergeTypeConstraints ps = do
-    s <- get
-    let insts = concatMap (\(t,cs) -> map (\c -> Qualified S.empty $ IsInstance c t) (S.toList cs)) (M.toList ps)
-    ce' <- foldM addInstance (classEnvironment s) insts
-    put $ s
-        { typePredicates = M.unionWith S.union ps $ typePredicates s
-        , classEnvironment = ce' }
+mergeTypeConstraints ps = modify $ \s -> s { typePredicates = M.unionWith S.union ps $ typePredicates s }
 addTypePredicate :: TypePredicate -> TypeInferrer ()
 addTypePredicate (IsInstance classname t) = addTypeConstraint t classname
 addTypePredicates :: S.Set TypePredicate -> TypeInferrer ()
@@ -232,7 +226,7 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                                 -- We've got a typeclass declaration for the instance we want: remove it, process it,
                                 -- then retry
                                 modify $ \s -> s { typeclassInstances = M.delete key (typeclassInstances s) }
-                                addTypeclassInstance d
+                                addTypeclassInstanceFromDecl d
                                 ce' <- getClassEnvironment
                                 ifPThenByInstance ce' predicate >>= \case
                                     Just cs -> return cs -- Cool, the declaration worked
@@ -644,8 +638,8 @@ inferModule (HsModule p1 p2 p3 p4 decls) = do
     modify $ \s -> s { typeclassInstances = typePredMap }
     -- Process all the non-instance top-level definitions, then process any instance declarations
     decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
-    mapM_ addTypeclassInstance . M.elems =<< gets typeclassInstances
-    m <- HsModule p1 p2 p3 p4 <$> inferDeclGroup decls''
+    mapM_ addTypeclassInstanceFromDecl . M.elems =<< gets typeclassInstances
+    let m = HsModule p1 p2 p3 p4 decls''
     writeLog "Inferred module types"
     ts <- gets bindings
     m' <- updateModuleTypeTags m
@@ -658,17 +652,24 @@ getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
 getTypeclassTypePredicate (HsInstDecl _ _ name args _) = return (name, args)
 getTypeclassTypePredicate _ = throwError "Unexpected non-typeclass-instance declaration in getTypeclassTypePredicate."
 
-addTypeclassInstance :: HsDecl -> TypeInferrer ()
-addTypeclassInstance (HsInstDecl _ ctx name args _) = case (ctx, args) of
+addTypeclassInstanceFromDecl :: HsDecl -> TypeInferrer ()
+addTypeclassInstanceFromDecl (HsInstDecl _ ctx name args _) = case (ctx, args) of
     ([], [arg]) -> do
         ks <- getKinds
         t <- synToType ks arg
-        let inst = IsInstance (convertName name) t
-        writeLog $ "Adding type predicate " <> showt inst
-        addTypePredicate inst
+        addTypeclassInstance $ Qualified S.empty $ IsInstance (convertName name) t
     ([], _) -> throwError "Multiparameter typeclass instances not supported"
     (_, _) -> throwError "Contexts not yet supported in instances"
-addTypeclassInstance _ = throwError "Unexpected non-typeclass-instance declaration in addTypeclassInstance."
+addTypeclassInstanceFromDecl _ = throwError "Unexpected non-typeclass-instance declaration in addTypeclassInstanceFromDecl."
+
+addTypeclassInstance :: ClassInstance -> TypeInferrer ()
+addTypeclassInstance inst = do
+    writeLog $ "Adding class instance " <> showt inst
+    -- Make sure we use the most resolved type we for the head of the instance
+    inst' <- applyCurrentSubstitution inst
+    s <- get
+    ce' <- addInstance (classEnvironment s) inst'
+    put $ s { classEnvironment = ce' }
 
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
@@ -676,6 +677,14 @@ inferModuleWithBuiltins m = do
     addKinds builtinKinds
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     inferModule m
+
+getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
+getAllVariableTypes = do
+    binds <- gets bindings
+    -- Get the qualified types of each unbound but present variable (and give it an empty quantifier set)
+    unboundVariables <- M.toList <$> gets variableTypes
+    unbound <- forM unboundVariables $ \(v, t) -> (v,) . Quantified S.empty <$> getQualifiedType t
+    return $ M.union binds (M.fromList unbound)
 
 
 -- |After the 1st pass (`inferModule`) which produced an AST with explicit type tags for each expression, we need to

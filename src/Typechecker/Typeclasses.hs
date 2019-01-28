@@ -58,7 +58,8 @@ addInstance ce inst@(Qualified _ (IsInstance classname _)) =
     case M.lookup classname ce of -- Find the class we're making an instance of
         Nothing -> throwError $ "Class " <> showt classname <> " doesn't exist"
         Just (Class supers otherInsts) -> do
-            unless (null overlappingInstances) $ throwError $ "Overlapping instances " <> showt overlappingInstances
+            unless (null overlappingInstances) $ throwError $ unlines
+                ["Overlapping instances:", showt inst, "with", showt overlappingInstances]
             return $ M.insert classname (Class supers (S.insert inst otherInsts)) ce
             where
                 -- Two instances overlap if there's a substitution which unifies their heads
