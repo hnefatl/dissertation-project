@@ -102,7 +102,7 @@ instance TextShow Type where
         _ -> showb t1 <> " " <> showb t2
 
 instance TextShow TypePredicate where
-    showb (IsInstance (TypeVariableName name) t@TypeApp{}) = fromText name <> "(" <> showb t <> ")"
+    showb (IsInstance (TypeVariableName name) t@TypeApp{}) = fromText name <> " (" <> showb t <> ")"
     showb (IsInstance (TypeVariableName name) t)           = fromText name <> " " <> showb t
 instance TextShow a => TextShow (Qualified a) where
     showb (Qualified quals x) = prefix <> showb x

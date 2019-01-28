@@ -219,8 +219,8 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                     Nothing -> do
                         -- Failed to find an instance: check if we can create one on-demand from the typeclass instance
                         -- declarations we've not yet processed
-                        oldSyn <- typeToSyn t
-                        let key = (UnQual $ HsIdent $ unpack $ convertName classInstance, [oldSyn])
+                        synType <- typeToSyn =<< applyCurrentSubstitution t
+                        let key = (UnQual $ HsIdent $ unpack $ convertName classInstance, [synType])
                         gets (M.lookup key . typeclassInstances) >>= \case
                             Just d -> do
                                 -- We've got a typeclass declaration for the instance we want: remove it, process it,
