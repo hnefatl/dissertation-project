@@ -198,3 +198,7 @@ Sort hs-java stack tags: per-function datatypes in GState? Means we can keep tra
 used.
 
 hs-java constant pool deduplication?
+
+Typeclass instances break eeeeverything. They use the same name as an existing function, but have different types. Can't
+rename them because that's syntactic alterations when the dependency is semantic (renaming `foo` in `foo = all foo` will
+rename the 2nd `foo` although it refers to a different function).
