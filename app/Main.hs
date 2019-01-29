@@ -16,7 +16,6 @@ import           ExtraDefs               (pretty, synPrint)
 import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                   (VariableName)
-import           Typechecker.Hardcoded
 
 import qualified Backend.CodeGen         as CodeGen (convert, writeClass)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
@@ -26,7 +25,7 @@ import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
-import           Typechecker.Typechecker (evalTypeInferrer, inferModule)
+import           Typechecker.Typechecker (evalTypeInferrer, inferModule, getClassEnvironment, getKinds)
 
 
 data Flags = Flags
@@ -69,11 +68,11 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             mainName <- case M.lookup "_main" topLevelRenames of
                 Nothing -> throwError "No _main symbol found."
                 Just n       -> return n
-            (taggedModule, types) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ inferModule renamedModule
-            deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) builtinDictionaries types builtinKinds builtinClasses
+            ((taggedModule, types), classEnvironment, kinds) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,,) <$> inferModule renamedModule <*> getClassEnvironment <*> getKinds
+            deoverloadedModule <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types
-            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes builtinKinds
+            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]

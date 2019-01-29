@@ -48,6 +48,8 @@ data InferrerState = InferrerState
     , bindings           :: M.Map VariableName QuantifiedType
     , classEnvironment   :: ClassEnvironment
     , kinds              :: M.Map TypeVariableName Kind
+    -- Type predicates: this is not redundant given `classEnvironment`, this contains eg. "type variable t74 is
+    -- constrained by these classes", whereas `classEnvironment` contains eg. "Bool" is an instance of "Monoid".
     , typePredicates     :: M.Map Type (S.Set ClassName)
     , variableCounter    :: Int
     -- Any typeclass instances we find when typechecking: we process these either after all the other decls or when
@@ -730,7 +732,7 @@ updateModuleTypeTags :: Syntax.HsModule -> TypeInferrer Syntax.HsModule
 updateModuleTypeTags (HsModule a b c d decls) = HsModule a b c d <$> updateDeclsTypeTags decls
 
 updateDeclTypeTags :: Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
-updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> pure ds
+updateDeclTypeTags (HsPatBind l pat rhs ds) = HsPatBind l pat <$> updateRhsTypeTags rhs <*> updateDeclsTypeTags ds
 updateDeclTypeTags (HsFunBind matches)      = HsFunBind <$> mapM updateMatchTypeTags matches
 updateDeclTypeTags d@HsTypeSig{}            = return d
 updateDeclTypeTags d@HsClassDecl{}          = return d
@@ -751,14 +753,28 @@ updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
 updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
     HsQualType [] (HsTyVar tv) -> qualTypeToSyn =<< getQualifiedType (convertName tv)
     qt                         -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+updateExpTypeTags v@HsVar{} = return v
+updateExpTypeTags c@HsCon{} = return c
+updateExpTypeTags l@HsLit{} = return l
 updateExpTypeTags (HsInfixApp e1 op e2) = HsInfixApp <$> updateExpTypeTags e1 <*> pure op <*> updateExpTypeTags e2
 updateExpTypeTags (HsApp e1 e2) = HsApp <$> updateExpTypeTags e1 <*> updateExpTypeTags e2
 updateExpTypeTags (HsNegApp e) = HsNegApp <$> updateExpTypeTags e
 updateExpTypeTags (HsLambda l ps e) = HsLambda l ps <$> updateExpTypeTags e
+updateExpTypeTags (HsLet ds e) = HsLet <$> updateDeclsTypeTags ds <*> updateExpTypeTags e
 updateExpTypeTags (HsIf c e1 e2) = HsIf <$> updateExpTypeTags c <*> updateExpTypeTags e1 <*> updateExpTypeTags e2
+updateExpTypeTags (HsCase e as) = HsCase <$> updateExpTypeTags e <*> mapM updateAltTypeTags as
 updateExpTypeTags (HsTuple es) = HsTuple <$> mapM updateExpTypeTags es
 updateExpTypeTags (HsList es) = HsList <$> mapM updateExpTypeTags es
-updateExpTypeTags e = return e
+updateExpTypeTags (HsParen e) = HsParen <$> updateExpTypeTags e
+updateExpTypeTags e = throwError $ "Unknown expression in updateExpTypeTags: " <> showt e
+
+updateAltTypeTags :: Syntax.HsAlt -> TypeInferrer Syntax.HsAlt
+updateAltTypeTags (HsAlt loc pat a wheres) = HsAlt loc pat <$> updateGuardedAltsTypeTags a <*> updateDeclsTypeTags wheres
+updateGuardedAltsTypeTags :: Syntax.HsGuardedAlts -> TypeInferrer Syntax.HsGuardedAlts
+updateGuardedAltsTypeTags (HsUnGuardedAlt e) = HsUnGuardedAlt <$> updateExpTypeTags e
+updateGuardedAltsTypeTags (HsGuardedAlts as) = HsGuardedAlts <$> mapM updateGuardedAltTypeTags as
+updateGuardedAltTypeTags :: Syntax.HsGuardedAlt -> TypeInferrer Syntax.HsGuardedAlt
+updateGuardedAltTypeTags (HsGuardedAlt loc e1 e2) = HsGuardedAlt loc <$> updateExpTypeTags e1 <*> updateExpTypeTags e2
 
 checkModuleExpTypes :: MonadError Text m => Syntax.HsModule -> m ()
 checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
@@ -779,16 +795,32 @@ checkMatchExpTypes :: MonadError Text m => Syntax.HsMatch -> m ()
 checkMatchExpTypes (HsMatch _ _ _ rhs wheres) = checkRhsExpTypes rhs >> checkDeclsExpTypes wheres
 
 checkExpExpTypes :: MonadError Text m => Syntax.HsExp -> m ()
+-- We previously wrapped the manual type signature with an automatically added one, treat them differently
 checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
     | alphaEq manualType autoType = checkExpExpTypes e
     | otherwise = throwError $ "Type mismatch in explicit type annotation: tagged with " <> x <> " but inferred " <> y
         where x = synPrint manualType
               y = synPrint autoType
+checkExpExpTypes (HsExpTypeSig _ e _) = checkExpExpTypes e -- Ignore automatically added signatures
+checkExpExpTypes HsVar{} = return ()
+checkExpExpTypes HsCon{} = return ()
+checkExpExpTypes HsLit{} = return ()
 checkExpExpTypes (HsInfixApp e1 _ e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsApp e1 e2) = checkExpExpTypes e1 >> checkExpExpTypes e2
 checkExpExpTypes (HsNegApp e) = checkExpExpTypes e
 checkExpExpTypes (HsLambda _ _ e) = checkExpExpTypes e
+checkExpExpTypes (HsLet ds e) = checkDeclsExpTypes ds >> checkExpExpTypes e
 checkExpExpTypes (HsIf c e1 e2) = checkExpExpTypes c >> checkExpExpTypes e1 >> checkExpExpTypes e2
+checkExpExpTypes (HsCase e as) = checkExpExpTypes e >> mapM_ checkAltExpTypes as
 checkExpExpTypes (HsTuple es) = mapM_ checkExpExpTypes es
 checkExpExpTypes (HsList es) = mapM_ checkExpExpTypes es
-checkExpExpTypes _ = return ()
+checkExpExpTypes (HsParen e) = checkExpExpTypes e
+checkExpExpTypes e = throwError $ "Unknown expression in checkExpExpTypes: " <> showt e
+
+checkAltExpTypes :: MonadError Text m => Syntax.HsAlt -> m ()
+checkAltExpTypes (HsAlt _ _ a wheres) = checkGuardedAltsExpTypes a >> checkDeclsExpTypes wheres
+checkGuardedAltsExpTypes :: MonadError Text m => Syntax.HsGuardedAlts -> m ()
+checkGuardedAltsExpTypes (HsUnGuardedAlt e) = checkExpExpTypes e
+checkGuardedAltsExpTypes (HsGuardedAlts as) = mapM_ checkGuardedAltExpTypes as
+checkGuardedAltExpTypes :: MonadError Text m => Syntax.HsGuardedAlt-> m ()
+checkGuardedAltExpTypes (HsGuardedAlt _ e1 e2) = mapM_ checkExpExpTypes [e1, e2]

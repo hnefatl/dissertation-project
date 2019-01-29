@@ -52,7 +52,7 @@ applyTypeFunUnsafe t1 t2 = case applyTypeFun t1 t2 of
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !TypeVariableName !Type deriving (Eq, Ord, Show)
+data TypePredicate = IsInstance !ClassName !Type deriving (Eq, Ord, Show)
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType

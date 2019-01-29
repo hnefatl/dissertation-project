@@ -1,11 +1,12 @@
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 
 module Backend.Deoverload where
 
 import           BasicPrelude               hiding (exp)
-import           Control.Monad.Except       (Except, ExceptT, MonadError, runExceptT, throwError)
+import           Control.Monad.Except       (Except, ExceptT, MonadError, runExcept, runExceptT, throwError, liftEither)
 import           Control.Monad.Extra        (concatForM, concatMapM)
 import           Control.Monad.State.Strict (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default               (Default, def)
@@ -16,7 +17,7 @@ import           Data.Text                  (unpack)
 import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showb, showt)
 
-import           ExtraDefs                  (synPrint, zipOverM)
+import           ExtraDefs                  (synPrint, pretty, zipOverM)
 import           Logger
 import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                      (TypeVariableName(..), VariableName(..), convertName)
@@ -24,7 +25,7 @@ import           TextShowHsSrc              ()
 import           Typechecker.Hardcoded      (builtinKinds)
 import           Typechecker.Substitution   (applySub)
 import           Typechecker.Typechecker    (nullSrcLoc)
-import           Typechecker.Typeclasses    (ClassEnvironment, entails)
+import           Typechecker.Typeclasses    (TypeClass(Class), ClassEnvironment, entails)
 import           Typechecker.Types
 import           Typechecker.Unifier        (mgu)
 
@@ -46,22 +47,22 @@ instance Default DeoverloadState where
         , kinds = M.empty
         , classEnvironment = M.empty }
 
-runDeoverload :: Deoverload a -> M.Map TypePredicate VariableName -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
-runDeoverload action d ts ks ce = do
-    let Deoverload inner = addDictionaries d >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
+runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
+runDeoverload action ts ks ce = do
+    let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
+                flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
+        Deoverload inner = addDictionaries ds >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
-            Left err -> throwError $ unlines [err, showt s]
+            Left err -> throwError $ unlines [err, pretty s]
             Right y  -> return y
     return (z, s)
 
-evalDeoverload :: Deoverload a -> M.Map TypePredicate VariableName -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
-evalDeoverload action d ts ks ce = do
-    let Deoverload inner = addDictionaries d >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
-    (x, s) <- lift $ runStateT (runExceptT inner) def
-    case x of
-        Left err -> throwError $ unlines [err, showt s]
-        Right y  -> return y
+evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
+evalDeoverload action ts ks ce = liftEither . runExcept . fst =<< lift (runDeoverload action ts ks ce)
+
+typePredToDictionaryName :: TypePredicate -> VariableName
+typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
@@ -159,7 +160,8 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         return decl
     return $ dataDecl:methodDecls
 deoverloadDecl d@HsDataDecl{} = return [d]
-deoverloadDecl _ = throwError "Unsupported declaration in deoverloader"
+deoverloadDecl d@HsInstDecl{} = throwError $ unlines ["Classes are removed in the deoverloader, can we do the same for instance declarations? And can we support contexts on member functions given that they're all deoverloaded anyway?", synPrint d]
+deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = HsMatch loc name pats <$> deoverloadRhs rhs <*> deoverloadDecls wheres
@@ -169,7 +171,7 @@ isTypeSig HsTypeSig{} = True
 isTypeSig _           = False
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
-deoverloadRhs (HsUnGuardedRhs expr) = case expr of
+deoverloadRhs (HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
     e@(HsExpTypeSig loc _ t@(HsQualType _ simpleType)) -> do
         -- Replace each constraint with a lambda for a dictionary
         ks                <- getKinds
