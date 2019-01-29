@@ -140,7 +140,7 @@ makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) ele
 makeSynFun :: [HsType] -> HsType -> HsType
 makeSynFun as e = foldr HsTyFun e as
 makeSynApp :: HsType -> [HsType] -> HsType
-makeSynApp e = foldl HsTyApp e
+makeSynApp = foldl HsTyApp
 
 synFunArgNum :: HsType -> Int
 synFunArgNum (HsTyFun _ t) = 1 + synFunArgNum t

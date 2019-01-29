@@ -20,6 +20,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 
 import           AlphaEq                     (stripModuleParens)
+import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
 import           ExtraDefs                   (synPrint)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
@@ -28,8 +29,7 @@ import           Preprocessor.ContainedNames
 import           Tuples                      (makeTupleName)
 
 data RenamerState = RenamerState
-      -- Used to generate unique variable names
-    { variableCounter            :: Int
+    { classInfo :: M.Map HsQName ClassInfo
       -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
     , variableBindings           :: M.Map VariableName [UniqueVariableName]
       -- A reverse mapping from unique names to their original variable name: useful for printing error messages.
@@ -42,7 +42,7 @@ instance TextShow RenamerState where
     showb = fromString . show
 instance Default RenamerState where
     def = RenamerState
-            { variableCounter = 0
+            { classInfo = M.empty
             , variableBindings = M.empty
             , variableReverseMapping = M.empty
             , typeVariableBindings = M.empty
@@ -127,11 +127,14 @@ renameTypeVariable n           = HsSymbol . unpack . convertName <$> getUniqueSc
 
 -- Returns the renamed module along with the top-level renaming and reverse variable renaming mapping
 renameModule :: HsModule -> Renamer (HsModule, M.Map VariableName VariableName, M.Map VariableName VariableName)
-renameModule (HsModule a b c d decls) = do
+renameModule m@(HsModule a b c d decls) = do
     writeLog "-----------"
     writeLog "- Renamer -"
     writeLog "-----------"
     boundVars <- getBoundVariables decls
+    let classInfos = getClassInfo m
+    writeLog $ unlines ["Found class info:", showt classInfos]
+    modify $ \s -> s { classInfo = classInfos }
     bindVariableForScope boundVars $ do
         topLevelMappings <- gets variableBindings
         decls' <- renames decls
@@ -182,7 +185,12 @@ instance Renameable HsDecl where
     rename (HsDataDecl loc ctx name args decls derivings) =
         bindTypeVariableForScope (S.fromList $ map convertName args) $
             HsDataDecl loc ctx name <$> mapM renameTypeVariable args <*> renames decls <*> pure derivings
-    rename (HsInstDecl loc ctx cname ts ds) = HsInstDecl loc <$> renames ctx <*> pure cname <*> renames ts <*> renames ds
+    rename (HsInstDecl loc ctx cname ts ds) = do
+        cis <- gets classInfo
+        case M.lookup cname cis of
+            Nothing -> throwError $ "Class " <> showt cname <> " not found in class info."
+            Just ci -> bindVariableForScope (S.map convertName $ M.keysSet $ methods ci) $
+                HsInstDecl loc <$> renames ctx <*> pure cname <*> renames ts <*> renames ds
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
 
 instance Renameable HsConDecl where

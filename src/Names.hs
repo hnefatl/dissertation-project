@@ -13,6 +13,7 @@ import Tuples                  (makeTupleName)
 
 newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
 newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
+type ClassName = TypeVariableName
 -- Unique variants are only used within the renamer
 newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable)
 newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable)
