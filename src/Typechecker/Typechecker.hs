@@ -25,6 +25,7 @@ import           Logger
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (getBoundVariables)
+import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
 import           Preprocessor.Dependency
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
@@ -53,7 +54,9 @@ data InferrerState = InferrerState
     -- another declaration needs a typeclass instance we can provide by processing one of these. It's weird, but
     -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
     -- detect, so we just process them as late as possible.
-    , typeclassInstances :: M.Map (HsQName, [HsType]) HsDecl }
+    , typeclassInstances :: M.Map (HsQName, [HsType]) HsDecl
+    -- Information about classes 
+    , classInfo :: M.Map HsQName ClassInfo }
     deriving (Eq, Show)
 
 instance Default InferrerState where
@@ -65,7 +68,8 @@ instance Default InferrerState where
             , kinds = M.empty
             , typePredicates = M.empty
             , variableCounter = 0
-            , typeclassInstances = M.empty }
+            , typeclassInstances = M.empty
+            , classInfo = M.empty }
 instance TextShow InferrerState where
     showb = fromString . show
 
@@ -555,11 +559,7 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
 inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
-    ([], [_]) -> do
-        decls' <- forM decls $ \case
-            d@HsPatBind{} -> inferDecl d
-            _ -> throwError "Only support pattern binding declarations in typeclass instances"
-        return $ HsInstDecl loc ctx name args decls'
+    ([], [_]) -> HsInstDecl loc ctx name args <$> mapM (checkInstanceDecl name args) decls
     ([], _) -> throwError "Multiparameter typeclass instances not supported"
     (_, _) -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
@@ -569,6 +569,40 @@ inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     decls' <- mapM (inferConDecl resultType) decls
     return $ HsDataDecl loc ctx name args decls' derivings
 inferDecl _ = throwError "Declaration not yet supported"
+
+-- |For typeclass instance "top-level" declarations, we don't need to infer the type: it's easily obtained by
+-- substituting the class type variable parameters for the concrete types in the instance head in the type of each
+-- binding. We need to process them separately to normal declarations as normal declarations assume they're the only
+-- definition of the symbol: typeclass instance definitions might be one of many.
+checkInstanceDecl :: HsQName -> [HsType] -> Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
+checkInstanceDecl cname argTypes (HsPatBind loc pat rhs wheres) = do
+    writeLog $ "Processing instance declaration for " <> synPrint pat
+    -- When inferring the pattern type, we want to inject the type of the binding given the instance variables: in
+    -- `instance Num Int`, `(+)` doesn't have type `Num a => a -> a -> a`, it has type `Int -> Int -> Int`.
+    ci <- gets (M.lookup cname . classInfo) >>= \case
+        Nothing -> throwError $ "No class with name " <> showt cname <> " found."
+        Just info -> return info
+    ks <- getKinds
+    sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci) <$> mapM (synToType ks) argTypes
+    methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m,t) -> do
+        qt@(Qualified quals _) <- applySub sub <$> synToQualType ks t
+        unless (null quals) $ throwError "Unexpected qualifiers in typeclass method context"
+        -- TODO(kc506): Should probably actually fill out the quantified vars
+        t' <- instantiateToVar $ Quantified S.empty qt
+        return (convertName m, t')
+    -- Temporarily add the renamed types, infer the pattern, then reset to the old types
+    origTypes <- gets variableTypes
+    modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
+    patType <- nameToType =<< inferPattern pat
+    modify $ \s -> s { variableTypes = origTypes }
+    writeLog $ "methodTypes: " <> showt methodTypes
+    writeLog $ "Pattern type: " <> showt patType
+    -- Infer the RHS type, unify
+    (rhsExp, rhsVar) <- inferRhs rhs
+    rhsType <- nameToType rhsVar
+    unify patType rhsType
+    return $ HsPatBind loc pat rhsExp wheres
+checkInstanceDecl _ _ d = throwError $ unlines ["Illegal declaration in typeclass instance:", synPrint d]
 
 inferMatch :: Syntax.HsMatch -> TypeInferrer (Syntax.HsMatch, TypeVariableName)
 inferMatch (HsMatch loc name args rhs wheres) = do
@@ -627,10 +661,13 @@ inferDeclGroup ds = do
 
 -- TODO(kc506): Take advantage of explicit type hints
 inferModule :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule (HsModule p1 p2 p3 p4 decls) = do
+inferModule m@(HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
+    let ci = getClassInfo m
+    modify $ \s -> s { classInfo = ci }
+    writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
         isTypeclassInstance _ = False
         (instanceDecls, decls') = partition isTypeclassInstance decls
@@ -639,14 +676,14 @@ inferModule (HsModule p1 p2 p3 p4 decls) = do
     -- Process all the non-instance top-level definitions, then process any instance declarations
     decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
     mapM_ addTypeclassInstanceFromDecl . M.elems =<< gets typeclassInstances
-    let m = HsModule p1 p2 p3 p4 decls''
+    let m' = HsModule p1 p2 p3 p4 decls''
     writeLog "Inferred module types"
     ts <- gets bindings
-    m' <- updateModuleTypeTags m
+    m'' <- updateModuleTypeTags m'
     writeLog "Updated explicit type tags"
-    checkModuleExpTypes m'
+    checkModuleExpTypes m''
     writeLog "Checked explicit type tags"
-    return (m', ts)
+    return (m'', ts)
 
 getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
 getTypeclassTypePredicate (HsInstDecl _ _ name args _) = return (name, args)
