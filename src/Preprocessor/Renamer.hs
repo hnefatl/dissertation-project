@@ -28,10 +28,8 @@ import           Preprocessor.ContainedNames
 import           Tuples                      (makeTupleName)
 
 data RenamerState = RenamerState
-      -- Used to generate unique variable names
-    { variableCounter            :: Int
-      -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
-    , variableBindings           :: M.Map VariableName [UniqueVariableName]
+    { -- Mappings from a variable name to a stack of unique names. The stack is to facilitate nesting.
+      variableBindings           :: M.Map VariableName [UniqueVariableName]
       -- A reverse mapping from unique names to their original variable name: useful for printing error messages.
     , variableReverseMapping     :: M.Map UniqueVariableName VariableName
     -- Analogous to the above but for type variables
@@ -42,8 +40,7 @@ instance TextShow RenamerState where
     showb = fromString . show
 instance Default RenamerState where
     def = RenamerState
-            { variableCounter = 0
-            , variableBindings = M.empty
+            { variableBindings = M.empty
             , variableReverseMapping = M.empty
             , typeVariableBindings = M.empty
             , typeVariableReverseMapping = M.empty }

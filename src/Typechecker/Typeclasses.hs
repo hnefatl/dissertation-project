@@ -16,8 +16,6 @@ import           Typechecker.Substitution
 import           Typechecker.Types
 import           Typechecker.Unifier
 
-type ClassName = TypeVariableName
-
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
 data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show)
