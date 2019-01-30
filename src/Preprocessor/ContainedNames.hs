@@ -62,7 +62,7 @@ conflict ClassSymType{} SymType = True
 conflict (ClassSymType c1) (ClassSymType c2) = c1 /= c2
 conflict InstSymDef{} SymDef = True
 conflict InstSymDef{} SymType = True
-conflict (InstSymDef c1 t1) (InstSymDef c2 t2) = c1 /= c2 && t1 /= t2
+conflict (InstSymDef c1 t1) (InstSymDef c2 t2) = (c1 == c2) /= (t1 == t2) -- xor
 conflict _ _ = False
 
 class HasBoundVariables a where

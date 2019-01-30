@@ -19,6 +19,7 @@ import           TextShow                   (TextShow, showb, showt)
 
 import           ExtraDefs                  (synPrint, pretty, zipOverM)
 import           Logger
+import           Preprocessor.Renamer       (renameIsolated)
 import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                      (TypeVariableName(..), VariableName(..), convertName)
 import           TextShowHsSrc              ()
@@ -145,7 +146,7 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         -- dataDecl is `data Foo a = Foo (a -> a) (a -> Int)` for `class Foo a { f :: a -> a ; g :: a -> Int }`
         dataDecl = HsDataDecl nullSrcLoc [] cname args [ HsConDecl nullSrcLoc cname dataArgs ] []
     writeLog $ "Generated data declaration " <> synPrint dataDecl
-    -- methodDecls are `f (Foo f' _) = f'` and `g (Foo _ g') = g'` for each method of the class
+    -- methodDecls are `f (Foo f' _) = f'` and `g (Foo _ g') = g'` for each method `f`/`g` of the class
     methodDecls <- zipOverM methods [0..] $ \(name, t) i -> do
         patVar <- convertName <$> freshVarName
         let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numMethods - 1 - i) HsPWildCard
@@ -160,7 +161,26 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         return decl
     return $ dataDecl:methodDecls
 deoverloadDecl d@HsDataDecl{} = return [d]
-deoverloadDecl d@HsInstDecl{} = throwError $ unlines ["Classes are removed in the deoverloader, can we do the same for instance declarations? And can we support contexts on member functions given that they're all deoverloaded anyway?", synPrint d]
+deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
+    ks <- getKinds
+    predicate <- IsInstance (convertName name) <$> synToType ks arg
+    dictName <- gets (M.lookup predicate . dictionaries) >>= \case
+        Nothing -> throwError $ "No dictionary name found for " <> showt predicate
+        Just n -> return n
+    -- Generate a top-level declaration for each member declaration, bound to a new name
+    (methodDecls, declRenames) <- fmap unzip $ forM ds $ \case
+        HsPatBind l pat rhs wheres -> do
+            (pat', renaming) <- (Deoverload $ lift $ lift $ runExceptT $ renameIsolated pat) >>= \case
+                Left err -> throwError err
+                Right v -> return v
+            d' <- HsPatBind l pat' <$> deoverloadRhs rhs <*> deoverloadDecls wheres
+            return (d', renaming)
+        d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
+    let renamings = M.unions declRenames
+        conArgs = map (HsVar . UnQual . HsIdent . unpack . convertName . snd) $ M.toAscList renamings
+        dictBody = HsUnGuardedRhs $ foldl' HsApp (HsCon name) conArgs
+        dictDecl = HsPatBind nullSrcLoc (HsPVar $ HsIdent $ unpack $ convertName dictName) dictBody []
+    return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 
 deoverloadMatch :: HsMatch -> Deoverload HsMatch

@@ -73,7 +73,7 @@ bindVariableForScope :: S.Set VariableName -> Renamer a -> Renamer a
 bindVariableForScope names action = do
     mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueVarName) (S.toList names)
     -- Add new bindings to scope
-    modify (\s -> s { variableBindings = M.unionWith (++) (M.map pure mapping) (variableBindings s) })
+    modify (\s -> s { variableBindings = M.unionWith (<>) (M.map pure mapping) (variableBindings s) })
     writeLog $ "Entered new scope: bindings = " <> showt mapping
     -- Add reverse mappings
     let reverseMapping = M.fromList $ map swap $ M.toList mapping
@@ -94,7 +94,7 @@ bindVariableForScope names action = do
 bindTypeVariableForScope :: S.Set TypeVariableName -> Renamer a -> Renamer a
 bindTypeVariableForScope names action = do
     mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueTypeVarName) (S.toList names)
-    modify (\s -> s { typeVariableBindings = M.unionWith (++) (M.map pure mapping) (typeVariableBindings s) })
+    modify (\s -> s { typeVariableBindings = M.unionWith (<>) (M.map pure mapping) (typeVariableBindings s) })
     let reverseMapping = M.fromList $ map swap $ M.toList mapping
     modify (\s -> s { typeVariableReverseMapping = M.union (typeVariableReverseMapping s) reverseMapping })
     result <- action
@@ -114,6 +114,14 @@ class Renameable a where
     rename :: a -> Renamer a
 renames :: (Renameable a, Traversable f) => f a -> Renamer (f a)
 renames = mapM rename
+
+renameIsolated :: (Renameable a, HasBoundVariables a) => a -> ExceptT Text (LoggerT NameGenerator) (a, M.Map VariableName VariableName)
+renameIsolated x = do
+    bound <- getBoundVariables x
+    evalRenamer $ bindVariableForScope bound $ do
+        renamed <- rename x
+        mapping <- fmap (\[UniqueVariableName ren] -> VariableName ren) <$> gets variableBindings
+        return (renamed, mapping)
 
 renameVariable :: HsName -> Renamer HsName
 renameVariable n@HsIdent{} = HsIdent . unpack . convertName <$> getUniqueScopedVariableName (convertName n)
