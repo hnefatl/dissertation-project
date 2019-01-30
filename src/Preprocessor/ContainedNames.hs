@@ -1,5 +1,4 @@
 {-# Language FlexibleContexts  #-}
-{-# Language TupleSections     #-}
 {-# Language FlexibleInstances #-}
 
 -- |Utility functions for getting variable names from the parse tree
@@ -16,7 +15,7 @@ import           TextShow                (showt)
 
 import           ExtraDefs               (synPrint)
 import           Names
-import           Typechecker.Types       (Type)
+import           Typechecker.Types       (Type(..), TypeVariable(..), Qualified(..), TypePredicate(..))
 import           Tuples                  (makeTupleName)
 
 
@@ -198,6 +197,17 @@ instance HasFreeTypeVariables HsType where
     getFreeTypeVariables (HsTyApp t1 t2) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
     getFreeTypeVariables (HsTyVar n)     = S.singleton $ convertName n
     getFreeTypeVariables HsTyCon{}       = S.empty
+
+instance HasFreeTypeVariables TypeVariable where
+    getFreeTypeVariables (TypeVariable v _) = S.singleton v
+instance HasFreeTypeVariables Type where
+    getFreeTypeVariables (TypeVar v) = getFreeTypeVariables v
+    getFreeTypeVariables TypeCon{} = S.empty
+    getFreeTypeVariables (TypeApp t1 t2 _) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
+instance HasFreeTypeVariables a => HasFreeTypeVariables (Qualified a) where
+    getFreeTypeVariables (Qualified quals t) = S.unions $ getFreeTypeVariables t:map getFreeTypeVariables (S.toList quals)
+instance HasFreeTypeVariables TypePredicate where
+    getFreeTypeVariables (IsInstance _ t) = getFreeTypeVariables t
 
 instance HasFreeTypeConstants HsDecl where
     getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = getFreeTypeConstants ds

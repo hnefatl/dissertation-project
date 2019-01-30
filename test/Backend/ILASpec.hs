@@ -40,7 +40,7 @@ makeTest input expected = testCase (unpack $ deline input) $
     where foo = do
             m <- parse input
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            m'' <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
+            (m'', _, _) <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             let dets = map deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types

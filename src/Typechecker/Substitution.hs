@@ -35,7 +35,7 @@ class Substitutable t where
 -- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
 instance Substitutable Type where
     applySub (Substitution subs) t@(TypeVar (TypeVariable name _)) = M.findWithDefault t name subs
-    applySub _ t@(TypeCon _)                                       = t
+    applySub (Substitution subs) t@(TypeCon (TypeConstant name _)) = M.findWithDefault t name subs
     applySub sub (TypeApp t1 t2 kind)                              = TypeApp (applySub sub t1) (applySub sub t2) kind
 instance Substitutable TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)

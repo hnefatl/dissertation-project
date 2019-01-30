@@ -12,10 +12,12 @@ import           Control.Monad.Except    (MonadError, throwError)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (unpack)
+import           Data.Foldable           (foldlM)
 import           Language.Haskell.Syntax as Syntax
 import           TextShow                (TextShow, fromText, showb, showt)
 
 import           NameGenerator
+import           ExtraDefs               (synPrint)
 import           Names
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
@@ -115,7 +117,6 @@ instance TextShow a => TextShow (Quantified a) where
     showb (Quantified quants t) = (if S.null quants then "" else quantifiers) <> showb t
         where quantifiers = "∀" <> (mconcat $ intersperse ", " $ map showb $ S.toList quants) <> ". "
 
-
 getInstantiatingTypeMap :: (MonadNameGenerator m, MonadError Text m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
     m <- getInstantiatingMap q
@@ -133,6 +134,8 @@ mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions 
 -- |Utility functions on types
 makeFun :: [Type] -> Type -> Type
 makeFun args ret = foldr (applyTypeFunUnsafe . applyTypeFunUnsafe typeFun) ret args
+makeApp :: MonadError Text m => Type -> [Type] -> m Type
+makeApp = foldlM applyTypeFun
 makeList :: Type -> Type
 makeList = applyTypeFunUnsafe typeList
 makeTuple :: [Type] -> Type
@@ -177,6 +180,9 @@ unwrapFunMaybe (TypeApp (TypeApp f t1 _) t2 _)
 unwrapFunMaybe _ = Nothing
 unwrapFun :: MonadError Text m => Type -> m (Type, Type)
 unwrapFun t = maybe (throwError $ showt t <> " isn't a function type.") return (unwrapFunMaybe t)
+unwrapSynFun :: MonadError Text m => HsType -> m (HsType, HsType)
+unwrapSynFun (HsTyFun t1 t2) = return (t1, t2)
+unwrapSynFun t = throwError $ synPrint t <> " isn't a function type."
 
 unmakeList :: MonadError Text m => Type -> m Type
 unmakeList t@(TypeApp t1 t2 _)

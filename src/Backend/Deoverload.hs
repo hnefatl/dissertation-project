@@ -5,30 +5,31 @@
 
 module Backend.Deoverload where
 
-import           BasicPrelude               hiding (exp)
-import           Control.Monad.Except       (Except, ExceptT, MonadError, runExcept, runExceptT, throwError, liftEither)
-import           Control.Monad.Extra        (concatForM, concatMapM)
-import           Control.Monad.State.Strict (MonadState, StateT, gets, modify, runStateT)
-import           Data.Default               (Default, def)
-import           Data.Foldable              (null, toList)
-import qualified Data.Map.Strict            as M
-import qualified Data.Set                   as S
-import           Data.Text                  (unpack)
+import           BasicPrelude                hiding (exp)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, runExcept, runExceptT, throwError, liftEither)
+import           Control.Monad.Extra         (concatForM, concatMapM)
+import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
+import           Data.Default                (Default, def)
+import           Data.Foldable               (null, toList, foldlM)
+import qualified Data.Map.Strict             as M
+import qualified Data.Set                    as S
+import           Data.Text                   (unpack)
 import           Language.Haskell.Syntax
-import           TextShow                   (TextShow, showb, showt)
+import           TextShow                    (TextShow, showb, showt)
 
-import           ExtraDefs                  (synPrint, pretty, zipOverM)
+import           ExtraDefs                   (synPrint, pretty, zipOverM)
 import           Logger
-import           Preprocessor.Renamer       (renameIsolated)
-import           NameGenerator              (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
-import           Names                      (TypeVariableName(..), VariableName(..), convertName)
-import           TextShowHsSrc              ()
-import           Typechecker.Hardcoded      (builtinKinds)
-import           Typechecker.Substitution   (applySub)
-import           Typechecker.Typechecker    (nullSrcLoc)
-import           Typechecker.Typeclasses    (TypeClass(Class), ClassEnvironment, entails)
+import           Preprocessor.Renamer        (renameIsolated)
+import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
+import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
+import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
+import           Names                       (TypeVariableName(..), VariableName(..), convertName)
+import           TextShowHsSrc               ()
+import           Typechecker.Substitution    (Substitution(..), applySub)
+import           Typechecker.Typechecker     (nullSrcLoc)
+import           Typechecker.Typeclasses     (TypeClass(Class), ClassEnvironment, entails)
 import           Typechecker.Types
-import           Typechecker.Unifier        (mgu)
+import           Typechecker.Unifier         (mgu)
 
 newtype Deoverload a = Deoverload (ExceptT Text (StateT DeoverloadState (LoggerT NameGenerator)) a)
     deriving (Functor, Applicative, Monad, MonadState DeoverloadState, MonadError Text, MonadLogger, MonadNameGenerator)
@@ -37,7 +38,8 @@ data DeoverloadState = DeoverloadState
     { dictionaries     :: M.Map TypePredicate VariableName
     , types            :: M.Map VariableName QuantifiedType
     , kinds            :: M.Map TypeVariableName Kind
-    , classEnvironment :: ClassEnvironment }
+    , classEnvironment :: ClassEnvironment
+    , classInfo :: M.Map HsQName ClassInfo }
     deriving (Eq, Show)
 instance TextShow DeoverloadState where
     showb = fromString . show
@@ -46,9 +48,10 @@ instance Default DeoverloadState where
         { dictionaries = M.empty
         , types = M.empty
         , kinds = M.empty
-        , classEnvironment = M.empty }
+        , classEnvironment = M.empty
+        , classInfo = M.empty }
 
-runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
+runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind, DeoverloadState)
 runDeoverload action ts ks ce = do
     let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
                 flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
@@ -57,10 +60,13 @@ runDeoverload action ts ks ce = do
     let z = case x of
             Left err -> throwError $ unlines [err, pretty s]
             Right y  -> return y
-    return (z, s)
+    return (z, types s, kinds s, s)
 
-evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
-evalDeoverload action ts ks ce = liftEither . runExcept . fst =<< lift (runDeoverload action ts ks ce)
+evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) (a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind)
+evalDeoverload action ts ks ce = do
+    (a, b, c, _) <- lift $ runDeoverload action ts ks ce
+    a' <- liftEither $ runExcept a
+    return (a', b, c)
 
 typePredToDictionaryName :: TypePredicate -> VariableName
 typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t
@@ -90,7 +96,11 @@ addDictionaries dicts = do
     existingDicts <- gets dictionaries
     let intersection = M.intersection dicts existingDicts
     unless (null intersection) $ throwError $ "Clashing dictionary types: " <> showt intersection
-    modify (\s -> s { dictionaries = M.union existingDicts dicts })
+    -- Generate a type for each new dictionary bound
+    let newTypes = M.fromList $ map (\(p, v) -> (v, Quantified S.empty $ Qualified S.empty $ deoverloadTypePredicate p)) (M.toList dicts)
+    modify $ \s -> s
+        { dictionaries = M.union existingDicts dicts
+        , types = M.union newTypes (types s) }
 addScopedDictionaries :: M.Map TypePredicate VariableName -> Deoverload a -> Deoverload a
 addScopedDictionaries dicts action = do
     -- Add dictionaries, run the action, remove them
@@ -114,16 +124,24 @@ makeDictName (IsInstance (TypeVariableName cl) t) = do
         TypeCon (TypeConstant tcn _) -> return tcn
         TypeApp{}                    -> freshTypeVarName
     return $ VariableName $ "d" <> cl <> suffix
-
+    
+quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
+quantifyType t = do
+    let frees = getFreeTypeVariables t
+    ks <- getKinds
+    frees' <- fmap S.fromList $ forM (S.toList frees) $ \n -> return $ TypeVariable n (M.findWithDefault KindStar n ks)
+    return $ Quantified frees' t
 
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: HsModule -> Deoverload HsModule
-deoverloadModule (HsModule a b c d decls) = do
+deoverloadModule m@(HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
-    addKinds builtinKinds
+    let ci = getClassInfo m
+    modify $ \s -> s { classInfo = ci }
+    writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls
 
 deoverloadDecls :: [HsDecl] -> Deoverload [HsDecl]
@@ -159,11 +177,28 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
             decl = HsPatBind nullSrcLoc (HsPVar name) (HsUnGuardedRhs lam) []
         writeLog $ "Generated function declaration " <> synPrint decl
         return decl
+    -- Add the type and kind of the data constructor to our environment
+    let conName = convertName cname
+        argNames = map convertName args
+        conKind = foldr KindFun KindStar (replicate numMethods KindStar)
+    writeLog $ "Added kind " <> showt conKind <> " for constructor " <> showt conName
+    addKinds $ M.singleton conName conKind
+    ks <- getKinds
+    argTypes <- mapM (synToType ks . snd) methods
+    resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (map (\a -> TypeCon $ TypeConstant a KindStar) argNames)
+    let conType = makeFun argTypes resultType
+    conQuantType <- quantifyType $ Qualified S.empty conType
+    writeLog $ "Added type " <> showt conQuantType <> " for constructor " <> showt conName
+    addTypes $ M.singleton (convertName cname) conQuantType
     return $ dataDecl:methodDecls
 deoverloadDecl d@HsDataDecl{} = return [d]
 deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     ks <- getKinds
-    predicate <- IsInstance (convertName name) <$> synToType ks arg
+    ci <- gets (M.lookup name . classInfo) >>= \case
+        Nothing -> throwError $ "No class with name " <> showt name <> " found."
+        Just info -> return info
+    paramType <- synToType ks arg
+    let predicate = IsInstance (convertName name) paramType
     dictName <- gets (M.lookup predicate . dictionaries) >>= \case
         Nothing -> throwError $ "No dictionary name found for " <> showt predicate
         Just n -> return n
@@ -176,10 +211,33 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
             d' <- HsPatBind l pat' <$> deoverloadRhs rhs <*> deoverloadDecls wheres
             return (d', renaming)
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
+    -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
+    -- the member declarations.
+    let typeSub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) [paramType]
+    Quantified _ t' <- deoverloadQuantType <$> getType (convertName name)
+    let t'' = applySub typeSub t'
+    conType <- HsQualType [] <$> typeToSyn t''
+    writeLog $ "Constructor type: " <> synPrint conType
     let renamings = M.unions declRenames
         conArgs = map (HsVar . UnQual . HsIdent . unpack . convertName . snd) $ M.toAscList renamings
-        dictBody = HsUnGuardedRhs $ foldl' HsApp (HsCon name) conArgs
-        dictDecl = HsPatBind nullSrcLoc (HsPVar $ HsIdent $ unpack $ convertName dictName) dictBody []
+        -- Given a type-tagged constructor and an argument, return a type-tagged application of the arg to the con
+        makeConApp :: MonadError Text m => HsExp -> HsExp -> m HsExp
+        makeConApp l@(HsExpTypeSig loc _ (HsQualType [] t)) e = do
+            (argType, retType) <- unwrapSynFun t
+            let r = HsExpTypeSig loc e (HsQualType [] argType)
+            return $ HsExpTypeSig loc (HsApp l r) (HsQualType [] retType)
+        makeConApp e _ = throwError $ "Illegal expression in makeConApp: " <> showt e
+    dictRhs <- HsUnGuardedRhs <$> foldlM makeConApp (HsExpTypeSig nullSrcLoc (HsCon name) conType) conArgs
+    let dictDecl = HsPatBind nullSrcLoc (HsPVar $ HsIdent $ unpack $ convertName dictName) dictRhs []
+    -- Add types for each of the generated decls
+    dictType <- TypeApp (TypeCon $ TypeConstant (convertName name) (KindFun KindStar KindStar)) <$> synToType ks arg <*> pure KindStar
+    addTypes . M.singleton dictName =<< quantifyType (Qualified S.empty dictType)
+    writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
+    forM_ (M.toList $ methods ci) $ \(n, t) -> do
+        methodType <- quantifyType . applySub typeSub =<< synToQualType ks t
+        let methodName = renamings M.! convertName n
+        addTypes $ M.singleton methodName methodType
+        writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
     return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 
@@ -296,7 +354,7 @@ deoverloadQuantType :: QuantifiedType -> QuantifiedSimpleType
 deoverloadQuantType (Quantified qs qt) = Quantified qs (deoverloadQualType qt)
 deoverloadQualType :: QualifiedType -> Type
 deoverloadQualType (Qualified quals t) = makeFun (map deoverloadTypePredicate $ toList quals) t
-deoverloadTypePredicate :: TypePredicate -> Type
+deoverloadTypePredicate :: TypePredicate -> Type -- TODO(kc506): This should use `getKinds`
 deoverloadTypePredicate (IsInstance c t) = TypeApp base t KindStar
     where base = TypeCon $ TypeConstant c (KindFun KindStar KindStar)
 
