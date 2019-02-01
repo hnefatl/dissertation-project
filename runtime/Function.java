@@ -17,26 +17,21 @@ public class Function extends HeapObject {
 
     @Override
     public HeapObject enter() {
-        System.out.println("Entering " + inner.toString());
         if (arguments.size() < arity) {
-            System.out.println("Partial");
             return this; // If we're not fully applied, we get a partially applied function
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
-            System.out.println("Overapplied");
-            Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables);
+            Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables).enter();
             for (HeapObject arg : arguments.subList(arity, arguments.size()))
                 result.addArgument(arg);
             return result;
         }
         else { // Perfect number of arguments
-            System.out.println("Perfect application");
             return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
         }
     }
 
     public void addArgument(HeapObject arg) {
-        System.out.println("Added argument " + arg.toString() + " to function " + inner.toString());
         arguments.add(arg);
     }
 

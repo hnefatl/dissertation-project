@@ -14,6 +14,7 @@ import qualified Data.Set                    as S
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
+import           Typechecker.Types           (Type)
 import           TextShow                    (TextShow, showb, showt)
 
 -- Datatypes inspired by STG:
@@ -27,7 +28,7 @@ data Exp = ExpLit Literal
          | ExpVar VariableName
          | ExpApp VariableName [Arg] -- Might need to add a type so we know what type of register to assign?
          | ExpConApp VariableName [Arg] -- Application of a constructor: require *all* the arguments to be present.
-         | ExpCase Exp [VariableName] [Alt Exp] -- Scrutinee, variables the scrutinee's assigned to, alts
+         | ExpCase Exp Type [VariableName] [Alt Exp] -- Scrutinee, variables the scrutinee's assigned to, alts
          | ExpLet VariableName Rhs Exp
     deriving (Eq, Ord)
 data Rhs = RhsClosure [VariableName] Exp -- Thunks: if it has arguments, it's a function; otherwise it's a thunk.
@@ -41,7 +42,7 @@ instance TextShow Exp where
     showb (ExpVar v)       = showb v
     showb (ExpApp v as)    = intercalate " " $ showb v:map showb as
     showb (ExpConApp c as) = intercalate " " $ showb c:map showb as
-    showb (ExpCase s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> intercalate " ; " (map showb as) <> " }"
+    showb (ExpCase s t bs as) = "case " <> showb s <> " :: " <> showb t <> " of " <> showb bs <> " { " <> intercalate " ; " (map showb as) <> " }"
     showb (ExpLet v r e) = "let " <> showb v <> " = " <> showb r <> " in " <> showb e
 instance TextShow Rhs where
     showb (RhsClosure vs e) = "\\" <> showb vs <> " -> " <> showb e
@@ -60,7 +61,7 @@ anfRhsToIlbRhs (ANF.Complex e) = RhsClosure [] <$> anfComplexToIlbExp e
 
 anfComplexToIlbExp ::  MonadError Text m => ANF.AnfComplex -> m Exp
 anfComplexToIlbExp (ANF.Let v _ r b)  = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
-anfComplexToIlbExp (ANF.Case s bs as) = ExpCase <$> anfComplexToIlbExp s <*> pure bs <*> mapM anfAltToIlbAlt as
+anfComplexToIlbExp (ANF.Case s t bs as) = ExpCase <$> anfComplexToIlbExp s <*> pure t <*> pure bs <*> mapM anfAltToIlbAlt as
 anfComplexToIlbExp (ANF.CompApp a)    = anfComplexToIlbApp a
 anfComplexToIlbExp (ANF.Trivial t)    = maybe (throwError "Unexpected type in expression") return (anfTrivialToExp t)
 
@@ -99,7 +100,7 @@ instance HasFreeVariables Exp where
     getFreeVariables (ExpVar v) = return $ S.singleton v
     getFreeVariables (ExpApp v as) = S.insert v <$> getFreeVariables as
     getFreeVariables (ExpConApp _ as) = getFreeVariables as
-    getFreeVariables (ExpCase s vs cs) = S.difference <$> (S.union <$> getFreeVariables s <*> getFreeVariables cs) <*> pure (S.fromList vs)
+    getFreeVariables (ExpCase s _ vs cs) = S.difference <$> (S.union <$> getFreeVariables s <*> getFreeVariables cs) <*> pure (S.fromList vs)
     getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)
 instance HasFreeVariables Rhs where
     getFreeVariables (RhsClosure vs e) = S.difference <$> getFreeVariables e <*> pure (S.fromList vs)

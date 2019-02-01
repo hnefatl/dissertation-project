@@ -7,7 +7,6 @@ import qualified Backend.ILA          as ILA
 import           BasicPrelude
 import           Control.Monad.Except (MonadError, runExceptT, throwError)
 import qualified Data.Map.Strict      as M
-import           Data.Text            (unpack)
 import           ExtraDefs            (secondM)
 import           NameGenerator        (MonadNameGenerator, freshVarName)
 import           Names
@@ -30,7 +29,7 @@ data AnfApplication = App AnfApplication AnfTrivial
 -- Like GHC's STG, in ILA-ANF Case expressions are the only points of *evaluation*, and Let expressions are points of
 -- *allocation* (but not the only points of allocation).
 data AnfComplex = Let VariableName Type AnfRhs AnfComplex
-                | Case AnfComplex [VariableName] [Alt AnfComplex]
+                | Case AnfComplex Type [VariableName] [Alt AnfComplex]
                 | CompApp AnfApplication
                 | Trivial AnfTrivial
     deriving (Eq, Ord)
@@ -49,7 +48,7 @@ instance TextShow AnfComplex where
     showb (Trivial e) = showb e
     showb (CompApp e) = showb e
     showb (Let v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
-    showb (Case s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }"
+    showb (Case s t bs as) = "case " <> showb s <> " :: " <> showb t <> " of " <> showb bs <> " { " <> cases <> " }"
         where cases = mconcat $ intersperse " ; " $ map showb as
 instance TextShow AnfRhs where
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
@@ -74,8 +73,8 @@ getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
 getAnfComplexType (Trivial e)            = getAnfTrivialType e
 getAnfComplexType (CompApp e)            = getAnfAppType e
 getAnfComplexType (Let _ _ _ e)          = getAnfComplexType e
-getAnfComplexType (Case _ _ [])          = throwError "No alts in case"
-getAnfComplexType (Case _ _ (Alt _ e:_)) = getAnfComplexType e
+getAnfComplexType (Case _ _ _ [])          = throwError "No alts in case"
+getAnfComplexType (Case _ _ _ (Alt _ e:_)) = getAnfComplexType e
 getAnfRhsType :: MonadError Text m => AnfRhs -> m Type
 getAnfRhsType (Lam _ t e) = T.makeFun [t] <$> getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
@@ -114,7 +113,7 @@ ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
 ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
 ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
-ilaExpToComplex (ILA.Case s vs as) = Case <$> ilaExpToComplex s <*> pure vs <*> mapM ilaAltToAnf as
+ilaExpToComplex (ILA.Case s vs as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
 
 ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfRhs
 ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b

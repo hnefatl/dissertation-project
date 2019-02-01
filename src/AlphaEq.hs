@@ -284,7 +284,7 @@ instance AlphaEq ILAANF.AnfComplex where
         alphaEq' t1 t2
         alphaEq' e1a e2a
         alphaEq' e1b e2b
-    alphaEq' (ILAANF.Case e1 vs1 as1) (ILAANF.Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (ILAANF.Case e1 t1 vs1 as1) (ILAANF.Case e2 t2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' t1 t2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
     alphaEq' (ILAANF.Trivial e1) (ILAANF.Trivial e2) = alphaEq' e1 e2
     alphaEq' (ILAANF.CompApp e1) (ILAANF.CompApp e2) = alphaEq' e1 e2
     alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]

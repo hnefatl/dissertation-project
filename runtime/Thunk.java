@@ -19,4 +19,11 @@ public class Thunk extends HeapObject {
     public String toString() {
         return "Thunk: { " + contained.toString() + "}";
     }
+
+    @Override
+    public Object clone() throws CloneNotSupportedException {
+        Thunk t = (Thunk)super.clone();
+        t.contained = (HeapObject)contained.clone();
+        return t;
+    }
 }

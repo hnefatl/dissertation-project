@@ -16,6 +16,8 @@ import           Data.Maybe                     (fromJust)
 import qualified Data.Sequence                  as Seq
 import qualified Data.Set                       as S
 import           Data.Text                      (pack, unpack)
+import           Data.Text.Lazy                 (fromStrict)
+import           Data.Text.Lazy.Encoding        (encodeUtf8)
 import           Data.Word                      (Word16)
 import           System.FilePath                ((<.>), (</>))
 import           TextShow                       (showt)
@@ -314,7 +316,12 @@ compileExp (ExpConApp con args) = do
             -- Push all the datatype arguments onto the stack then call the datatype constructor
             forM_ args pushArg
             invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
-compileExp (ExpCase head vs alts) = do
+compileExp (ExpCase head t vs alts) = do
+    let headType = case fst $ Types.unmakeApp t of
+            Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
+            Types.TypeCon (Types.TypeConstant n _) -> encodeUtf8 $ fromStrict $ convertName $ jvmSanitise n
+            _ -> boxedData -- If it's not a datatype, pretend it's boxed data
+    writeLog $ showt $ Types.unmakeApp t
     compileExp head
     -- Evaluate the expression
     invokeVirtual heapObject enter
@@ -324,25 +331,25 @@ compileExp (ExpCase head vs alts) = do
         storeLocal var -- Store it locally
     -- Branch: if the head object is a boxed data, we extract its branch value. Otherwise, we pop it and push 0 instead.
     dup
-    instanceOf boxedData -- Crashes: why?
+    instanceOf headType
     i0 $ IF C_EQ 13 -- If instanceof returned 0, the head's not data. Jump to the "else" block
     do -- The "then" block
         dup
-        checkCast boxedData
-        getField boxedData boxedDataBranch
+        checkCast headType
+        getField headType boxedDataBranch
         goto 4 -- Jump past the "else" block
     do -- The "else" block
         iconst_0
     -- Compile the actual case expression
-    compileCase alts
+    compileCase headType alts
 compileExp (ExpLet var rhs body) = do
     -- Compile the bound expression, store it in a local
     void $ compileLocalClosure var rhs
     -- Compile the inner expression
     compileExp body
 
-compileCase :: [Alt Exp] -> Converter ()
-compileCase as = do
+compileCase :: B.ByteString -> [Alt Exp] -> Converter ()
+compileCase headType as = do
     (defaultAlt, otherAlts) <- case partition isDefaultAlt as of
         ([], alt:otherAlts) -> return (alt, otherAlts) -- Select the first given constructor as the default one
         ([defaultAlt], otherAlts) -> return (defaultAlt, otherAlts)
@@ -350,18 +357,20 @@ compileCase as = do
     -- altKeys are the branch numbers of each alt's constructor
     (altKeys, alts) <- unzip <$> sortAlts otherAlts
     s <- get
-    let defaultAltGenerator = (\(Alt c e) -> unwrap $ bindDataVariables (getConstructorVariables c) >> compileExp e) defaultAlt
-        altGenerators = map (\(Alt c e) -> unwrap $ bindDataVariables (getConstructorVariables c) >> compileExp e) alts
+    let processAlt (Alt c e) = unwrap $ bindDataVariables headType (getConstructorVariables c) >> compileExp e
+        defaultAltGenerator = processAlt defaultAlt
+        altGenerators = map processAlt alts
         unwrap (Converter x) = x
         runner x = evalStateT x s
     Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
 
 -- TODO(kc506): Change to `Maybe VariableName` to allow us to compile `Alt`s without storing all their data parameters,
 -- only the ones we use.
-bindDataVariables :: [VariableName] -> Converter ()
-bindDataVariables vs = do
+bindDataVariables :: B.ByteString -> [VariableName] -> Converter ()
+bindDataVariables _ [] = return ()
+bindDataVariables headType vs = do
     -- Replace the head expression with a ref to its data array
-    getField boxedData boxedDataData
+    getField headType boxedDataData
     zipOverM_ vs [0..] $ \var index -> do
         -- Store the data at the given index into the given variable
         dup
