@@ -71,4 +71,7 @@ test = testGroup "Dependency Analysis"
     , makeTest
         "data B = F | T ; data [] a = [] | a :+ [a] ; class P a where { f :: a -> B } ; instance P B where { f = \\x -> x } ; instance P [B] where { f = all f } ; any :: (a -> B) -> [a] -> B"
         [["B", "T", "F"], ["P", "f"], [], ["[]", ":+"], ["any"], []]
+    , makeTest
+        "f = \\Foo -> Bar ; data Foo = Foo ; data Bar = Bar"
+        [["Foo"], ["Bar"], ["f"]]
     ]

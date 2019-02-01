@@ -159,7 +159,7 @@ instance HasFreeVariables HsExp where
     getFreeVariables (HsInfixApp e1 op e2) = S.insert (convertName op) <$> getFreeVariables [e1, e2]
     getFreeVariables (HsApp e1 e2)         = S.union <$> getFreeVariables e1 <*> getFreeVariables e2
     getFreeVariables (HsNegApp e)          = getFreeVariables e
-    getFreeVariables (HsLambda _ pats e)   = S.difference <$> getFreeVariables e <*> getBoundVariables pats
+    getFreeVariables (HsLambda _ pats e)   = S.difference <$> (S.union <$> getFreeVariables e <*> getFreeVariables pats) <*> getBoundVariables pats
     getFreeVariables (HsLet ds e)          = S.union <$> getFreeVariables ds <*> getFreeVariables e
     getFreeVariables (HsCase scrut alts)   = S.union <$> getFreeVariables scrut <*> getFreeVariables alts
     getFreeVariables (HsIf e1 e2 e3)       = getFreeVariables [e1, e2, e3]
@@ -175,7 +175,7 @@ instance HasFreeVariables HsPat where
     getFreeVariables (HsPNeg p)              = getFreeVariables p
     getFreeVariables (HsPParen p)            = getFreeVariables p
     getFreeVariables (HsPIrrPat p)           = getFreeVariables p
-    getFreeVariables (HsPAsPat v p)          = S.insert (convertName v) <$> getFreeVariables p
+    getFreeVariables (HsPAsPat _ p)          = getFreeVariables p
     getFreeVariables (HsPInfixApp p1 con p2) = S.insert (convertName con) <$> getFreeVariables [p1, p2]
     getFreeVariables (HsPApp con ps)         = S.insert (convertName con) <$> getFreeVariables ps
     getFreeVariables (HsPTuple ps)           = S.insert (VariableName $ makeTupleName $ length ps) <$> getFreeVariables ps
@@ -214,7 +214,14 @@ instance HasFreeTypeConstants HsDecl where
     getFreeTypeConstants (HsInstDecl _ _ name ts ds) =
             S.unions [S.singleton $ convertName name, getFreeTypeConstants ts, getFreeTypeConstants ds]
     getFreeTypeConstants (HsTypeSig _ _ t)        = getFreeTypeConstants t
+    getFreeTypeConstants (HsDataDecl _ _ _ _ cons _) = getFreeTypeConstants cons
     getFreeTypeConstants _                        = S.empty
+instance HasFreeTypeConstants HsConDecl where
+    getFreeTypeConstants (HsConDecl _ _ ts) = getFreeTypeConstants ts
+    getFreeTypeConstants HsRecDecl{} = error "recdecl"
+instance HasFreeTypeConstants HsBangType where
+    getFreeTypeConstants (HsBangedTy t) = getFreeTypeConstants t
+    getFreeTypeConstants (HsUnBangedTy t) = getFreeTypeConstants t
 instance HasFreeTypeConstants HsQualType where
     getFreeTypeConstants (HsQualType quals t) = S.union qualConsts (getFreeTypeConstants t)
         where qualConsts = S.unions $ map (S.singleton . convertName . fst) quals
