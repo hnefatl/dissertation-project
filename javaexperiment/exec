@@ -1,3 +1,0 @@
-#!/bin/bash
-
-rm -f *.class && javac *.java && javap -c -p -v foo.class && java -cp . foo
