@@ -38,6 +38,12 @@ dependencies:
 - binary
 - filepath
 
+custom-setup:
+  dependencies:
+    - base
+    - Cabal
+    - process
+
 library:
   source-dirs: src
 
