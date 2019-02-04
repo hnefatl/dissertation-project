@@ -3,5 +3,6 @@ import System.Process (callCommand)
 
 main :: IO ()
 main = do
-    callCommand "javac -classpath runtime runtime/*.java"
+    -- TODO(kc506): Remove -g to disable debugging output
+    callCommand "javac -g -classpath runtime runtime/*.java"
     defaultMain

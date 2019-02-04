@@ -15,6 +15,7 @@ import           Data.Word                   (Word16)
 import           TextShow                    (TextShow, showb, showt)
 
 import qualified Java.Lang
+import qualified Java.IO
 import           JVM.Assembler
 import           JVM.Builder                 hiding (locals)
 import           JVM.ClassFile               hiding (Class, Field, Method, toString)

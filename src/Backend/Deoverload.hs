@@ -328,6 +328,7 @@ deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*>
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
 deoverloadExp (HsList  es) = HsList <$> mapM deoverloadExp es
 deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
+deoverloadExp (HsLet ds e) = HsLet <$> deoverloadDecls ds <*> deoverloadExp e
 deoverloadExp (HsCase scrut alts) = HsCase <$> deoverloadExp scrut <*> mapM deoverloadAlt alts
 -- We can ignore any qualifiers: any expression needing them further down the tree will have had the dictionaries passed
 -- appropriately and now just have the simple type: we should propagate this change up the tree.

@@ -306,16 +306,16 @@ compileExp (ExpApp fun args) = do
     invokeVirtual function enter
 compileExp (ExpConApp con args) = do
     ds <- gets datatypes
-    case find (\d -> con `elem` map fst (branches d)) ds of
+    datatype <- case find (\d -> con `elem` map fst (branches d)) ds of
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
-        Just datatype -> do
-            let cname = convertName (typeName datatype)
-                methodname = "_make" <> convertName con
-                methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
-                numArgs = length args
-            -- Push all the datatype arguments onto the stack then call the datatype constructor
-            forM_ args pushArg
-            invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
+        Just d -> return d
+    let cname = convertName (typeName datatype)
+        methodname = "_make" <> convertName con
+        methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
+        numArgs = length args
+    -- Push all the datatype arguments onto the stack then call the datatype constructor
+    forM_ args pushArg
+    invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
 compileExp (ExpCase head t vs alts) = do
     let headType = case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
@@ -334,8 +334,8 @@ compileExp (ExpCase head t vs alts) = do
     instanceOf headType
     i0 $ IF C_EQ 13 -- If instanceof returned 0, the head's not data. Jump to the "else" block
     do -- The "then" block
-        dup
         checkCast headType
+        dup
         getField headType boxedDataBranch
         goto 4 -- Jump past the "else" block
     do -- The "else" block

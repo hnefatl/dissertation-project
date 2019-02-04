@@ -3,4 +3,4 @@
 .vscode/
 compiler.cabal
 *~
-javaexperiment/*.class
+runtime/*.class

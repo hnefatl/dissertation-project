@@ -11,6 +11,7 @@ import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
+import           Data.Foldable               (foldrM)
 import           Data.List                   (foldl', intersperse)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
@@ -180,8 +181,11 @@ addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
 addRenamings :: M.Map VariableName VariableName -> Converter a -> Converter a
 addRenamings rens action = do
-    modify (\st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) })
-    local (\st -> st { renamings = M.union rens (renamings st) }) action
+    -- Permanently add reverse renamings for these, then run the given action with a temporarily modified state
+    modify $ \st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) }
+    writeLog . showt =<< asks types
+    renamedTypes <- fmap M.fromList $ forM (M.toList rens) $ \(k,v) -> (v,) <$> getType k
+    local (\st -> st { renamings = M.union rens (renamings st), types = M.union renamedTypes (types st) }) ((writeLog . showt =<< asks types) >> action)
 addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterReadableState -> ConverterReadableState
 addTypes ts state = state { types = M.union ts (types state) }
 addKinds :: M.Map TypeVariableName Kind -> Converter ()
@@ -277,6 +281,8 @@ toIla (HsModule _ _ _ _ decls) = do
     writeLog "-------"
     writeLog "- ILA -"
     writeLog "-------"
+    ts <- asks types
+    forM_ (M.toList ts) $ \(v,t) -> writeLog $ showt v <> " :: " <> showt t
     let mapper e = unlines [e, unlines $ map synPrint decls]
     mapError mapper $ concat <$> mapM declToIla decls
 
@@ -293,7 +299,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     let resultType  = T.makeTuple boundTypes
     resultTuple <- makeTuple (zip renamedExps boundTypes)
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    resultExpr <- addRenamings renames $ local (addTypes ts) $ do
+    resultExpr <- local (addTypes ts) $ addRenamings renames $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
         patToIla pat rhst rhsExpr resultTuple resultType
@@ -370,12 +376,18 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
-    body <- addRenamings renames $ local (addTypes renamedVariableTypes) $ do
+    body <- local (addTypes patVariableTypes) $ addRenamings renames $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
         patToIla p argType (Var argName argType) nextBody bodyType
     return (Lam argName argType body)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
-expToIla (HsLet _ _) = throwError "Let not yet supported"
+--expToIla (HsLet [] e) = expToIla e
+--expToIla (HsLet (d:ds) e) = do
+--    bs <- declToIla d
+--    body <- expToIla (HsLet ds e)
+--    let processBinding (NonRec v e') body' = writeLog (showt v <> " " <> showt e') >> Let v <$> getSimpleType v <*> pure e' <*> pure body'
+--        processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
+--    foldrM processBinding body bs
 expToIla (HsIf cond e1 e2) = do
     condExp <- expToIla cond
     e1Exp   <- expToIla e1
