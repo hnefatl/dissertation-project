@@ -4,3 +4,5 @@
 compiler.cabal
 *~
 runtime/*.class
+hoogle.log
+out/
