@@ -296,9 +296,7 @@ compileFunction name args body = do
             aaload
         -- The actual implementation of the function
         void $ newMethod implAccs (toLazyBytestring implName) implArgs (Returns heapObjectClass) $ do
-            printText $ convertName name
             compileExp body
-            printText $ "Returning from " <> convertName name
             i0 ARETURN
     let wrapperName = "_make" <> convertName name
         numFreeVars = S.size freeVars
@@ -331,7 +329,6 @@ compileExp (ExpConApp con args) = do
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
     invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
-    printTopOfStack
 compileExp (ExpCase head t vs alts) = do
     let headType = case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
@@ -339,12 +336,8 @@ compileExp (ExpCase head t vs alts) = do
             _ -> boxedData -- If it's not a datatype, pretend it's boxed data
     writeLog $ showt $ Types.unmakeApp t
     compileExp head
-    printText "head"
-    printTopOfStack
     -- Evaluate the expression
     invokeVirtual heapObject enter
-    printText "entered head"
-    printTopOfStack
     -- Bind each extra variable to the head
     forM_ vs $ \var -> do
         dup -- Copy the head expression

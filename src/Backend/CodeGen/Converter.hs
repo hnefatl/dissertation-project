@@ -217,13 +217,12 @@ compileMakerFunction name arity numFreeVars implName = do
 -- |Consume initialisers from the state list until there are none left. We iterate them one at a time in case an
 -- initialiser adds more initialisers to the list: we want to process these as well.
 performInitialisers :: Converter ()
-performInitialisers = do
-    gets initialisers >>= \case
-        [] -> return ()
-        init:inits -> do
-            modify $ \s -> s { initialisers = inits }
-            init
-            performInitialisers
+performInitialisers = gets initialisers >>= \case
+    [] -> return ()
+    init:inits -> do
+        modify $ \s -> s { initialisers = inits }
+        init
+        performInitialisers
 
 pushArg :: Arg -> Converter ()
 pushArg (ArgLit l) = pushLit l

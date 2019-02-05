@@ -17,24 +17,18 @@ public class Function extends HeapObject {
 
     @Override
     public HeapObject enter() {
-        HeapObject out;
         if (arguments.size() < arity) {
-            //return this; // If we're not fully applied, we get a partially applied function
-            out = this;
+            return this; // If we're not fully applied, we get a partially applied function
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
             Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables).enter();
             for (HeapObject arg : arguments.subList(arity, arguments.size()))
                 result.addArgument(arg);
-            //return result;
-            out = result;
+            return result;
         }
         else { // Perfect number of arguments
-            //return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
-            out = inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
+            return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables).enter();
         }
-        System.out.println("Function output: " + String.valueOf(out));
-        return out;
     }
 
     public void addArgument(HeapObject arg) {
@@ -54,7 +48,7 @@ public class Function extends HeapObject {
 
     @Override
     public String toString() {
-        String res = "Function: { args: {";
+        String res = "Function: { arity: " + arity + ", args: {";
         for (HeapObject a : arguments) {
             res += " " + String.valueOf(a);
         }
