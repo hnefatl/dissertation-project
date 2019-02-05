@@ -43,7 +43,6 @@ import           Logger                         (LoggerT, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
 import qualified Preprocessor.ContainedNames    as ContainedNames
-import           Typechecker.Hardcoded          (builtinFunctions)
 import qualified Typechecker.Types              as Types
 
 writeClass :: FilePath -> NamedClass -> IO ()
@@ -53,9 +52,7 @@ freeVariables :: ContainedNames.HasFreeVariables a => VariableName -> [VariableN
 freeVariables name args x = do
     fvs <- liftErrorText $ ContainedNames.getFreeVariables x
     tls <- gets (M.keysSet . topLevelSymbols)
-    -- TODO(kc506): remove these when we remove hardcoded stuff
-    let bfs = M.keysSet builtinFunctions
-    return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls, bfs])
+    return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls])
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file

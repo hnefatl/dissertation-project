@@ -404,17 +404,19 @@ expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
 
--- Need to handle any pattern, not just this subset. So need to find a way to reuse patToIla to construct alts....
--- Handle anything other than these types by using patToIla and using altToIla in the body?
+-- Big TODO(kc506): Need to handle any pattern, not just this subset. So need to find a way to reuse patToIla to
+-- construct alts.... Handle anything other than these types by using patToIla and using altToIla in the body?
 altToIla :: HsAlt -> Converter (Alt Expr)
 altToIla (HsAlt _ pat alts wheres) = helper pat
     where helper p = case p of
-            HsPApp con vs -> Alt (DataCon (convertName con) []) <$> guardedAltsToIla alts
-            HsPInfixApp p1 con p2 -> Alt (DataCon (convertName con) []) <$> guardedAltsToIla alts
+            HsPApp con vs -> Alt (DataCon (convertName con) (map patToVar vs)) <$> guardedAltsToIla alts
+            HsPInfixApp p1 con p2 -> Alt (DataCon (convertName con) [patToVar p1, patToVar p2]) <$> guardedAltsToIla alts
             HsPLit l      -> Alt <$> (LitCon <$> litToIla l) <*> guardedAltsToIla alts
             HsPWildCard   -> Alt Default <$> guardedAltsToIla alts
             HsPParen p'   -> helper p'
             _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
+          patToVar (HsPVar v) = convertName v
+          patToVar _ = error "Non-variable in ILA, need to rework case alt patterns"
 
 guardedAltsToIla :: HsGuardedAlts -> Converter Expr
 guardedAltsToIla (HsUnGuardedAlt e) = expToIla e

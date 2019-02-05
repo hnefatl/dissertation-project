@@ -110,7 +110,6 @@ pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
 pushGlobalSymbol v t = do
     writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
-    renames <- gets reverseRenames
     getStaticField cname $ NameType { ntName = toLazyBytestring $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
