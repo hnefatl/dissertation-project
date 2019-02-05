@@ -91,6 +91,19 @@ convert cname primitiveClassDir bs main reverseRenames ds = do
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
 
+printTopOfStack :: MonadGenerator m => m ()
+printTopOfStack = do
+    dup
+    getStaticField Java.Lang.system Java.IO.out
+    JVM.Builder.swap
+    invokeVirtual Java.Lang.object toString
+    invokeVirtual Java.IO.printStream Java.IO.println
+printText :: MonadGenerator m => Text -> m ()
+printText t = do
+    getStaticField Java.Lang.system Java.IO.out
+    loadString $ unpack t
+    invokeVirtual Java.IO.printStream Java.IO.println
+
 loadPrimitiveClasses :: MonadIO m => FilePath -> m [Tree CPEntry]
 loadPrimitiveClasses dirPath = liftIO $ execClassPath (mapM_ (loadClass . (dirPath </>)) classes)
     where classes = ["HeapObject", "Function"]
@@ -100,7 +113,7 @@ addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
         -- Perform any initialisation actions
-        sequence_ =<< gets initialisers
+        performInitialisers
         getStaticField Java.Lang.system Java.IO.out
         main <- jvmSanitise <$> gets mainName
         pushGlobalSymbol main heapObjectClass
@@ -283,7 +296,9 @@ compileFunction name args body = do
             aaload
         -- The actual implementation of the function
         void $ newMethod implAccs (toLazyBytestring implName) implArgs (Returns heapObjectClass) $ do
+            printText $ convertName name
             compileExp body
+            printText $ "Returning from " <> convertName name
             i0 ARETURN
     let wrapperName = "_make" <> convertName name
         numFreeVars = S.size freeVars
@@ -316,6 +331,7 @@ compileExp (ExpConApp con args) = do
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
     invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
+    printTopOfStack
 compileExp (ExpCase head t vs alts) = do
     let headType = case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
@@ -323,8 +339,12 @@ compileExp (ExpCase head t vs alts) = do
             _ -> boxedData -- If it's not a datatype, pretend it's boxed data
     writeLog $ showt $ Types.unmakeApp t
     compileExp head
+    printText "head"
+    printTopOfStack
     -- Evaluate the expression
     invokeVirtual heapObject enter
+    printText "entered head"
+    printTopOfStack
     -- Bind each extra variable to the head
     forM_ vs $ \var -> do
         dup -- Copy the head expression
@@ -339,7 +359,9 @@ compileExp (ExpCase head t vs alts) = do
         getField headType boxedDataBranch
         goto 4 -- Jump past the "else" block
     do -- The "else" block
-        iconst_0
+        -- Not a data type, so we give a branch value of -1: no datatype can have that branch value, so we'll always
+        -- take the default branch
+        iconst_m1
     -- Compile the actual case expression
     compileCase headType alts
 compileExp (ExpLet var rhs body) = do
@@ -357,17 +379,18 @@ compileCase headType as = do
     -- altKeys are the branch numbers of each alt's constructor
     (altKeys, alts) <- unzip <$> sortAlts otherAlts
     s <- get
-    let processAlt (Alt c e) = unwrap $ bindDataVariables headType (getConstructorVariables c) >> compileExp e
+    let unwrap (Converter x) = x
+        processAlt (Alt c e) = unwrap $ do
+            bindDataVariables headType (getConstructorVariables c)
+            compileExp e
         defaultAltGenerator = processAlt defaultAlt
         altGenerators = map processAlt alts
-        unwrap (Converter x) = x
         runner x = evalStateT x s
     Converter $ lookupSwitchGeneral runner defaultAltGenerator (zip altKeys altGenerators)
-
 -- TODO(kc506): Change to `Maybe VariableName` to allow us to compile `Alt`s without storing all their data parameters,
 -- only the ones we use.
 bindDataVariables :: B.ByteString -> [VariableName] -> Converter ()
-bindDataVariables _ [] = return ()
+bindDataVariables _ [] = pop
 bindDataVariables headType vs = do
     -- Replace the head expression with a ref to its data array
     getField headType boxedDataData

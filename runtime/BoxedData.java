@@ -7,9 +7,21 @@ public abstract class BoxedData extends Data {
     public String toString() {
         String res = "Data: { branch: " + String.valueOf(branch) + ", data {";
         for (HeapObject o : data) {
-            res += " " + o.toString();
+            res += " " + String.valueOf(o);
         }
         res += " } }";
         return res;
+    }
+
+    private static Boolean forced = false;
+    @Override
+    public HeapObject force() {
+        if (!forced) {
+            forced = true;
+            for (HeapObject o : data) {
+                o.force();
+            }
+        }
+        return this;
     }
 }

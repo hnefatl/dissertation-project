@@ -18,16 +18,16 @@ compilerGeneratedHooks :: M.Map (S.Set VariableName) (Text -> Converter ())
 compilerGeneratedHooks = M.fromList
     [ (S.fromList ["_compilerErrorImpl", "_makeCompilerError", "_compilerError"], \cname -> do
         -- Create a function to force a crash
-        void $ newMethod [ACC_PUBLIC, ACC_STATIC] "_compilerErrorImpl" [] ReturnsVoid $ do
+        void $ newMethod [ACC_PUBLIC, ACC_STATIC] "_compilerErrorImpl" args ret $ do
             -- Create a new exception and throw it
             new runtimeException
             dup
-            ldc1 (CUTF8 "Compiler error :(") -- Load the error message from the constant pool
+            loadString "Compiler error :("
             invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
             throw
         -- Make a function to create a Function object of the crasher
         -- TODO(kc506): If we switch to makeFunction1, makeFunction2 etc, replace this
-        makeImpl <- compileMakerFunction "_makeCompilerError" 1 0 "_compilerErrorImpl"
+        makeImpl <- compileMakerFunction "_makeCompilerError" 0 0 "_compilerErrorImpl"
         -- Create a field we can treat as a variable in the program to call the crasher
         void $ makePublicStaticField "_compilerError" heapObjectClass $ \field -> do
             -- Store the Function object wrapping the implementation function in the field
@@ -35,3 +35,5 @@ compilerGeneratedHooks = M.fromList
             putStaticField (toLazyBytestring cname) field
       )
     ]
+    where args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
+          ret = Returns heapObjectClass

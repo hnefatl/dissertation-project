@@ -17,21 +17,24 @@ public class Function extends HeapObject {
 
     @Override
     public HeapObject enter() {
-        System.out.println("Entering " + inner.toString());
+        HeapObject out;
         if (arguments.size() < arity) {
-            return this; // If we're not fully applied, we get a partially applied function
+            //return this; // If we're not fully applied, we get a partially applied function
+            out = this;
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
-            System.out.println("Overapplied: " + arguments.size() + " args");
             Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables).enter();
             for (HeapObject arg : arguments.subList(arity, arguments.size()))
                 result.addArgument(arg);
-            return result;
+            //return result;
+            out = result;
         }
         else { // Perfect number of arguments
-            System.out.println("Perfect application: " + arguments.size() + " args");
-            return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
+            //return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
+            out = inner.apply(arguments.toArray(new HeapObject[0]), freeVariables);
         }
+        System.out.println("Function output: " + String.valueOf(out));
+        return out;
     }
 
     public void addArgument(HeapObject arg) {
@@ -45,7 +48,7 @@ public class Function extends HeapObject {
         f.inner = inner;
         f.arity = arity;
         f.freeVariables = freeVariables.clone();
-        f.arguments = (ArrayList<HeapObject>)arguments.clone();
+        f.arguments = new ArrayList<>(arguments);
         return f;
     }
 
@@ -53,11 +56,11 @@ public class Function extends HeapObject {
     public String toString() {
         String res = "Function: { args: {";
         for (HeapObject a : arguments) {
-            res += " " + a.toString();
+            res += " " + String.valueOf(a);
         }
         res += " }, freeVars: {";
         for (HeapObject a : freeVariables) {
-            res += " " + a.toString();
+            res += " " + String.valueOf(a);
         }
         res += " } }";
 
