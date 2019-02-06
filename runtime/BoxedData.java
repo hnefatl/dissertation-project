@@ -13,14 +13,12 @@ public abstract class BoxedData extends Data {
         return res;
     }
 
-    private static Boolean forced = false;
+    private Boolean forced = false;
     @Override
     public HeapObject force() {
         if (!forced) {
             forced = true;
-            for (HeapObject o : data) {
-                o.force();
-            }
+            data = java.util.Arrays.stream(data).map(d -> d.force()).toArray(HeapObject[]::new);
         }
         return this;
     }

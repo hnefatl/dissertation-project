@@ -31,6 +31,11 @@ public class Function extends HeapObject {
         }
     }
 
+    @Override
+    public HeapObject force() {
+        return enter().force();
+    }
+
     public void addArgument(HeapObject arg) {
         arguments.add(arg);
     }

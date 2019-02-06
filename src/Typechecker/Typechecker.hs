@@ -355,9 +355,11 @@ inferExpression (HsApp f e) = do
     unify (makeFun [argType] retType) funType
     makeExpTypeWrapper (HsApp funExp argExp) retVar
 inferExpression (HsInfixApp lhs op rhs) = do
-    let VariableName name = convertName op
+    let op' = case op of
+            HsQVarOp n -> HsVar n
+            HsQConOp n -> HsCon n
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
-    inferExpression (HsApp (HsApp (HsVar $ UnQual $ HsIdent $ unpack name) lhs) rhs)
+    inferExpression (HsApp (HsApp op' lhs) rhs)
 inferExpression (HsTuple exps) = do
     (argExps, argVars) <- mapAndUnzipM inferExpression exps
     argTypes <- mapM nameToType argVars
