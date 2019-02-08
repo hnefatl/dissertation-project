@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE TupleSections              #-}
 
@@ -12,7 +14,8 @@ import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local,
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
 import           Data.Foldable               (foldrM)
-import           Data.List                   (foldl', intersperse)
+import           Data.List.Extra             (foldl', intersperse, groupOn)
+import           Data.Tuple.Extra            (fst3, snd3, thd3)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import qualified Data.Text                   as Text
@@ -21,7 +24,7 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (inverseMap, mapError, middleText, synPrint)
+import           ExtraDefs                   (inverseMap, mapError, middleText, synPrint, allM)
 import           Logger
 import           NameGenerator
 import           Names
@@ -29,6 +32,7 @@ import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariable
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
+import Typechecker.Substitution (Substitutable, NameSubstitution, Substitution(..), applySub, subCompose, subComposes, subSingle, subEmpty)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -40,13 +44,13 @@ instance TextShow Strictness where
 data Datatype = Datatype
     { typeName   :: TypeVariableName
     , parameters :: [TypeVariableName]
-    , branches   :: [(VariableName, [(Type, Strictness)])] }
+    , branches   :: M.Map VariableName [(Type, Strictness)] }
     deriving (Eq, Ord, Show)
 instance TextShow Datatype where
     showb = fromString . show
 
 getBranchNames :: Datatype -> S.Set VariableName
-getBranchNames d = S.fromList $ map fst $ branches d
+getBranchNames = M.keysSet . branches
 
 -- TODO(kc506): Not sure if we need... maybe for instances?
 data Typeclass = Typeclass
@@ -302,7 +306,8 @@ declToIla (HsPatBind _ pat rhs _) = do
     resultExpr <- local (addTypes ts) $ addRenamings renames $ do
         rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
-        patToIla pat rhst rhsExpr resultTuple resultType
+        argName <- freshVarName
+        patToIla [(argName, rhst)] [([pat], rhsExpr, rhst, subEmpty)] (makeError rhst)
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
     -- For each bound name, generate a binding that extracts the variable from the result tuple
@@ -321,7 +326,7 @@ declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been remov
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do
         writeLog $ "Processing datatype " <> showt name
-        bs' <- mapM conDeclToBranch bs
+        bs' <- M.fromList <$> mapM conDeclToBranch bs
         addDatatype $ Datatype
             { typeName = convertName name
             , parameters = map convertName args
@@ -378,7 +383,9 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addTypes patVariableTypes) $ addRenamings renames $ do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
-        patToIla p argType (Var argName argType) nextBody bodyType
+        --patToIla p argType (Var argName argType) nextBody bodyType
+        -- Probably just need a single lambda processor now? Can handle multiple pattern so.
+        patToIla [(argName, rhst)] [([pat], rhsExpr, rhst, subEmpty)] (makeError rhst)
     return (Lam argName argType body)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
@@ -429,35 +436,80 @@ litToIla (HsInt i)    = return $ LiteralInt i  -- Replace with fromInteger to ca
 litToIla (HsFrac r)   = return $ LiteralFrac r
 litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
 
--- |Lowers a pattern match on a given expression with a given body expression into the core equivalent
--- We convert a pattern match on a variable into a case statement that binds the variable to the head and always
--- defaults to the body.
--- We convert a constructor application by recursively converting the sub-pattern-matches then chaining them with
--- matching this data constructor.
--- The result is a massive mess of case statements. They are composable though, which is useful for building larger
--- expressions, and we can prune redundant/overly complicated substructures in an optimisation pass if necessary.
-patToIla :: HsPat -> Type -> Expr -> Expr -> Type -> Converter Expr
-patToIla (HsPVar n) _ head body _ = do
-    renamedVar <- getRenamed $ convertName n
-    return $ Case head [renamedVar] [Alt Default body]
-patToIla (HsPLit l) _ head body _ = throwError "Need to figure out dictionary passing before literals"
-patToIla (HsPApp con args) t head body bodyType = do
-    argNames <- replicateM (length args) freshVarName
-    let (_, argTypes) = T.unmakeApp t
-        argExpTypes = zipWith3 (\p n t' -> (p, Var n t', t')) args argNames argTypes
-    body' <- foldM (\body' (pat, head', t') -> patToIla pat t' head' body' bodyType) body argExpTypes
-    return $ Case head [] [ Alt (DataCon (convertName con) argNames) body', Alt Default $ makeError bodyType ]
-patToIla HsPTuple{} _ _ _ _ = throwError "HsPTuple should've been removed in the renamer"
-patToIla HsPList{} _ _ _ _ = throwError "HsPTuple should've been removed in the renamer"
-patToIla (HsPParen pat) t head body bodyType = patToIla pat t head body bodyType
-patToIla (HsPAsPat name pat) t head body bodyType = do
-    expr <- patToIla pat t head body bodyType
-    asArgName <- getRenamed (convertName name)
-    case expr of
-        Case head' captures alts' -> return $ Case head' (asArgName : captures) alts'
-        _                         -> throwError "@ pattern binding non-case translation"
-patToIla HsPWildCard _ head body _ = return $ Case head [] [Alt Default body]
-patToIla p _ _ _ _ = throwError $ "Unsupported pattern: " <> showt p
+
+-- Implemented as in "The Implementation of Functional Programming Languages"
+patToIla :: [(VariableName, Type)] -> [([HsPat], Expr, Type, NameSubstitution)] -> Expr -> Converter Expr
+patToIla _ [] def = return def
+patToIla [] (([], e, _, sub):_) _ =
+    -- TODO(kc506): If the first case can fail somehow, we need to use the later ones? Weird notation in the book
+    return $ applySub sub e
+patToIla ((v, t):vs) cs def = do
+    let getPat (x:_, _, _, _) = x
+        allPatType pt = allM (fmap (== pt) . getPatType . getPat)
+    pats <- mapM (reducePats v) cs
+    allVariable <- allPatType Variable pats
+    allLiteral <- allPatType Literal pats
+    allCon <- allPatType Constructor pats
+    if allVariable then do
+        -- Extract the variable names `ns` from the patterns, get the new cases `cs'`
+        cs' <- forM cs $ \(pl, e, et, sub) -> case pl of
+            HsPVar n:ps -> return (ps, e, et, subCompose sub $ subSingle (convertName n) v)
+            [] -> throwError "Internal: wrong patterns length"
+            _ -> throwError "Non-HsPVar in variables"
+        patToIla vs cs' def
+    else if allLiteral then
+        -- Not supported yet...
+        throwError "Literals in pattern match in ILA"
+    else if allCon then do
+        conGroups <- groupPatCons getPat cs
+        alts <- forM conGroups $ \(con, es) -> do
+            cont <- asks (M.lookup con . types) >>= \case
+                Just (Quantified _ t) -> return t
+                Nothing -> throwError $ "No type for constructor " <> showt con
+            (args, _) <- T.unmakeFun cont
+            freshArgVars <- replicateM (length args) freshVarName
+            body <- patToIla (zip freshArgVars args <> vs) es def
+            return $ Alt (DataCon con freshArgVars) body
+        let defaultAlt = Alt Default def
+        return $ Case (Var v t) [] (defaultAlt:alts)
+    else -- Mixture of variables/literals/constructors
+        throwError "Not implemented yet in patToIla"
+
+-- Get the type of each pattern:
+data PatType = Variable | Constructor | Literal
+    deriving (Eq)
+getPatType :: MonadError Text m => HsPat -> m PatType
+getPatType HsPVar{} = return Variable
+getPatType HsPWildCard = return Variable
+getPatType HsPLit{} = return Literal
+getPatType HsPApp{} = return Constructor
+getPatType p = throwError $ "Illegal pattern " <> showt p
+
+-- |Group items by their pattern type
+groupPatsOn :: MonadError Text m => (a -> HsPat) -> [a] -> m [(PatType, [a])]
+groupPatsOn f xl = do
+    grouped <- groupOn fst <$> mapM (\x -> fmap (,x) $ getPatType $ f x) xl
+    return $ map (\((p, x):xs) -> (p, x:map snd xs)) grouped
+
+-- |Reorder and group the items so that each group contains all items with the same constructor
+groupPatCons :: (MonadError Text m, Eq a) => (a -> HsPat) -> [a] -> m [(VariableName, [a])]
+groupPatCons f xl = do
+    tagged <- forM xl $ \x -> case f x of
+        HsPApp n ps -> return (convertName n, x)
+        _ -> throwError "Non-constructor in rearrangePatCons"
+    return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortBy (comparing fst) tagged
+
+-- |Reduce patterns so that the root of each pattern is a variable/literal/constructor
+reducePats :: MonadError Text m => VariableName -> ([HsPat], Expr, Type, NameSubstitution) -> m ([HsPat], Expr, Type, NameSubstitution)
+reducePats _ x@([], _, _, _) = return x
+reducePats v (p:ps, e, t', s) = case p of
+    HsPInfixApp x1 op x2 -> return (HsPApp op [x1, x2]:ps, e, t', s)
+    HsPParen x -> reducePats v (x:ps, e, t', s)
+    HsPAsPat n x -> reducePats v (x:ps, e, t', subCompose s $ subSingle (convertName n) v)
+    HsPTuple{} -> throwError "HsPTuple should've been removed in the renamer"
+    HsPList{} -> throwError "HsPList should've been removed in the renamer"
+    _ -> return (p:ps, e, t', s)
+
 
 instance HasFreeVariables a => HasFreeVariables (Alt a) where
     getFreeVariables (Alt c e) = S.difference <$> getFreeVariables e <*> getFreeVariables c
@@ -477,3 +529,15 @@ instance HasBoundVariables (Binding a) where
 instance HasFreeVariables a => HasFreeVariables (Binding a) where
     getFreeVariables (NonRec v e) = S.delete v <$> getFreeVariables e
     getFreeVariables (Rec m)      = fmap S.unions $ forM (M.toList m) $ \(v, e) -> S.delete v <$> getFreeVariables e
+
+instance Substitutable VariableName VariableName Expr where
+    applySub (Substitution sub) (Var v t) = Var (M.findWithDefault v v sub) t
+    applySub (Substitution sub) (Con v t) = Con (M.findWithDefault v v sub) t
+    applySub _ l@Lit{} = l
+    applySub sub (App e1 e2) = App (applySub sub e1) (applySub sub e2)
+    applySub sub (Lam v t e) = Lam v t (applySub sub e)
+    applySub sub (Let v t e b) = Let v t (applySub sub e) (applySub sub b)
+    applySub sub (Case e vs as) = Case (applySub sub e) vs (applySub sub as)
+    applySub _ t@Type{} = t
+instance Substitutable a b c => Substitutable a b (Alt c) where
+    applySub sub (Alt c x) = Alt c (applySub sub x)

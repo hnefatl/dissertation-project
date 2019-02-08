@@ -1,6 +1,8 @@
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds       #-}
 
 module Typechecker.Substitution where
 
@@ -16,67 +18,71 @@ import           Names
 import           Typechecker.Types
 
 -- |A substitution is a collection of assignments of a type to a variable
-newtype Substitution = Substitution (M.Map TypeVariableName Type) deriving (Eq)
+newtype Substitution a b = Substitution (M.Map a b) deriving (Eq)
+type TypeSubstitution = Substitution TypeVariableName Type
+type NameSubstitution = Substitution VariableName VariableName
 
-instance Default Substitution where
+instance Default (Substitution a b) where
     def = Substitution M.empty
 
-instance TextShow Substitution where
+instance (TextShow a, TextShow b) => TextShow (Substitution a b) where
     showb (Substitution subs) = "[" <> mconcat (intersperse ", " prettyElements) <> "]"
         where prettyElements = map (\(k, v) -> "(" <> showb v <> ")/" <> showb k) $ M.toList subs
-instance Show Substitution where
+instance (TextShow a, TextShow b) => Show (Substitution a b) where
     show = unpack . showt
 
-class Substitutable t where
+class Substitutable a b t where
     -- |Apply the given type variable -> type substitution
-    applySub :: Substitution -> t -> t
+    applySub :: Substitution a b -> t -> t
+type TypeSubstitutable = Substitutable TypeVariableName Type
 
--- |We only allow substitutions on instantiated variables: not on uninstantiated (dummy) ones
--- Building up substitutions on types with unintentionally overlapping variable names causes invalid unifications etc.
-instance Substitutable Type where
+instance Ord a => Substitutable a a a where
+    applySub (Substitution subs) v = M.findWithDefault v v subs
+
+instance Substitutable TypeVariableName Type Type where
     applySub (Substitution subs) t@(TypeVar (TypeVariable name _)) = M.findWithDefault t name subs
     applySub (Substitution subs) t@(TypeCon (TypeConstant name _)) = M.findWithDefault t name subs
-    applySub sub (TypeApp t1 t2 kind)                              = TypeApp (applySub sub t1) (applySub sub t2) kind
-instance Substitutable TypePredicate where
+    applySub sub (TypeApp t1 t2 k)                              = TypeApp (applySub sub t1) (applySub sub t2) k
+instance Substitutable TypeVariableName Type TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
-instance Substitutable a => Substitutable (Qualified a) where
+instance TypeSubstitutable a => Substitutable TypeVariableName Type (Qualified a) where
     applySub sub (Qualified ps x) = Qualified (applySub sub ps) (applySub sub x)
-instance (Ord t, Substitutable t) => Substitutable (S.Set t) where
+instance (Ord c, Substitutable a b c) => Substitutable a b (S.Set c) where
     applySub subs = S.map (applySub subs)
-instance (Ord t, Substitutable t) => Substitutable (M.Map a t) where
+instance (Ord c, Substitutable a b d) => Substitutable a b (M.Map c d) where
     applySub subs = M.map (applySub subs)
-instance Substitutable t => Substitutable [t] where
+instance Substitutable a b c => Substitutable a b [c] where
     applySub subs = map (applySub subs)
-instance (Substitutable a, Substitutable b) => Substitutable (a, b) where
+instance (Substitutable a b c, Substitutable a b d) => Substitutable a b (c, d) where
     applySub sub (a, b) = (applySub sub a, applySub sub b)
-instance Substitutable b => Substitutable (Either a b) where
+instance Substitutable a b d => Substitutable a b (Either c d) where
     applySub sub = fmap (applySub sub)
-instance Substitutable a => Substitutable (Maybe a) where
+instance Substitutable a b c => Substitutable a b (Maybe c) where
     applySub sub = fmap (applySub sub)
 
-subEmpty :: Substitution
+subEmpty :: Substitution a b
 subEmpty = def
 
-subSingle :: TypeVariableName -> Type -> Substitution
+subSingle :: Ord a => a -> b -> Substitution a b
 subSingle v t = Substitution (M.singleton v t)
 
-subMultiple :: [(TypeVariableName, Type)] -> Substitution
+subMultiple :: (Ord a, Substitutable a b b) => [(a, b)] -> Substitution a b
 subMultiple = subComposes . map (uncurry subSingle)
 
 
 -- |Composition of substitutions
 --
 -- > (s1 `subCompose` s2) `applySub` <exp> = (s1 . s2)<exp> = s2(s1<exp>)
-subCompose :: Substitution -> Substitution -> Substitution
+subCompose :: (Ord a, Substitutable a b b) => Substitution a b -> Substitution a b -> Substitution a b
 subCompose (Substitution subs1) s2@(Substitution subs2) = Substitution (M.union subs1' subs2)
     where subs1' = M.map (applySub s2) subs1
 
-subComposes :: [Substitution] -> Substitution
+subComposes :: (Ord a, Substitutable a b b) => [Substitution a b] -> Substitution a b
 subComposes = foldl' subCompose subEmpty
 
 -- |Merging of substitutions (the intersections of the type variables from each substitution must produce the same
 -- results, the rest can do whatever).
-subMerge :: MonadError Text m => Substitution -> Substitution -> m Substitution
+subMerge :: (Ord a, Eq b, MonadError Text m, Substitutable a b b) => Substitution a b -> Substitution a b -> m (Substitution a b)
 subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
     if agree then return $ Substitution (M.union subs1 subs2) else throwError "Conflicting substitutions"
     where agree = all subsGiveSameResult (M.keys $ M.intersection subs1 subs2)
@@ -84,5 +90,5 @@ subMerge s1@(Substitution subs1) s2@(Substitution subs2) =
           -- Ensures that eg. `[b/a, Int/b]` and `c/a, Int/c]` are merged
           subsGiveSameResult var = fmap (applySub s2) (M.lookup var subs1) == fmap (applySub s1) (M.lookup var subs2)
 
-subMerges :: MonadError Text m => [Substitution] -> m Substitution
+subMerges :: (Ord a, Eq b, MonadError Text m, Substitutable a b b) => [Substitution a b] -> m (Substitution a b)
 subMerges = foldM subMerge subEmpty

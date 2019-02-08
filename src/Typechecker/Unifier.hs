@@ -15,11 +15,11 @@ import           TextShow.Instances       ()
 import           Typechecker.Substitution
 import           Typechecker.Types
 
-class (Ord t, TextShow t, Substitutable t) => Unifiable t where
+class (Ord t, TextShow t, TypeSubstitutable t) => Unifiable t where
     -- |Most general unifier of two types
-    mgu :: MonadError Text m => t -> t -> m Substitution
+    mgu :: MonadError Text m => t -> t -> m TypeSubstitution
     -- |Unification only applied to the first parameter (only type variables in $1 are unified)
-    match :: MonadError Text m => t -> t -> m Substitution
+    match :: MonadError Text m => t -> t -> m TypeSubstitution
 
     hasMgu :: t -> t -> Bool
     hasMgu x y = isRight (mgu x y)
