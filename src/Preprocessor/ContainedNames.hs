@@ -1,5 +1,5 @@
-{-# Language FlexibleContexts  #-}
-{-# Language FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 -- |Utility functions for getting variable names from the parse tree
 module Preprocessor.ContainedNames where
@@ -7,16 +7,16 @@ module Preprocessor.ContainedNames where
 import           BasicPrelude
 import           Control.Monad.Except    (MonadError, throwError)
 import           Data.Foldable           (foldlM)
-import qualified Data.Set                as S
 import qualified Data.Map.Strict         as M
+import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
 import           Language.Haskell.Syntax
 import           TextShow                (showt)
 
 import           ExtraDefs               (synPrint)
 import           Names
-import           Typechecker.Types       (Type(..), TypeVariable(..), Qualified(..), TypePredicate(..))
 import           Tuples                  (makeTupleName)
+import           Typechecker.Types       (Qualified(..), Type(..), TypePredicate(..), TypeVariable(..))
 
 
 type VariableConflictInfo = M.Map VariableName (S.Set ConflictInfo)
@@ -34,7 +34,7 @@ disjointInserts :: MonadError Text m => VariableName -> S.Set ConflictInfo -> Va
 disjointInserts v cs m = foldlM (flip $ disjointInsert v) m cs
 
 disjointUnion :: MonadError Text m => VariableConflictInfo -> VariableConflictInfo -> m VariableConflictInfo
-disjointUnion m1 m2 = foldM (\m (v, cs) -> disjointInserts v cs m) m2 (M.toList m1) 
+disjointUnion m1 m2 = foldM (\m (v, cs) -> disjointInserts v cs m) m2 (M.toList m1)
 
 disjointUnions :: (MonadError Text m, Foldable f) => f VariableConflictInfo -> m VariableConflictInfo
 disjointUnions = foldlM disjointUnion M.empty
@@ -46,23 +46,23 @@ data ConflictInfo = SymDef | SymType | ClassSymDef Text | ClassSymType Text | In
 -- |Predicate should return True iff a bound variable with the first conflict info would conflict with a bound variable
 -- in the same scope with the second conflict info. Predicate must be symmetric otherwise the world will end.
 conflict :: ConflictInfo -> ConflictInfo -> Bool
-conflict SymDef SymDef = True
-conflict SymDef ClassSymDef{} = True
-conflict SymDef ClassSymType{} = True
-conflict SymDef InstSymDef{} = True
-conflict SymType ClassSymDef{} = True
-conflict SymType ClassSymType{} = True
-conflict SymType InstSymDef{} = True
-conflict ClassSymDef{} SymDef = True
-conflict ClassSymDef{} SymType = True
-conflict (ClassSymDef c1) (ClassSymDef c2) = c1 /= c2
-conflict ClassSymType{} SymDef = True
-conflict ClassSymType{} SymType = True
-conflict (ClassSymType c1) (ClassSymType c2) = c1 /= c2
-conflict InstSymDef{} SymDef = True
-conflict InstSymDef{} SymType = True
+conflict SymDef SymDef                         = True
+conflict SymDef ClassSymDef{}                  = True
+conflict SymDef ClassSymType{}                 = True
+conflict SymDef InstSymDef{}                   = True
+conflict SymType ClassSymDef{}                 = True
+conflict SymType ClassSymType{}                = True
+conflict SymType InstSymDef{}                  = True
+conflict ClassSymDef{} SymDef                  = True
+conflict ClassSymDef{} SymType                 = True
+conflict (ClassSymDef c1) (ClassSymDef c2)     = c1 /= c2
+conflict ClassSymType{} SymDef                 = True
+conflict ClassSymType{} SymType                = True
+conflict (ClassSymType c1) (ClassSymType c2)   = c1 /= c2
+conflict InstSymDef{} SymDef                   = True
+conflict InstSymDef{} SymType                  = True
 conflict (InstSymDef c1 t1) (InstSymDef c2 t2) = (c1 == c2) /= (t1 == t2) -- xor
-conflict _ _ = False
+conflict _ _                                   = False
 
 class HasBoundVariables a where
     -- Returns a set of pairs of a bound variable along with True iff the variable can conflict with other variables
@@ -104,9 +104,9 @@ instance HasBoundVariables HsDecl where
     getBoundVariablesAndConflicts (HsDataDecl _ _ _ _ conDecls _) = getBoundVariablesAndConflicts conDecls
     getBoundVariablesAndConflicts (HsClassDecl _ _ name _ decls) =
         M.map (S.map move) <$> getBoundVariablesAndConflicts decls
-        where move SymDef = ClassSymDef $ convertName name
+        where move SymDef  = ClassSymDef $ convertName name
               move SymType = ClassSymType $ convertName name
-              move c = error $ unpack ("Invalid conflict type in class " <> convertName name <> ": ") <> show c
+              move c       = error $ unpack ("Invalid conflict type in class " <> convertName name <> ": ") <> show c
     getBoundVariablesAndConflicts (HsInstDecl _ _ name _ decls) =
         M.map (S.map move) <$> getBoundVariablesAndConflicts decls
         where move SymDef = ClassSymDef $ convertName name
@@ -206,8 +206,8 @@ instance HasFreeTypeVariables HsType where
 instance HasFreeTypeVariables TypeVariable where
     getFreeTypeVariables (TypeVariable v _) = S.singleton v
 instance HasFreeTypeVariables Type where
-    getFreeTypeVariables (TypeVar v) = getFreeTypeVariables v
-    getFreeTypeVariables TypeCon{} = S.empty
+    getFreeTypeVariables (TypeVar v)       = getFreeTypeVariables v
+    getFreeTypeVariables TypeCon{}         = S.empty
     getFreeTypeVariables (TypeApp t1 t2 _) = S.union (getFreeTypeVariables t1) (getFreeTypeVariables t2)
 instance HasFreeTypeVariables a => HasFreeTypeVariables (Qualified a) where
     getFreeTypeVariables (Qualified quals t) = S.unions $ getFreeTypeVariables t:map getFreeTypeVariables (S.toList quals)
@@ -223,9 +223,9 @@ instance HasFreeTypeConstants HsDecl where
     getFreeTypeConstants _                        = S.empty
 instance HasFreeTypeConstants HsConDecl where
     getFreeTypeConstants (HsConDecl _ _ ts) = getFreeTypeConstants ts
-    getFreeTypeConstants HsRecDecl{} = error "recdecl"
+    getFreeTypeConstants HsRecDecl{}        = error "recdecl"
 instance HasFreeTypeConstants HsBangType where
-    getFreeTypeConstants (HsBangedTy t) = getFreeTypeConstants t
+    getFreeTypeConstants (HsBangedTy t)   = getFreeTypeConstants t
     getFreeTypeConstants (HsUnBangedTy t) = getFreeTypeConstants t
 instance HasFreeTypeConstants HsQualType where
     getFreeTypeConstants (HsQualType quals t) = S.union qualConsts (getFreeTypeConstants t)
@@ -238,8 +238,8 @@ instance HasFreeTypeConstants HsType where
     getFreeTypeConstants (HsTyCon n)     = S.singleton $ convertName n
 
 instance HasBoundTypeConstants HsDecl where
-    getBoundTypeConstants (HsDataDecl _ _ name _ _ _) = S.singleton $ convertName name
-    getBoundTypeConstants (HsClassDecl _ _ name _ _) = S.singleton $ convertName name
-    getBoundTypeConstants (HsTypeDecl _ name _ _) = S.singleton $ convertName name
+    getBoundTypeConstants (HsDataDecl _ _ name _ _ _)    = S.singleton $ convertName name
+    getBoundTypeConstants (HsClassDecl _ _ name _ _)     = S.singleton $ convertName name
+    getBoundTypeConstants (HsTypeDecl _ name _ _)        = S.singleton $ convertName name
     getBoundTypeConstants (HsNewTypeDecl _ _ name _ _ _) = S.singleton $ convertName name
-    getBoundTypeConstants _ = S.empty
+    getBoundTypeConstants _                              = S.empty

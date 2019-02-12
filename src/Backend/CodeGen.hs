@@ -318,7 +318,7 @@ compileExp (ExpConApp con args) = do
     ds <- gets datatypes
     datatype <- case find (\d -> con `elem` map fst (branches d)) ds of
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
-        Just d -> return d
+        Just d  -> return d
     let cname = convertName (typeName datatype)
         methodname = "_make" <> convertName con
         methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
@@ -329,8 +329,8 @@ compileExp (ExpConApp con args) = do
 compileExp (ExpCase head t vs alts) = do
     let headType = case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
-            Types.TypeCon (Types.TypeConstant n _) -> encodeUtf8 $ fromStrict $ convertName $ jvmSanitise n
-            _ -> boxedData -- If it's not a datatype, pretend it's boxed data
+            Types.TypeCon (Types.TypeConstant n _)    -> encodeUtf8 $ fromStrict $ convertName $ jvmSanitise n
+            _                                         -> boxedData -- If it's not a datatype, pretend it's boxed data
     writeLog $ showt $ Types.unmakeApp t
     compileExp head
     -- Evaluate the expression

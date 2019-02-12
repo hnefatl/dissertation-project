@@ -25,7 +25,8 @@ import           ExtraDefs                   (inverseMap, mapError, middleText, 
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables, getBoundVariablesAndConflicts, getFreeVariables)
+import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
+                                              getBoundVariablesAndConflicts, getFreeVariables)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
@@ -146,8 +147,8 @@ getExprType (Case _ _ (Alt _ e:_)) = getExprType e
 getExprType (Type t)               = return t
 
 data ConverterReadableState = ConverterReadableState
-    { types     :: M.Map VariableName QuantifiedSimpleType
-    , renamings :: M.Map VariableName VariableName
+    { types           :: M.Map VariableName QuantifiedSimpleType
+    , renamings       :: M.Map VariableName VariableName
       -- The renamings from the renamer stage: used to get the right name for eg. tuple constructors if they've been
       -- renamed
     , topLevelRenames :: M.Map VariableName VariableName }
@@ -416,7 +417,7 @@ altToIla (HsAlt _ pat alts wheres) = helper pat
             HsPParen p'   -> helper p'
             _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
           patToVar (HsPVar v) = convertName v
-          patToVar _ = error "Non-variable in ILA, need to rework case alt patterns"
+          patToVar _          = error "Non-variable in ILA, need to rework case alt patterns"
 
 guardedAltsToIla :: HsGuardedAlts -> Converter Expr
 guardedAltsToIla (HsUnGuardedAlt e) = expToIla e

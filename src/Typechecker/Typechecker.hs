@@ -10,7 +10,7 @@ import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
 import           Control.Monad.Extra         (whenJust)
-import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, put, modify, runStateT)
+import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify, put, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -24,8 +24,8 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
+import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.Dependency
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
@@ -57,8 +57,8 @@ data InferrerState = InferrerState
     -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
     -- detect, so we just process them as late as possible.
     , typeclassInstances :: M.Map (HsQName, [HsType]) HsDecl
-    -- Information about classes 
-    , classInfo :: M.Map HsQName ClassInfo }
+    -- Information about classes
+    , classInfo          :: M.Map HsQName ClassInfo }
     deriving (Eq, Show)
 
 instance Default InferrerState where
@@ -564,8 +564,8 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
 inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
     ([], [_]) -> HsInstDecl loc ctx name args <$> mapM (checkInstanceDecl name args) decls
-    ([], _) -> throwError "Multiparameter typeclass instances not supported"
-    (_, _) -> throwError "Contexts not yet supported in instances"
+    ([], _)   -> throwError "Multiparameter typeclass instances not supported"
+    (_, _)    -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     let typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
     addKinds $ M.singleton (convertName name) typeKind
@@ -673,7 +673,7 @@ inferModule m@(HsModule p1 p2 p3 p4 decls) = do
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
-        isTypeclassInstance _ = False
+        isTypeclassInstance _            = False
         (instanceDecls, decls') = partition isTypeclassInstance decls
     typePredMap <- M.fromList <$> forM instanceDecls (\d -> (,d) <$> getTypeclassTypePredicate d)
     modify $ \s -> s { typeclassInstances = typePredMap }

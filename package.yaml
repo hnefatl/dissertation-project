@@ -65,6 +65,7 @@ executables:
     - -Wall
     dependencies:
     - compiler
+    - optparse-applicative
 
 tests:
   compiler-test:
@@ -77,6 +78,9 @@ tests:
     - -Wall
     dependencies:
     - compiler
+    - compiler-exe
+    - neat-interpolation
     - tasty
     - tasty-hunit
     - tasty-quickcheck
+    - temporary

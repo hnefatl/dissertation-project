@@ -13,10 +13,10 @@ import           Language.Haskell.Syntax
 import           TextShow                    (showt)
 import           TextShow.Instances          ()
 
-import           Logger                      (MonadLogger, writeLog)
 import           ExtraDefs                   (showtSet)
-import           Names                       (VariableName, TypeVariableName)
+import           Logger                      (MonadLogger, writeLog)
 import           NameGenerator               (MonadNameGenerator, freshVarName)
+import           Names                       (TypeVariableName, VariableName)
 import           Preprocessor.ContainedNames
 
 -- |Keep type variable names (`Num`, `Eq`) distinct from variable names (`x`, `(+)`).
@@ -29,8 +29,8 @@ variableUnion vs tvs = S.union (S.map Left vs) (S.map Right tvs)
 -- definition.
 
 getDepBoundVariables :: MonadError Text m => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
-getDepBoundVariables HsInstDecl{} = return S.empty 
-getDepBoundVariables d = variableUnion <$> getBoundVariables d <*> pure (getBoundTypeConstants d)
+getDepBoundVariables HsInstDecl{} = return S.empty
+getDepBoundVariables d            = variableUnion <$> getBoundVariables d <*> pure (getBoundTypeConstants d)
 
 getDepFreeVariables :: MonadError Text m => HsDecl -> m (S.Set (Either VariableName TypeVariableName))
 getDepFreeVariables d@HsInstDecl{} = do
