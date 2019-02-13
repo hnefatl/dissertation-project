@@ -78,6 +78,8 @@ tests:
     - -rtsopts
     - -with-rtsopts=-N
     - -Wall
+    build-tools:
+    - compiler-exe
     dependencies:
     - compiler
     - neat-interpolation

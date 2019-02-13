@@ -85,9 +85,7 @@ makeJar flags = do
             -- Drop the leading directory from each path
             return $ concatMap (\f -> ["-C", dir, drop (1 + length dir) f]) paths
     outputFiles <- getClassFilePaths (outputDir flags)
-    print outputFiles
     runtimeFiles <- getClassFilePaths (runtimeFileDir flags)
-    print runtimeFiles
     let args = ["cfe", outputDir flags </> outputJar flags, outputClassName flags] <> outputFiles <> runtimeFiles
     callProcess "jar" args
 
