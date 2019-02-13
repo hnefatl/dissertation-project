@@ -8,7 +8,9 @@ import           BasicPrelude
 import           Control.Monad.Except    (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import qualified Data.Map                as M
 import           Data.Text               (pack, unpack)
-import           System.Exit
+import           System.Exit             (exitFailure)
+import           System.Process          (callProcess)
+import           System.FilePath.Glob    as Glob (compile, globDir1)
 import           TextShow                (TextShow, showt)
 
 import           ExtraDefs               (pretty, synPrint)
@@ -30,6 +32,8 @@ data Flags = Flags
     { verbose :: Bool
     , outputDir :: FilePath
     , outputJar :: FilePath
+    , outputClassName :: FilePath
+    , runtimeFileDir :: FilePath
     , inputFiles :: [FilePath] }
     deriving (Eq, Show)
 
@@ -70,8 +74,22 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
             ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert "Output" "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
+            lift $ lift $ lift $ makeJar flags
+
+makeJar :: Flags -> IO ()
+makeJar flags = do
+    let getClassFilePaths dir = do
+            paths <- globDir1 (Glob.compile "*.class") dir
+            -- Drop the leading directory from each path
+            return $ concatMap (\f -> ["-C", dir, drop (1 + length dir) f]) paths
+    outputFiles <- getClassFilePaths (outputDir flags)
+    print outputFiles
+    runtimeFiles <- getClassFilePaths (runtimeFileDir flags)
+    print runtimeFiles
+    let args = ["cfe", outputDir flags </> outputJar flags, outputClassName flags] <> outputFiles <> runtimeFiles
+    callProcess "jar" args
 
 -- |"Extend" one map with another: given mappings x->y and y->z, create a mapping (x+y)->(y+z).
 combineReverseRenamings :: M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName

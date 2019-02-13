@@ -36,6 +36,8 @@ dependencies:
 - haskell-src # Provided from custom repo, see stack.yaml extra-deps
 - hs-java # Also provided from custom repo
 - binary
+- process
+- Glob
 - filepath
 
 custom-setup:

@@ -33,6 +33,17 @@ parseFlags = Flags
         ( long "output-jar"
        <> short 'o'
        <> help "Output jar name"
+       <> value "a.jar"
+       <> showDefault)
+    <*> strOption
+        ( long "output-class"
+       <> short 'c'
+       <> help "Output class name"
        <> value "Output"
+       <> showDefault)
+    <*> strOption
+        ( long "runtime-file-dir"
+       <> help "Directory containing the compiler's runtime class files."
+       <> value "runtime"
        <> showDefault)
     <*> some (argument str (metavar "input-files" <> help "Haskell source files to compile"))
