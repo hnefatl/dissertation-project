@@ -42,4 +42,63 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             "Data: { branch: 1, data: { } }\n"
         )
+    ,
+        (
+            "_main = id id False"
+        ,
+            [text|
+                data Bool = False | True
+                data (,) a = (,) a
+                id = \x -> x
+                _main = id id False
+            |]
+        ,
+            "Data: { branch: 0, data: { } }\n"
+        )
+    ,
+        (
+            "_main = foo [True, False]"
+        ,
+            [text|
+                data Bool = False | True
+                data [] a = [] | a :+ [a]
+                data (,) a = (,) a
+
+                (&&) = \x y -> case x of
+                    False -> False
+                    True -> case y of
+                        False -> False
+                        True -> True
+
+                all = \f xl -> case xl of
+                    [] -> True
+                    (x:+xs) -> f x && all f xs
+
+                class Foo a where
+                    foo :: a -> Bool
+                instance Foo Bool where
+                    foo = \x -> x
+                instance Foo [Bool] where
+                    foo = all foo
+
+                _main = foo (True:+(False:+[]))
+            |]
+        ,
+            "Data: { branch: 0, data: { } }\n"
+        )
+    ,
+        (
+            "_main = (\\(Foo x) -> x) (Foo True)"
+        ,
+            [text|
+                data Bool = False | True
+                data (,) a = (,) a
+
+                data Foo a = Foo a
+
+                _main = (\(Foo x) -> x) (Foo True)
+            |]
+        ,
+            "Data: { branch: 0, data: { } }\n"
+        )
     ]
