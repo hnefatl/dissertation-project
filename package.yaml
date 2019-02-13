@@ -80,7 +80,6 @@ tests:
     - -Wall
     dependencies:
     - compiler
-    - compiler-exe
     - neat-interpolation
     - tasty
     - tasty-hunit
