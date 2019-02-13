@@ -5,7 +5,7 @@ public abstract class BoxedData extends Data {
 
     @Override 
     public String toString() {
-        String res = "Data: { branch: " + String.valueOf(branch) + ", data {";
+        String res = "Data: { branch: " + String.valueOf(branch) + ", data: {";
         for (HeapObject o : data) {
             res += " " + String.valueOf(o);
         }

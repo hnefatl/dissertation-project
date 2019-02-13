@@ -2,26 +2,26 @@
 
 module Preprocessor.DependencySpec where
 
-import           Test.Tasty                  (TestTree, testGroup)
-import           Test.Tasty.HUnit            (assertEqual, assertFailure, testCase)
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.HUnit        (assertEqual, assertFailure, testCase)
 
 import           BasicPrelude
-import           Control.Monad.Except        (runExcept, runExceptT)
-import qualified Data.Set                    as S
-import           Data.Text                   (pack, unpack)
-import           Language.Haskell.Parser     (ParseResult(..), parseModule)
+import           Control.Monad.Except    (runExcept, runExceptT)
+import qualified Data.Set                as S
+import           Data.Text               (pack, unpack)
+import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax
-import           TextShow                    (showt)
+import           TextShow                (showt)
 
 import           ExtraDefs
-import           Logger                      (runLogger)
-import           NameGenerator               (evalNameGeneratorT)
+import           Logger                  (runLogger)
+import           NameGenerator           (evalNameGeneratorT)
 import           Names
-import           Preprocessor.Dependency     (dependencyOrder, getDepBoundVariables)
-import           TextShowHsSrc               ()
+import           Preprocessor.Dependency (dependencyOrder, getDepBoundVariables)
+import           TextShowHsSrc           ()
 
 tvToV :: Either VariableName TypeVariableName -> VariableName
-tvToV (Left v) = v
+tvToV (Left v)                     = v
 tvToV (Right (TypeVariableName n)) = VariableName n
 
 makeTest :: Text -> [[VariableName]] -> TestTree

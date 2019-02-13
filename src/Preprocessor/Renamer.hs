@@ -142,7 +142,7 @@ renameModule (HsModule a b c d decls) = do
         decls' <- renames decls
         reverseMapping <- gets variableReverseMapping
         let reverseRenames = M.mapKeys (\(UniqueVariableName n) -> VariableName n) reverseMapping
-        topLevelRenames <- forM topLevelMappings $ \case 
+        topLevelRenames <- forM topLevelMappings $ \case
             [UniqueVariableName n] -> return $ VariableName n
             rs -> throwError $ unlines ["Got illegal top level renaming:", showt rs]
         writeLog "Renames"

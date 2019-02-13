@@ -14,8 +14,8 @@ import qualified Data.Set                    as S
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
-import           Typechecker.Types           (Type)
 import           TextShow                    (TextShow, showb, showt)
+import           Typechecker.Types           (Type)
 
 -- Datatypes inspired by STG:
 -- https://github.com/ghc/ghc/blob/6353efc7694ba8ec86c091918e02595662169ae2/compiler/stgSyn/StgSyn.hs

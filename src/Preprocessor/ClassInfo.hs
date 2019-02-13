@@ -1,12 +1,12 @@
 module Preprocessor.ClassInfo where
 
-import BasicPrelude
-import Language.Haskell.Syntax
-import TextShow (TextShow, showb)
-import qualified Data.Map.Strict as M
+import           BasicPrelude
+import qualified Data.Map.Strict         as M
+import           Language.Haskell.Syntax
+import           TextShow                (TextShow, showb)
 
 data ClassInfo = ClassInfo
-    { methods :: M.Map HsName HsQualType
+    { methods      :: M.Map HsName HsQualType
     , argVariables :: [HsName] }
     deriving (Eq, Show)
 instance TextShow ClassInfo where
@@ -22,4 +22,4 @@ getDeclClassInfo _ = M.empty
 
 getDeclTypes :: HsDecl -> M.Map HsName HsQualType
 getDeclTypes (HsTypeSig _ names t) = M.fromList $ zip names (repeat t)
-getDeclTypes _ = M.empty
+getDeclTypes _                     = M.empty

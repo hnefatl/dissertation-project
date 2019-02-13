@@ -9,15 +9,15 @@ module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
 import           Control.Monad.Except    (MonadError, throwError)
+import           Data.Foldable           (foldlM)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (unpack)
-import           Data.Foldable           (foldlM)
 import           Language.Haskell.Syntax as Syntax
 import           TextShow                (TextShow, fromText, showb, showt)
 
-import           NameGenerator
 import           ExtraDefs               (synPrint)
+import           NameGenerator
 import           Names
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
@@ -182,7 +182,7 @@ unwrapFun :: MonadError Text m => Type -> m (Type, Type)
 unwrapFun t = maybe (throwError $ showt t <> " isn't a function type.") return (unwrapFunMaybe t)
 unwrapSynFun :: MonadError Text m => HsType -> m (HsType, HsType)
 unwrapSynFun (HsTyFun t1 t2) = return (t1, t2)
-unwrapSynFun t = throwError $ synPrint t <> " isn't a function type."
+unwrapSynFun t               = throwError $ synPrint t <> " isn't a function type."
 
 unmakeList :: MonadError Text m => Type -> m Type
 unmakeList t@(TypeApp t1 t2 _)
@@ -237,8 +237,8 @@ typeToSyn (TypeApp t1 t2 _) = do
 synToType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsType -> m Type
 synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
 synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
-    Nothing   -> throwError $ "Type constructor not in kind mapping: " <> showt name
-    Just k -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
+    Nothing -> throwError $ "Type constructor not in kind mapping: " <> showt name
+    Just k  -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
     where name = convertName c
 synToType ks (HsTyFun arg body) = makeFun <$> sequence [synToType ks arg] <*> synToType ks body
 synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts

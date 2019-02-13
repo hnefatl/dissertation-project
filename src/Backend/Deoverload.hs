@@ -1,33 +1,34 @@
 {-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE TupleSections              #-}
 
 module Backend.Deoverload where
 
 import           BasicPrelude                hiding (exp)
-import           Control.Monad.Except        (Except, ExceptT, MonadError, runExcept, runExceptT, throwError, liftEither)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
+                                              throwError)
 import           Control.Monad.Extra         (concatForM, concatMapM)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
-import           Data.Foldable               (null, toList, foldlM)
+import           Data.Foldable               (foldlM, null, toList)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
-import           ExtraDefs                   (synPrint, pretty, zipOverM)
+import           ExtraDefs                   (pretty, synPrint, zipOverM)
 import           Logger
-import           Preprocessor.Renamer        (renameIsolated)
-import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
-import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
 import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                       (TypeVariableName(..), VariableName(..), convertName)
+import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
+import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
+import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
 import           Typechecker.Substitution    (Substitution(..), applySub)
 import           Typechecker.Typechecker     (nullSrcLoc)
-import           Typechecker.Typeclasses     (TypeClass(Class), ClassEnvironment, entails)
+import           Typechecker.Typeclasses     (ClassEnvironment, TypeClass(Class), entails)
 import           Typechecker.Types
 import           Typechecker.Unifier         (mgu)
 
@@ -39,7 +40,7 @@ data DeoverloadState = DeoverloadState
     , types            :: M.Map VariableName QuantifiedType
     , kinds            :: M.Map TypeVariableName Kind
     , classEnvironment :: ClassEnvironment
-    , classInfo :: M.Map HsQName ClassInfo }
+    , classInfo        :: M.Map HsQName ClassInfo }
     deriving (Eq, Show)
 instance TextShow DeoverloadState where
     showb = fromString . show
@@ -124,7 +125,7 @@ makeDictName (IsInstance (TypeVariableName cl) t) = do
         TypeCon (TypeConstant tcn _) -> return tcn
         TypeApp{}                    -> freshTypeVarName
     return $ VariableName $ "d" <> cl <> suffix
-    
+
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do
     let frees = getFreeTypeVariables t

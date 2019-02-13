@@ -70,9 +70,9 @@ getAnfAppType (App e1 e2) = do
     when (argType /= e2Type) $ throwError "Invalid arg type"
     return retType
 getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
-getAnfComplexType (Trivial e)            = getAnfTrivialType e
-getAnfComplexType (CompApp e)            = getAnfAppType e
-getAnfComplexType (Let _ _ _ e)          = getAnfComplexType e
+getAnfComplexType (Trivial e)              = getAnfTrivialType e
+getAnfComplexType (CompApp e)              = getAnfAppType e
+getAnfComplexType (Let _ _ _ e)            = getAnfComplexType e
 getAnfComplexType (Case _ _ _ [])          = throwError "No alts in case"
 getAnfComplexType (Case _ _ _ (Alt _ e:_)) = getAnfComplexType e
 getAnfRhsType :: MonadError Text m => AnfRhs -> m Type
