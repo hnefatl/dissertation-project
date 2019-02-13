@@ -41,7 +41,7 @@ type TypeMap = M.Map VariableName TypeVariableName
 -- |An inferrer carries along a working substitution of type variable names, a global variable counter for making new
 -- unique variable names
 data InferrerState = InferrerState
-    { substitutions      :: Substitution
+    { substitutions      :: TypeSubstitution
     -- "In progress" variable -> type variable mappings
     , variableTypes      :: M.Map VariableName TypeVariableName
     -- "Finished" variable -> fully described quantified type mappings
@@ -117,11 +117,11 @@ synToQuantType t = do
     return $ Quantified freeVars t'
 
 -- |Returns the current substitution in the monad
-getSubstitution :: TypeInferrer Substitution
+getSubstitution :: TypeInferrer TypeSubstitution
 getSubstitution = gets substitutions
-composeSubstitution :: Substitution -> TypeInferrer ()
+composeSubstitution :: TypeSubstitution -> TypeInferrer ()
 composeSubstitution sub = modify (\s -> s { substitutions = substitutions s `subCompose` sub })
-applyCurrentSubstitution :: Substitutable a => a -> TypeInferrer a
+applyCurrentSubstitution :: TypeSubstitutable a => a -> TypeInferrer a
 applyCurrentSubstitution x = do
     sub <- getSubstitution
     return $ applySub sub x
@@ -207,7 +207,7 @@ insertQuantifiedType name t = do
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
 -- if we have `Num t1` and `[t2/t1]` we add a constraint `Num t2`, and if we have `instance (Foo a, Bar b) => Baz (Maybe
 -- a b)`, `Foo t1` and `[(Maybe t2 t3)/t1]` then we add constraints `Foo t2` and `Bar t3`.
-updateTypeConstraints :: Substitution -> TypeInferrer ()
+updateTypeConstraints :: TypeSubstitution -> TypeInferrer ()
 updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (uncurry helper)
     where helper :: TypeVariableName -> Type -> TypeInferrer ()
           -- Easy to transfer constraints from a variable to a variable: just copy them over
@@ -587,7 +587,7 @@ checkInstanceDecl cname argTypes (HsPatBind loc pat rhs wheres) = do
         Nothing -> throwError $ "No class with name " <> showt cname <> " found."
         Just info -> return info
     ks <- getKinds
-    sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci) <$> mapM (synToType ks) argTypes
+    sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci :: [TypeVariableName]) <$> mapM (synToType ks) argTypes
     methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m,t) -> do
         qt@(Qualified quals _) <- applySub sub <$> synToQualType ks t
         unless (null quals) $ throwError "Unexpected qualifiers in typeclass method context"

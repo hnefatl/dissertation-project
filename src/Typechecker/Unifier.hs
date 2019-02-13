@@ -85,7 +85,7 @@ instance Unifiable t => Unifiable (Maybe t) where
 
 
 -- |unifyVar v t returns a substitution [t/v] like subSingle but performs additional checks
-unifyVar :: MonadError Text m => TypeVariable -> Type -> m Substitution
+unifyVar :: MonadError Text m => TypeVariable -> Type -> m TypeSubstitution
 unifyVar var@(TypeVariable name _) t
     | TypeVar var == t = return subEmpty
     | name `S.member` getTypeVars t = throwError $ "Fails occurs check: " <> showt var <> " vs " <> showt t

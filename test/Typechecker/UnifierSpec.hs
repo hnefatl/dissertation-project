@@ -9,7 +9,7 @@ import           Test.Tasty.HUnit         (assertEqual, testCase)
 import           Data.Text                (unpack)
 import           Names
 import           TextShow                 (showt)
-import           Typechecker.Substitution (Substitution(..), subMultiple)
+import           Typechecker.Substitution (Substitution(..), TypeSubstitution, subMultiple)
 import           Typechecker.Types
 import           Typechecker.Unifier      (match, mgu)
 
@@ -27,7 +27,7 @@ test =
             -- y = [(Char -> c, (b, Bool))]
             y = makeList (makeTuple [makeFun [typeChar] tc, makeTuple [tb, typeBool]])
 
-            actual = mgu x y :: Either Text Substitution
+            actual = mgu x y :: Either Text TypeSubstitution
             -- expected = [(Char -> Bool)/a, Int/b, Bool/c]
             expected = Right $ subMultiple [(a, makeFun [typeChar] typeBool), (b, typeInt), (c, typeBool)]
 

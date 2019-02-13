@@ -134,7 +134,7 @@ compileDatatypes ds classpath = do
                     invokeSpecial boxedData Java.Lang.objectInit
                     i0 RETURN
                 -- Compile each constructor into a static "maker" method
-                zipOverM_ (branches datatype) [0..] $ \(branchName, args) branchTag -> do
+                zipOverM_ (M.toList $ branches datatype) [0..] $ \(branchName, args) branchTag -> do
                     void $ addToPool (CClass boxedData)
                     let numArgs = length args
                         methName = toLazyBytestring $ "_make" <> convertName branchName
@@ -316,7 +316,7 @@ compileExp (ExpApp fun args) = do
     invokeVirtual function enter
 compileExp (ExpConApp con args) = do
     ds <- gets datatypes
-    datatype <- case find (\d -> con `elem` map fst (branches d)) ds of
+    datatype <- case find (\d -> S.member con (M.keysSet $ branches d)) ds of
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
         Just d  -> return d
     let cname = convertName (typeName datatype)
@@ -400,14 +400,14 @@ sortAlts alts@(Alt (DataCon con _) _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
     ds <- gets datatypes
     -- Find the possible constructors by finding a datatype whose possible branches contain the first alt's constructor
-    case find (con `elem`) $ map (map fst . branches) $ M.elems ds of
+    case find (S.member con) $ map (M.keysSet . branches) $ M.elems ds of
         Nothing -> throwTextError $ "Unknown data constructor: " <> showt con <> "\n" <> showt ds
-        Just branches -> do
+        Just bs -> do
             let getDataCon (Alt (DataCon c _) _) = c
                 getDataCon _                     = error "Compiler error: can only have datacons here"
-                okay = all ((`elem` branches) . getDataCon) alts
+                okay = all ((`S.member` bs) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
-            let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` branches, a)) alts
+            let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` S.toAscList bs, a)) alts
             return $ sortOn fst alts'
 sortAlts alts@(Alt (LitCon _) _:_) = do
     unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"

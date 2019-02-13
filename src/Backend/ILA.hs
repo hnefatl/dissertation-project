@@ -13,9 +13,7 @@ import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default, def)
-import           Data.Foldable               (foldrM)
 import           Data.List.Extra             (foldl', intersperse, groupOn)
-import           Data.Tuple.Extra            (fst3, snd3, thd3)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import qualified Data.Text                   as Text
@@ -33,7 +31,7 @@ import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariable
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
-import Typechecker.Substitution (Substitutable, NameSubstitution, Substitution(..), applySub, subCompose, subComposes, subSingle, subEmpty)
+import Typechecker.Substitution (Substitutable, NameSubstitution, Substitution(..), applySub, subCompose, subSingle, subEmpty)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -267,8 +265,8 @@ getPatVariableTypes (HsPApp _ ps) t = do
     let (_, argTypes) = T.unmakeApp t
     unless (length ps == length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
     M.unions <$> zipWithM getPatVariableTypes ps argTypes
-getPatVariableTypes (HsPTuple ps) t = throwError "HsPTuple should've been removed in the renamer"
-getPatVariableTypes (HsPList ps) t = throwError "HsPList should've been removed in the renamer"
+getPatVariableTypes HsPTuple{} _ = throwError "HsPTuple should've been removed in the renamer"
+getPatVariableTypes HsPList{} _ = throwError "HsPList should've been removed in the renamer"
 getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t
 getPatVariableTypes (HsPAsPat n p) t = M.insert (convertName n) t <$> getPatVariableTypes p t
 getPatVariableTypes HsPWildCard _ = return M.empty
@@ -305,10 +303,9 @@ declToIla (HsPatBind _ pat rhs _) = do
     resultTuple <- makeTuple (zip renamedExps boundTypes)
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
     resultExpr <- local (addTypes ts) $ addRenamings renames $ do
-        rhsExpr <- rhsToIla rhs -- Get an expression for the RHS using the renamings from actual name to temporary name
         rhst <- rhsType rhs
         argName <- freshVarName
-        patToIla [(argName, rhst)] [([pat], rhsExpr, rhst, subEmpty)] (makeError rhst)
+        patToIla [(argName, rhst)] [([pat], rhs, rhst, subEmpty)] (makeError rhst)
     -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
     resultName <- freshVarName
     -- For each bound name, generate a binding that extracts the variable from the result tuple
@@ -370,13 +367,13 @@ expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
-expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
+expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
     argName <- freshVarName
     expType <- getSimpleFromSynType t
     (argType, bodyType) <- T.unwrapFun expType
     reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
-    (_, renames) <- getPatRenamings p
-    patVariableTypes <- fmap (Quantified S.empty) <$> getPatVariableTypes p argType
+    renames <- M.unions . snd . unzip <$> mapM getPatRenamings pats
+    patVariableTypes <- fmap (Quantified S.empty) . M.unions <$> mapM (\p -> getPatVariableTypes p argType) pats
     let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
         log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
@@ -386,7 +383,7 @@ expToIla (HsExpTypeSig l (HsLambda l' (p:pats) e) t) = do
         nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
         --patToIla p argType (Var argName argType) nextBody bodyType
         -- Probably just need a single lambda processor now? Can handle multiple pattern so.
-        patToIla [(argName, rhst)] [([pat], rhsExpr, rhst, subEmpty)] (makeError rhst)
+        patToIla [(argName, expType)] [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
     return (Lam argName argType body)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
@@ -439,13 +436,14 @@ litToIla l            = throwError $ "Unboxed primitives not supported: " <> sho
 
 
 -- Implemented as in "The Implementation of Functional Programming Languages"
-patToIla :: [(VariableName, Type)] -> [([HsPat], Expr, Type, NameSubstitution)] -> Expr -> Converter Expr
+patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution)] -> Expr -> Converter Expr
 patToIla _ [] def = return def
-patToIla [] (([], e, _, sub):_) _ =
+patToIla [] (([], r, _, Substitution sub):_) _ =
     -- TODO(kc506): If the first case can fail somehow, we need to use the later ones? Weird notation in the book
-    return $ applySub sub e
+    addRenamings sub $ rhsToIla r
 patToIla ((v, t):vs) cs def = do
     let getPat (x:_, _, _, _) = x
+        getPat ([], _, _, _) = undefined
         allPatType pt = allM (fmap (== pt) . getPatType . getPat)
     pats <- mapM (reducePats v) cs
     allVariable <- allPatType Variable pats
@@ -501,7 +499,7 @@ groupPatCons f xl = do
     return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortBy (comparing fst) tagged
 
 -- |Reduce patterns so that the root of each pattern is a variable/literal/constructor
-reducePats :: MonadError Text m => VariableName -> ([HsPat], Expr, Type, NameSubstitution) -> m ([HsPat], Expr, Type, NameSubstitution)
+reducePats :: MonadError Text m => VariableName -> ([HsPat], HsRhs, Type, NameSubstitution) -> m ([HsPat], HsRhs, Type, NameSubstitution)
 reducePats _ x@([], _, _, _) = return x
 reducePats v (p:ps, e, t', s) = case p of
     HsPInfixApp x1 op x2 -> return (HsPApp op [x1, x2]:ps, e, t', s)

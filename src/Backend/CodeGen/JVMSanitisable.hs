@@ -59,4 +59,4 @@ instance JVMSanitisable a => JVMSanitisable (Binding a) where
 instance JVMSanitisable Datatype where
     jvmSanitise d = d
         { typeName = jvmSanitise $ typeName d
-        , branches = [ (jvmSanitise v, as) | (v, as) <- branches d ] }
+        , branches = M.mapKeys jvmSanitise (branches d) }
