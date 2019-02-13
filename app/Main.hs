@@ -1,9 +1,10 @@
 module Main where
 
 import BasicPrelude
+import Data.Default        (def)
 import Options.Applicative
 
-import Compiler (Flags(..), compile)
+import Compiler            (Flags(..), compile)
 
 main :: IO ()
 main = do
@@ -27,23 +28,23 @@ parseFlags = Flags
         ( long "output-dir"
        <> short 'd'
        <> help "Output directory for build files"
-       <> value "out"
+       <> value (outputDir def)
        <> showDefault)
     <*> strOption
         ( long "output-jar"
        <> short 'o'
        <> help "Output jar name"
-       <> value "a.jar"
+       <> value (outputJar def)
        <> showDefault)
     <*> strOption
         ( long "output-class"
        <> short 'c'
        <> help "Output class name"
-       <> value "Output"
+       <> value (outputClassName def)
        <> showDefault)
     <*> strOption
         ( long "runtime-file-dir"
        <> help "Directory containing the compiler's runtime class files."
-       <> value "runtime"
+       <> value (runtimeFileDir def)
        <> showDefault)
     <*> some (argument str (metavar "input-files" <> help "Haskell source files to compile"))

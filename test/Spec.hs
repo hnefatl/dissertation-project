@@ -1,17 +1,18 @@
 import Test.Tasty
 
-import AlphaEqSpec
-import Backend.DeoverloadSpec
-import Backend.ILAANFSpec
-import Backend.ILASpec
 import BasicPrelude
-import Preprocessor.DependencySpec
-import Preprocessor.RenamerSpec
-import Typechecker.SubstitutionSpec
-import Typechecker.TypecheckerSpec
-import Typechecker.TypeclassesSpec
-import Typechecker.TypeTaggerSpec
-import Typechecker.UnifierSpec
+import qualified AlphaEqSpec
+import qualified Backend.DeoverloadSpec
+import qualified Backend.ILAANFSpec
+import qualified Backend.ILASpec
+import qualified Preprocessor.DependencySpec
+import qualified Preprocessor.RenamerSpec
+import qualified Typechecker.SubstitutionSpec
+import qualified Typechecker.TypecheckerSpec
+import qualified Typechecker.TypeclassesSpec
+import qualified Typechecker.TypeTaggerSpec
+import qualified Typechecker.UnifierSpec
+import qualified WholeProgram
 
 tests :: TestTree
 tests = testGroup "Tests"
@@ -33,6 +34,7 @@ tests = testGroup "Tests"
             [ Backend.DeoverloadSpec.test
             , Backend.ILASpec.test
             , Backend.ILAANFSpec.test ]
+    , WholeProgram.test
     ]
 
 main :: IO ()

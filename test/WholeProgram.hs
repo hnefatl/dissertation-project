@@ -7,35 +7,39 @@ import           Test.Tasty.HUnit
 
 import           BasicPrelude
 import           NeatInterpolation
-import           Control.Monad.Extra     (whenJust)
-import qualified Data.Set                as S
-import           Data.Text               (pack, unpack)
-import           TextShow                (TextShow, showt)
-import           System.Process          (readCreateProcess, shell)
+import           Data.Text               (unpack)
+import           Data.Default            (def)
+import           System.Process          (readProcessWithExitCode)
+import           System.Exit             (ExitCode(ExitSuccess))
 import           System.IO.Temp
+import           Compiler (Flags(outputJar))
 
 
---makeTest :: Text -> Text -> TestTree
---makeTest source expected = do
---    tempDir <- getCanonicalTemporaryDirectory
---    withTempDirectory tempDir "compiler-test" $ \dir -> do
---        sourceFile <- writeTempFile dir "compiler-test" source
---        let cmd = shell $ "stack exec compiler-exe " <> sourceFile
---        undefined
---    -- Run compile
---    -- Package to jar?
---    -- Save source to tmp file
---    -- Exec jar
---    --readCreateProcess 
---
---test :: TestTree
---test = testGroup "Whole Program"
---    [
---        (
---            [text|
---                _main = True
---            |]
---        ,
---            "Data { branch = 1, data = { } }"
---        )
---    ]
+makeTest :: (String, Text, String) -> TestTree
+makeTest (title, source, expected) = testCase title $ do
+    tempDir <- getCanonicalTemporaryDirectory
+    withTempDirectory tempDir "compiler-test" $ \dir -> do
+        sourceFile <- writeTempFile dir "compiler-test" (unpack source)
+        let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, dir </> sourceFile]
+            runArgs = ["-noverify", "-jar", dir </> outputJar def]
+        (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
+        unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
+        (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
+        unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
+        assertEqual buildOutput expected runOutput 
+
+test :: TestTree
+test = testGroup "Whole Program" $ map makeTest
+    [
+        (
+            "_main = True"
+        ,
+            [text|
+                data Bool = False | True
+                data (,) a = (,) a
+                _main = True
+            |]
+        ,
+            "Data: { branch: 1, data: { } }\n"
+        )
+    ]

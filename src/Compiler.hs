@@ -8,6 +8,7 @@ import           BasicPrelude
 import           Control.Monad.Except    (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
 import qualified Data.Map                as M
 import           Data.Text               (pack, unpack)
+import           Data.Default            (Default, def)
 import           System.Exit             (exitFailure)
 import           System.Process          (callProcess)
 import           System.FilePath.Glob    as Glob (compile, globDir1)
@@ -36,6 +37,15 @@ data Flags = Flags
     , runtimeFileDir :: FilePath
     , inputFiles :: [FilePath] }
     deriving (Eq, Show)
+instance Default Flags where
+    def = Flags
+        { verbose = False
+        , outputDir = "out"
+        , outputJar = "a.jar"
+        , outputClassName = "Output"
+        , runtimeFileDir = "runtime"
+        , inputFiles = []
+        }
 
 
 parse :: FilePath -> ExceptT Text IO HsModule
