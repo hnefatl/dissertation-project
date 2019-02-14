@@ -187,9 +187,8 @@ addRenamings :: M.Map VariableName VariableName -> Converter a -> Converter a
 addRenamings rens action = do
     -- Permanently add reverse renamings for these, then run the given action with a temporarily modified state
     modify $ \st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) }
-    writeLog . showt =<< asks types
     renamedTypes <- fmap M.fromList $ forM (M.toList rens) $ \(k,v) -> (v,) <$> getType k
-    local (\st -> st { renamings = M.union rens (renamings st), types = M.union renamedTypes (types st) }) ((writeLog . showt =<< asks types) >> action)
+    local (\st -> st { renamings = M.union rens (renamings st), types = M.union renamedTypes (types st) }) action
 addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterReadableState -> ConverterReadableState
 addTypes ts state = state { types = M.union ts (types state) }
 addKinds :: M.Map TypeVariableName Kind -> Converter ()
@@ -348,23 +347,20 @@ expToIla HsInfixApp{} = throwError "Infix applications not supported: should've 
 expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
 expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
-    argName <- freshVarName
+    argNames <- replicateM (length pats) freshVarName
     expType <- getSimpleFromSynType t
-    (argType, bodyType) <- T.unwrapFun expType
+    (argTypes, bodyType) <- T.unmakeFun expType
     reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
     renames <- M.unions . snd . unzip <$> mapM getPatRenamings pats
-    patVariableTypes <- fmap (Quantified S.empty) . M.unions <$> mapM (\p -> getPatVariableTypes p argType) pats
+    patVariableTypes <- fmap (Quantified S.empty) . M.unions <$> zipWithM getPatVariableTypes pats argTypes
     let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
         log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
-    body <- local (addTypes patVariableTypes) $ addRenamings renames $ do
-        nextBody <- expToIla (HsExpTypeSig l (HsLambda l' pats e) reducedType)
-        --patToIla p argType (Var argName argType) nextBody bodyType
-        -- Probably just need a single lambda processor now? Can handle multiple pattern so.
-        patToIla [(argName, expType)] [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
-    return (Lam argName argType body)
+    body <- local (addTypes patVariableTypes) $ addRenamings renames $
+        patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
+    return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
 --expToIla (HsLet (d:ds) e) = do
@@ -481,18 +477,19 @@ patToIla ((v, t):vs) cs def = do
         throwError "Literals in pattern match in ILA"
     else if allCon then do
         conGroups <- groupPatCons getPat pats
-        alts <- forM conGroups $ \(con, es) -> do
+        alts <- forM conGroups $ \(con, (HsPApp _ newpats:ps, r, t, s):es) -> do
             cont <- asks (M.lookup con . types) >>= \case
                 Just (Quantified _ t) -> return t
                 Nothing -> throwError $ "No type for constructor " <> showt con
-            (args, _) <- T.unmakeFun cont
+            let (args, _) = T.unmakeCon cont
             freshArgVars <- replicateM (length args) freshVarName
-            body <- patToIla (zip freshArgVars args <> vs) es def
+            body <- patToIla (zip freshArgVars args <> vs) ((newpats <> ps, r, t, s):es) def
             return $ Alt (DataCon con freshArgVars) body
         let defaultAlt = Alt Default def
         return $ Case (Var v t) [] (defaultAlt:alts)
     else -- Mixture of variables/literals/constructors
         throwError "Not implemented yet in patToIla"
+patToIla a b c = throwError $ unlines ["patToIla bug: ", showt a, showt b, showt c]
 
 -- Get the type of each pattern:
 data PatType = Variable | Constructor | Literal
