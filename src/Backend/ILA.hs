@@ -435,6 +435,42 @@ litToIla (HsFrac r)   = return $ LiteralFrac r
 litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
 
 
+-- |Wrapper around patToBindings' that ensures we don't generate two bindings for simple variable bindings.
+patToBindings :: HsPat -> Expr -> Converter [Binding Expr]
+patToBindings p@HsPVar{} e = patToBindings' p e
+patToBindings p e = do
+    -- We're going to generate more than one binding: avoid duplicating the head expression in each by binding it to a
+    -- main variable
+    v <- freshVarName
+    eType <- getExprType e
+    (NonRec v e:) <$> patToBindings' p (Var v eType)
+
+-- |Generates bindings of values to variables from the given pattern and expression.
+-- Essentially traverse the pattern tree looking for bound variables, then creates a binding that unwraps the expression
+-- down to the value bound to the pattern.
+patToBindings' :: HsPat -> Expr -> Converter [Binding Expr]
+patToBindings' (HsPVar v) e = return [NonRec (convertName v) e]
+patToBindings' (HsPApp con ps) e = do
+    eType <- getExprType e
+    let psLength = length ps
+        f (p, i) = do
+            vs <- replicateM psLength freshVarName
+            let v = vs !! i
+            nextBody <- patToBindings' p (Var v eType)
+            -- TODO(kc506): rather than generating loads of new variable names, use Nothing/Just.
+            return $ Case e [] [ Alt (DataCon (convertName con) vs) nextBody , Alt Default $ makeError eType ]
+    concat <$> mapM f (zip ps [0..])
+patToBindings' (HsPParen p) e = patToBindings' p e
+patToBindings' (HsPAsPat n p) e = (NonRec (convertName n) e:) <$> patToBindings' p e
+patToBindings' HsPWildCard _ = return []
+patToBindings' HsPInfixApp{} _ = throwError "HsPInfixApp should've been replaced already"
+patToBindings' HsPTuple{} _ = throwError "HsPTuple should've been replaced already"
+patToBindings' HsPList{} _ = throwError "HsPList should've been replaced already"
+patToBindings' HsPLit{} _ = throwError "HsPLit in decl patterns not yet supported"
+patToBindings' HsPNeg{} _ = throwError "HsPNeg in decl patterns not yet supported"
+patToBindings' HsPRec{} _ = throwError "HsPRec in decl patterns not yet supported"
+patToBindings' HsPIrrPat{} _ = throwError "HsPIrrPat in decl patterns not yet supported"
+
 -- Implemented as in "The Implementation of Functional Programming Languages"
 patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution)] -> Expr -> Converter Expr
 patToIla _ [] def = return def
@@ -450,17 +486,17 @@ patToIla ((v, t):vs) cs def = do
     allLiteral <- allPatType Literal pats
     allCon <- allPatType Constructor pats
     if allVariable then do
-        -- Extract the variable names `ns` from the patterns, get the new cases `cs'`
-        cs' <- forM cs $ \(pl, e, et, sub) -> case pl of
+        -- Extract the variable names `ns` from the patterns, get the new cases
+        pats' <- forM pats $ \(pl, e, et, sub) -> case pl of
             HsPVar n:ps -> return (ps, e, et, subCompose sub $ subSingle (convertName n) v)
             [] -> throwError "Internal: wrong patterns length"
-            _ -> throwError "Non-HsPVar in variables"
-        patToIla vs cs' def
+            p:_ -> throwError $ "Non-HsPVar in variables: " <> showt p
+        patToIla vs pats' def
     else if allLiteral then
         -- Not supported yet...
         throwError "Literals in pattern match in ILA"
     else if allCon then do
-        conGroups <- groupPatCons getPat cs
+        conGroups <- groupPatCons getPat pats
         alts <- forM conGroups $ \(con, es) -> do
             cont <- asks (M.lookup con . types) >>= \case
                 Just (Quantified _ t) -> return t
