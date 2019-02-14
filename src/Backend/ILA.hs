@@ -12,7 +12,8 @@ import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
-import           Data.Default                (Default, def)
+import           Data.Default                (Default)
+import qualified Data.Default                as Default (def)
 import           Data.List.Extra             (foldl', intersperse, groupOn)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
@@ -174,7 +175,7 @@ newtype Converter a = Converter (ReaderT ConverterReadableState (StateT Converte
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
 runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter x rs ts ks = runStateT (runReaderT inner rState) def
+runConverter x rs ts ks = runStateT (runReaderT inner rState) Default.def
     where Converter inner = addKinds ks >> x
           rState = ConverterReadableState { renamings = M.empty, topLevelRenames = rs, types = ts }
 evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
@@ -292,34 +293,13 @@ toIla (HsModule _ _ _ _ decls) = do
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
     -- Precompute a mapping from the bound names in the patterns to some fresh names
+    -- TODO(kc506): Do we need these renamings?
     (boundNames, renames) <- getPatRenamings pat
-    let boundNameLength = length boundNames
-    boundTypes <- mapM getSimpleType boundNames -- Type of each bound name
-    writeLog $ "Found bound names: " <> Text.intercalate " " (zipWith (middleText " :: ") boundNames boundTypes)
-    -- Create expressions for each of the fresh names
-    let renamedExps = zipWith (\name t -> Var (renames M.! name) t) boundNames boundTypes
-    -- Generate an expression that matches the patterns then returns a tuple of every variable
-    let resultType  = T.makeTuple boundTypes
-    resultTuple <- makeTuple (zip renamedExps boundTypes)
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    resultExpr <- local (addTypes ts) $ addRenamings renames $ do
-        rhst <- rhsType rhs
-        argName <- freshVarName
-        patToIla [(argName, rhst)] [([pat], rhs, rhst, subEmpty)] (makeError rhst)
-    -- The variable name used to store the result tuple: each bound name in the patterns pulls their values from this
-    resultName <- freshVarName
-    -- For each bound name, generate a binding that extracts the variable from the result tuple
-    let extractorMap (name, index) = do
-            bindingType <- getSimpleType name -- Get the type of this bound variable
-            tempNames   <- replicateM boundNameLength freshVarName -- Create temporary variables for pattern matching on
-            let tempName = tempNames !! index -- Get the temporary name in the right position in the tuple
-                body = Var tempName bindingType
-            -- Just retrieve the specific output variable
-            tupleName <- getTupleName
-            return $ NonRec name $ Case (Var resultName resultType) [] [ Alt (DataCon tupleName tempNames) body , Alt Default (makeError bindingType) ]
-    extractors <- mapM extractorMap (zip boundNames [0 ..])
-    return $ Rec (M.singleton resultName resultExpr):extractors
-declToIla (HsFunBind matches) = throwError "Functions not supported in ILA"
+    local (addTypes ts) $ addRenamings renames $ do
+        e <- rhsToIla rhs
+        patToBindings pat e
+declToIla HsFunBind{} = throwError "Functions not supported in ILA"
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do
@@ -437,39 +417,43 @@ litToIla l            = throwError $ "Unboxed primitives not supported: " <> sho
 
 -- |Wrapper around patToBindings' that ensures we don't generate two bindings for simple variable bindings.
 patToBindings :: HsPat -> Expr -> Converter [Binding Expr]
-patToBindings p@HsPVar{} e = patToBindings' p e
+patToBindings p@HsPVar{} e = mapM ($ e) =<< patToBindings' p
 patToBindings p e = do
     -- We're going to generate more than one binding: avoid duplicating the head expression in each by binding it to a
     -- main variable
     v <- freshVarName
     eType <- getExprType e
-    (NonRec v e:) <$> patToBindings' p (Var v eType)
+    fmap (NonRec v e:) . mapM ($ (Var v eType)) =<< patToBindings' p
 
--- |Generates bindings of values to variables from the given pattern and expression.
--- Essentially traverse the pattern tree looking for bound variables, then creates a binding that unwraps the expression
--- down to the value bound to the pattern.
-patToBindings' :: HsPat -> Expr -> Converter [Binding Expr]
-patToBindings' (HsPVar v) e = return [NonRec (convertName v) e]
-patToBindings' (HsPApp con ps) e = do
-    eType <- getExprType e
-    let psLength = length ps
-        f (p, i) = do
-            vs <- replicateM psLength freshVarName
-            let v = vs !! i
-            nextBody <- patToBindings' p (Var v eType)
+-- |Generates bindings of values to variables from the given pattern and expression. Essentially traverse the pattern
+-- tree looking for bound variables, then creates a binding that unwraps the given expression down to the value bound to
+-- the pattern.
+-- TODO(kc506): Pretty sure we can just bind the expression to a main value then use patToIla to generate
+-- the secondary bindings...
+patToBindings' :: MonadError Text m => HsPat -> m [Expr -> Converter (Binding Expr)]
+patToBindings' (HsPVar v) = return [return . NonRec (convertName v)]
+patToBindings' HsPWildCard = return []
+patToBindings' (HsPParen p) = patToBindings' p
+patToBindings' (HsPAsPat n p) = (return . NonRec (convertName n):) <$> patToBindings' p
+patToBindings' (HsPApp con ps) = do
+    newBindingConts <- concat . zipWith (\i -> map (i,)) [0..] <$> mapM patToBindings' ps
+    let wrapInCase :: (Int, Expr -> Converter (Binding Expr)) -> Expr -> Converter (Binding Expr)
+        wrapInCase (i, c) = \e -> do
             -- TODO(kc506): rather than generating loads of new variable names, use Nothing/Just.
-            return $ Case e [] [ Alt (DataCon (convertName con) vs) nextBody , Alt Default $ makeError eType ]
-    concat <$> mapM f (zip ps [0..])
-patToBindings' (HsPParen p) e = patToBindings' p e
-patToBindings' (HsPAsPat n p) e = (NonRec (convertName n) e:) <$> patToBindings' p e
-patToBindings' HsPWildCard _ = return []
-patToBindings' HsPInfixApp{} _ = throwError "HsPInfixApp should've been replaced already"
-patToBindings' HsPTuple{} _ = throwError "HsPTuple should've been replaced already"
-patToBindings' HsPList{} _ = throwError "HsPList should've been replaced already"
-patToBindings' HsPLit{} _ = throwError "HsPLit in decl patterns not yet supported"
-patToBindings' HsPNeg{} _ = throwError "HsPNeg in decl patterns not yet supported"
-patToBindings' HsPRec{} _ = throwError "HsPRec in decl patterns not yet supported"
-patToBindings' HsPIrrPat{} _ = throwError "HsPIrrPat in decl patterns not yet supported"
+            vs <- replicateM (length ps) freshVarName
+            let v = vs !! i
+            eType <- getExprType e
+            c (Var v eType) >>= \case
+              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default $ makeError eType ]
+              Rec{} -> throwError "Recursive bindings not supported in patToBindings'"
+    return $ map wrapInCase newBindingConts
+patToBindings' (HsPInfixApp p1 c p2) = patToBindings' $ HsPApp c [p1, p2]
+patToBindings' HsPTuple{} = throwError "HsPTuple should've been replaced already"
+patToBindings' HsPList{} = throwError "HsPList should've been replaced already"
+patToBindings' HsPLit{} = throwError "HsPLit in decl patterns not yet supported"
+patToBindings' HsPNeg{} = throwError "HsPNeg in decl patterns not yet supported"
+patToBindings' HsPRec{} = throwError "HsPRec in decl patterns not yet supported"
+patToBindings' HsPIrrPat{} = throwError "HsPIrrPat in decl patterns not yet supported"
 
 -- Implemented as in "The Implementation of Functional Programming Languages"
 patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution)] -> Expr -> Converter Expr
@@ -479,7 +463,7 @@ patToIla [] (([], r, _, Substitution sub):_) _ =
     addRenamings sub $ rhsToIla r
 patToIla ((v, t):vs) cs def = do
     let getPat (x:_, _, _, _) = x
-        getPat ([], _, _, _) = undefined
+        getPat ([], _, _, _) = error "Empty initial pattern in patToIla"
         allPatType pt = allM (fmap (== pt) . getPatType . getPat)
     pats <- mapM (reducePats v) cs
     allVariable <- allPatType Variable pats
