@@ -105,4 +105,10 @@ test = testGroup "Renamer"
     , makeVanillaTest
         "data [] a = [] | a :+ [a] ; x = []:+[]"
         "data [] a = V0 | V1 a [a] ; x = V0 `V1` V0"
+    , makeVanillaTest
+        "class Functor f where { fmap :: (a -> b) -> f a -> f b }"
+        "class Functor z0 where { z :: (z1 -> z2) -> z0 z1 -> z0 z2 }"
+    , makeVanillaTest
+        "data Maybe a = Nothing | Just a ; class Functor f where { fmap :: (a -> b) -> f a -> f b }"
+        "data Maybe x0 = Nothing | Just x0 ; class Functor z0 where { z :: (z1 -> z2) -> z0 z1 -> z0 z2 }"
     ]

@@ -94,16 +94,12 @@ bindVariableForScope names action = do
 bindTypeVariableForScope :: S.Set TypeVariableName -> Renamer a -> Renamer a
 bindTypeVariableForScope names action = do
     mapping <- M.fromList <$> mapM (\name -> (name,) <$> freshUniqueTypeVarName) (S.toList names)
-    modify (\s -> s { typeVariableBindings = M.unionWith (<>) (M.map pure mapping) (typeVariableBindings s) })
+    oldBindings <- gets typeVariableBindings
+    modify (\s -> s { typeVariableBindings = M.unionWith (<>) (M.map pure mapping) oldBindings })
     let reverseMapping = M.fromList $ map swap $ M.toList mapping
     modify (\s -> s { typeVariableReverseMapping = M.union (typeVariableReverseMapping s) reverseMapping })
     result <- action
-    forM_ names $ \name -> do
-        bindings' <- gets typeVariableBindings
-        case M.lookup name bindings' of
-            Nothing     -> throwError $ "Type Variable " <> showt name <> " is not defined."
-            Just []     -> throwError $ "Type Variable " <> showt name <> " is not in scope."
-            Just (_:bs) -> modify (\s -> s { typeVariableBindings = M.insert name bs bindings' })
+    modify (\s -> s { typeVariableBindings = oldBindings })
     return result
 
 
@@ -268,6 +264,8 @@ renameQualTypeWithExistingScope qt@(HsQualType quals t) = do
     existingBindings <- gets (M.keysSet . typeVariableBindings)
     let contained = getFreeTypeVariables qt
         newBindings = S.difference contained existingBindings
+    tvbs <- gets typeVariableBindings
+    writeLog $ unwords ["renameQualTypeWithExistingScope:", synPrint qt, showt tvbs, showt contained, showt newBindings]
     bindTypeVariableForScope newBindings $ HsQualType <$> renames quals <*> rename t
 
 instance Renameable HsQualType where
