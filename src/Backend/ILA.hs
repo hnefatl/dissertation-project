@@ -427,7 +427,7 @@ patToBindings p e = do
 -- TODO(kc506): Pretty sure we can just bind the expression to a main value then use patToIla to generate
 -- the secondary bindings...
 patToBindings' :: MonadError Text m => HsPat -> m [Expr -> Converter (Binding Expr)]
-patToBindings' (HsPVar v) = return [return . NonRec (convertName v)]
+patToBindings' (HsPVar v) = return [ \e -> NonRec <$> (getRenamedOrDefault $ convertName v) <*> pure e ]
 patToBindings' HsPWildCard = return []
 patToBindings' (HsPParen p) = patToBindings' p
 patToBindings' (HsPAsPat n p) = (return . NonRec (convertName n):) <$> patToBindings' p

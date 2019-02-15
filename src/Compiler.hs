@@ -14,7 +14,7 @@ import           System.Process          (callProcess)
 import           System.FilePath.Glob    as Glob (compile, globDir1)
 import           TextShow                (TextShow, showt)
 
-import           ExtraDefs               (pretty, synPrint)
+import           ExtraDefs               (pretty, synPrint, inverseMap)
 import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                   (VariableName)
@@ -69,9 +69,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
           x = do
             m <- embedExceptIOIntoResult $ parse f
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
-            mainName <- case M.lookup "_main" topLevelRenames of
-                Nothing -> throwError "No _main symbol found."
-                Just n       -> return n
             ((taggedModule, types), classEnvironment, kinds) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,,) <$> inferModule renamedModule <*> getClassEnvironment <*> getKinds
             (deoverloadedModule, types', kinds') <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
@@ -79,6 +76,10 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds'
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
+            print reverseRenames
+            mainName <- case M.lookup "_main" (inverseMap reverseRenames) of
+                Nothing -> throwError "No _main symbol found."
+                Just n       -> return n
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
             ilaanf <- catchAddText (unlines $ map showt ila) $ ILAANF.ilaToAnf ila
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
