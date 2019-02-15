@@ -295,7 +295,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     -- Add the types of bound variables
     (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    local (addTypes ts) $ do -- $ addRenamings renames $ do
+    local (addTypes ts) $ do
         e <- rhsToIla rhs
         patToBindings pat e
 declToIla (HsFunBind []) = throwError $ "Function definition with empty matches"
