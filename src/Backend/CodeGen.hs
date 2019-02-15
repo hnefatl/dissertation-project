@@ -306,6 +306,7 @@ compileExp (ExpVar v) = pushSymbol v
 compileExp (ExpLit l) = pushLit l
 compileExp (ExpApp fun args) = do
     pushSymbol fun -- Grab the function
+    invokeVirtual heapObject enter -- Make sure we evaluate any thunks
     invokeVirtual heapObject clone -- Copy it so we don't mutate the reference version
     checkCast function -- Cast the returned Object to a Function
     -- Add each argument to the function object
