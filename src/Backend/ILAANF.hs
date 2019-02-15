@@ -98,11 +98,27 @@ ilaExpToTrivial (ILA.Lit l t) = return $ Lit l t
 ilaExpToTrivial (ILA.Type t)  = return $ Type t
 ilaExpToTrivial e             = throwError $ "Non-trivial ILA to be converted to an ILA-ANF trivial: " <> showt e
 
+ilaExpIsTrivial :: ILA.Expr -> Bool
+ilaExpIsTrivial ILA.Var{} = True
+ilaExpIsTrivial ILA.Con{} = True
+ilaExpIsTrivial ILA.Lit{} = True
+ilaExpIsTrivial ILA.Type{} = True
+ilaExpIsTrivial _          = False
+
 ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
 ilaExpToApp e@ILA.App{} = do
     (fun, args) <- ILA.unmakeApplication e
-    fun' <- TrivApp <$> ilaExpToTrivial fun
-    makeBindings args (return . CompApp . foldl' App fun')
+    if ilaExpIsTrivial fun then do
+        -- If we're looking at an application to a trivial value (eg. `f x`) then just translate it direct
+        fun' <- TrivApp <$> ilaExpToTrivial fun
+        makeBindings args (return . CompApp . foldl' App fun')
+    else do
+        -- If the application is complex like `(\x -> x) y` then let-bind the function to a variable and use that in the
+        -- application
+        fun' <- ilaExpToRhs fun
+        v <- freshVarName
+        t <- getAnfRhsType fun'
+        Let v t fun' <$> makeBindings args (return . CompApp . foldl' App (TrivApp $ Var v t))
 ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF application: " <> showt e
 
 ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex

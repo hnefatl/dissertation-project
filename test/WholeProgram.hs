@@ -112,6 +112,6 @@ test = testGroup "Whole Program" $ map makeTest
                 _main = (\(Foo x) -> x) (Foo True)
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "Data: { branch: 1, data: { } }\n"
         )
     ]
