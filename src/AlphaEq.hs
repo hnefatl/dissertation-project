@@ -6,9 +6,10 @@
 module AlphaEq where
 
 import           BasicPrelude
-import           Control.Monad.Except       (ExceptT, Except, MonadError, catchError, liftEither, runExceptT, runExcept, throwError)
+import           Control.Monad.Except       (Except, ExceptT, MonadError, catchError, liftEither, runExcept, runExceptT,
+                                             throwError)
 import           Control.Monad.Extra        (findM)
-import           Control.Monad.State.Strict (MonadState, State, evalStateT, gets, modify, runState, get, put)
+import           Control.Monad.State.Strict (MonadState, State, evalStateT, get, gets, modify, put, runState)
 import           Data.Either                (isRight)
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
@@ -324,15 +325,15 @@ stripExpParens (HsList es)           = HsList (map stripExpParens es)
 stripExpParens (HsExpTypeSig l e t)  = HsExpTypeSig l (stripExpParens e) t
 stripExpParens e                     = e
 stripPatParens :: HsPat -> HsPat
-stripPatParens (HsPParen p) = stripPatParens p
+stripPatParens (HsPParen p)          = stripPatParens p
 stripPatParens p@HsPVar{}            = p
 stripPatParens p@HsPLit{}            = p
 stripPatParens (HsPNeg p)            = HsPNeg $ stripPatParens p
 stripPatParens (HsPInfixApp p1 n p2) = HsPInfixApp (stripPatParens p1) n (stripPatParens p2)
 stripPatParens (HsPApp con ps)       = HsPApp con $ map stripPatParens ps
-stripPatParens (HsPTuple ps) = HsPTuple $ map stripPatParens ps
-stripPatParens (HsPList ps) = HsPList $ map stripPatParens ps
+stripPatParens (HsPTuple ps)         = HsPTuple $ map stripPatParens ps
+stripPatParens (HsPList ps)          = HsPList $ map stripPatParens ps
 stripPatParens (HsPAsPat n p)        = HsPAsPat n $ stripPatParens p
 stripPatParens HsPWildCard           = HsPWildCard
 stripPatParens (HsPIrrPat p)         = HsPIrrPat $ stripPatParens p
-stripPatParens HsPRec{} = error "HsPRec in stripPatParens"
+stripPatParens HsPRec{}              = error "HsPRec in stripPatParens"

@@ -1,10 +1,10 @@
-import Test.Tasty
+import           Test.Tasty
 
-import BasicPrelude
 import qualified AlphaEqSpec
 import qualified Backend.DeoverloadSpec
 import qualified Backend.ILAANFSpec
 import qualified Backend.ILASpec
+import           BasicPrelude
 import qualified Preprocessor.DependencySpec
 import qualified Preprocessor.RenamerSpec
 import qualified Typechecker.SubstitutionSpec

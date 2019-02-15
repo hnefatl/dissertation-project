@@ -1,18 +1,18 @@
-{-# Language QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module WholeProgram where
 
-import           Test.Tasty
-import           Test.Tasty.HUnit
+import Test.Tasty
+import Test.Tasty.HUnit
 
-import           BasicPrelude
-import           NeatInterpolation
-import           Data.Text               (unpack)
-import           Data.Default            (def)
-import           System.Process          (readProcessWithExitCode)
-import           System.Exit             (ExitCode(ExitSuccess))
-import           System.IO.Temp
-import           Compiler (Flags(outputJar))
+import BasicPrelude
+import Compiler          (Flags(outputJar))
+import Data.Default      (def)
+import Data.Text         (unpack)
+import NeatInterpolation
+import System.Exit       (ExitCode(ExitSuccess))
+import System.IO.Temp
+import System.Process    (readProcessWithExitCode)
 
 
 makeTest :: (String, Text, String) -> TestTree
@@ -26,7 +26,7 @@ makeTest (title, source, expected) = testCase title $ do
         unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
         (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
         unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
-        assertEqual buildOutput expected runOutput 
+        assertEqual buildOutput expected runOutput
 
 test :: TestTree
 test = testGroup "Whole Program" $ map makeTest

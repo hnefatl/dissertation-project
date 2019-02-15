@@ -1,17 +1,17 @@
-{-# Language TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 
 module ExtraDefs where
 
-import           BasicPrelude            hiding (intercalate, encodeUtf8)
-import           Data.Foldable           (foldl', foldlM, length)
+import           BasicPrelude            hiding (encodeUtf8, intercalate)
 import           Control.Monad.Except    (MonadError, catchError, throwError)
+import qualified Data.ByteString.Lazy    as B
+import           Data.Foldable           (foldl', foldlM, length)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
-import           Data.Tuple              (swap)
 import           Data.Text               (intercalate, lines, pack, unpack)
-import           Data.Text.Lazy          (toStrict, fromStrict)
+import           Data.Text.Lazy          (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
-import qualified Data.ByteString.Lazy    as B
+import           Data.Tuple              (swap)
 import           Language.Haskell.Pretty (Pretty, prettyPrint)
 import           Text.Pretty.Simple      (pString)
 import           TextShow                (TextShow, showt)
@@ -50,9 +50,9 @@ zipOverM_ :: Applicative f => [a] -> [b] -> (a -> b -> f c) -> f ()
 zipOverM_ xs ys f = zipWithM_ f xs ys
 
 zipWithM3 :: Applicative f => (a -> b -> c -> f d) -> [a] -> [b] -> [c] -> f [d]
-zipWithM3 _ [] _ _ = pure []
-zipWithM3 _ _ [] _ = pure []
-zipWithM3 _ _ _ [] = pure []
+zipWithM3 _ [] _ _               = pure []
+zipWithM3 _ _ [] _               = pure []
+zipWithM3 _ _ _ []               = pure []
 zipWithM3 f (x:xs) (y:ys) (z:zs) = (:) <$> f x y z <*> zipWithM3 f xs ys zs
 
 zipOverM3 :: Applicative f => [a] -> [b] -> [c] -> (a -> b -> c -> f d) -> f [d]

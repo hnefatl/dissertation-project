@@ -52,11 +52,11 @@ instance NameConvertible Syntax.HsSpecialCon Text where
 instance NameConvertible Syntax.HsName Text where
     convertName (HsIdent name)  = pack name
     convertName (HsSymbol name) = pack name
-    convertName (HsSpecial s) = convertName s
+    convertName (HsSpecial s)   = convertName s
 instance NameConvertible Syntax.HsQName Text where
-    convertName (Qual _ name)            = convertName name
-    convertName (UnQual name)            = convertName name
-    convertName (Special s)              = convertName s
+    convertName (Qual _ name) = convertName name
+    convertName (UnQual name) = convertName name
+    convertName (Special s)   = convertName s
 instance NameConvertible Syntax.HsOp Text where
     convertName (HsVarOp v) = convertName v
     convertName (HsConOp c) = convertName c

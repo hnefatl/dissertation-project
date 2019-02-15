@@ -1,15 +1,15 @@
 module Backend.CodeGen.Hooks where
 
-import BasicPrelude
-import Backend.CodeGen.Converter
-import           ExtraDefs                   (toLazyBytestring)
-import Names (VariableName)
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
+import           Backend.CodeGen.Converter
+import           BasicPrelude
+import qualified Data.Map.Strict           as M
+import qualified Data.Set                  as S
+import           ExtraDefs                 (toLazyBytestring)
+import           Names                     (VariableName)
 
-import           JVM.Builder                 hiding (locals)
-import           JVM.ClassFile               hiding (Class, Field, Method, toString)
-import Java.Lang (runtimeException, stringClass)
+import           Java.Lang                 (runtimeException, stringClass)
+import           JVM.Builder               hiding (locals)
+import           JVM.ClassFile             hiding (Class, Field, Method, toString)
 
 -- A collection of extra generator actions, used to generate extra code in the main class. Allows injecting
 -- compiler-defined code like `error`, `undefined`, and dictionaries for builtin instances like `Num Int`.

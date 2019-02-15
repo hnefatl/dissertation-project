@@ -1,8 +1,8 @@
 {-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TupleSections              #-}
 
 -- |Intermediate Language A - basically GHC's Core but without support for complicated language features like GADTs.
@@ -15,7 +15,7 @@ import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, 
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
-import           Data.List.Extra             (foldl', intersperse, groupOn)
+import           Data.List.Extra             (foldl', groupOn, intersperse)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import qualified Data.Text                   as Text
@@ -24,16 +24,17 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (inverseMap, mapError, middleText, synPrint, allM)
+import           ExtraDefs                   (allM, inverseMap, mapError, middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
                                               getBoundVariablesAndConflicts, getFreeVariables)
+import           Typechecker.Substitution    (NameSubstitution, Substitutable, Substitution(..), applySub, subCompose,
+                                              subEmpty, subSingle)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
-import Typechecker.Substitution (Substitutable, NameSubstitution, Substitution(..), applySub, subCompose, subSingle, subEmpty)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -472,7 +473,7 @@ patToIla [] (([], r, _, Substitution sub):_) _ =
     addRenamings sub $ rhsToIla r
 patToIla ((v, t):vs) cs def = do
     let getPat (x:_, _, _, _) = x
-        getPat ([], _, _, _) = error "Empty initial pattern in patToIla"
+        getPat ([], _, _, _)  = error "Empty initial pattern in patToIla"
         allPatType pt = allM (fmap (== pt) . getPatType . getPat)
     pats <- mapM (reducePats v) cs
     allVariable <- allPatType Variable pats
@@ -485,7 +486,7 @@ patToIla ((v, t):vs) cs def = do
             HsPWildCard:ps -> return ((ps, e, et, sub), Nothing)
             [] -> throwError "Internal: wrong patterns length"
             p:_ -> throwError $ "Non-HsPVar in variables: " <> showt p
-        local (addTypes $ M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty t)) $ 
+        local (addTypes $ M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty t)) $
             patToIla vs pats' def
     else if allLiteral then
         -- Not supported yet...
@@ -515,11 +516,11 @@ patToIla a b c = throwError $ unlines ["patToIla bug: ", showt a, showt b, showt
 data PatType = Variable | Constructor | Literal
     deriving (Eq)
 getPatType :: MonadError Text m => HsPat -> m PatType
-getPatType HsPVar{} = return Variable
+getPatType HsPVar{}    = return Variable
 getPatType HsPWildCard = return Variable
-getPatType HsPLit{} = return Literal
-getPatType HsPApp{} = return Constructor
-getPatType p = throwError $ "Illegal pattern " <> showt p
+getPatType HsPLit{}    = return Literal
+getPatType HsPApp{}    = return Constructor
+getPatType p           = throwError $ "Illegal pattern " <> showt p
 
 -- |Group items by their pattern type
 groupPatsOn :: MonadError Text m => (a -> HsPat) -> [a] -> m [(PatType, [a])]
@@ -532,7 +533,7 @@ groupPatCons :: (MonadError Text m, Eq a) => (a -> HsPat) -> [a] -> m [(Variable
 groupPatCons f xl = do
     tagged <- forM xl $ \x -> case f x of
         HsPApp n _ -> return (convertName n, x)
-        _ -> throwError "Non-constructor in rearrangePatCons"
+        _          -> throwError "Non-constructor in rearrangePatCons"
     return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortBy (comparing fst) tagged
 
 -- |Reduce patterns so that the root of each pattern is a variable/literal/constructor
@@ -540,11 +541,11 @@ reducePats :: MonadError Text m => VariableName -> ([HsPat], HsRhs, Type, NameSu
 reducePats _ x@([], _, _, _) = return x
 reducePats v (p:ps, e, t', s) = case p of
     HsPInfixApp x1 op x2 -> return (HsPApp op [x1, x2]:ps, e, t', s)
-    HsPParen x -> reducePats v (x:ps, e, t', s)
-    HsPAsPat n x -> reducePats v (x:ps, e, t', subCompose s $ subSingle (convertName n) v)
-    HsPTuple{} -> throwError "HsPTuple should've been removed in the renamer"
-    HsPList{} -> throwError "HsPList should've been removed in the renamer"
-    _ -> return (p:ps, e, t', s)
+    HsPParen x           -> reducePats v (x:ps, e, t', s)
+    HsPAsPat n x         -> reducePats v (x:ps, e, t', subCompose s $ subSingle (convertName n) v)
+    HsPTuple{}           -> throwError "HsPTuple should've been removed in the renamer"
+    HsPList{}            -> throwError "HsPList should've been removed in the renamer"
+    _                    -> return (p:ps, e, t', s)
 
 
 instance HasFreeVariables a => HasFreeVariables (Alt a) where
@@ -569,11 +570,11 @@ instance HasFreeVariables a => HasFreeVariables (Binding a) where
 instance Substitutable VariableName VariableName Expr where
     applySub (Substitution sub) (Var v t) = Var (M.findWithDefault v v sub) t
     applySub (Substitution sub) (Con v t) = Con (M.findWithDefault v v sub) t
-    applySub _ l@Lit{} = l
-    applySub sub (App e1 e2) = App (applySub sub e1) (applySub sub e2)
-    applySub sub (Lam v t e) = Lam v t (applySub sub e)
-    applySub sub (Let v t e b) = Let v t (applySub sub e) (applySub sub b)
-    applySub sub (Case e vs as) = Case (applySub sub e) vs (applySub sub as)
-    applySub _ t@Type{} = t
+    applySub _ l@Lit{}                    = l
+    applySub sub (App e1 e2)              = App (applySub sub e1) (applySub sub e2)
+    applySub sub (Lam v t e)              = Lam v t (applySub sub e)
+    applySub sub (Let v t e b)            = Let v t (applySub sub e) (applySub sub b)
+    applySub sub (Case e vs as)           = Case (applySub sub e) vs (applySub sub as)
+    applySub _ t@Type{}                   = t
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)

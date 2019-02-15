@@ -6,15 +6,15 @@ module Compiler where
 
 import           BasicPrelude
 import           Control.Monad.Except    (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Data.Default            (Default, def)
 import qualified Data.Map                as M
 import           Data.Text               (pack, unpack)
-import           Data.Default            (Default, def)
 import           System.Exit             (exitFailure)
-import           System.Process          (callProcess)
 import           System.FilePath.Glob    as Glob (compile, globDir1)
+import           System.Process          (callProcess)
 import           TextShow                (TextShow, showt)
 
-import           ExtraDefs               (pretty, synPrint, inverseMap)
+import           ExtraDefs               (inverseMap, pretty, synPrint)
 import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                   (VariableName)
@@ -27,15 +27,15 @@ import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
-import           Typechecker.Typechecker (evalTypeInferrer, inferModule, getClassEnvironment, getKinds)
+import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, getKinds, inferModule)
 
 data Flags = Flags
-    { verbose :: Bool
-    , outputDir :: FilePath
-    , outputJar :: FilePath
+    { verbose         :: Bool
+    , outputDir       :: FilePath
+    , outputJar       :: FilePath
     , outputClassName :: FilePath
-    , runtimeFileDir :: FilePath
-    , inputFiles :: [FilePath] }
+    , runtimeFileDir  :: FilePath
+    , inputFiles      :: [FilePath] }
     deriving (Eq, Show)
 instance Default Flags where
     def = Flags
@@ -78,7 +78,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             mainName <- case M.lookup "_main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No _main symbol found."
-                Just n       -> return n
+                Just n  -> return n
             when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
             ilaanf <- catchAddText (unlines $ map showt ila) $ ILAANF.ilaToAnf ila
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]

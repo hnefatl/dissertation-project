@@ -1,32 +1,32 @@
-{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 
 module Backend.CodeGen.Converter where
 
-import           BasicPrelude                hiding (encodeUtf8, head, init, inits)
-import           Control.Monad.Except        (Except, ExceptT, runExcept, throwError)
-import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify)
-import qualified Data.ByteString.Lazy        as B
-import           Data.Functor                (void)
-import qualified Data.Map.Strict             as M
-import qualified Data.Sequence               as Seq
-import qualified Data.Set                    as S
-import           Data.Word                   (Word16)
-import           TextShow                    (TextShow, showb, showt)
+import           BasicPrelude               hiding (encodeUtf8, head, init, inits)
+import           Control.Monad.Except       (Except, ExceptT, runExcept, throwError)
+import           Control.Monad.State.Strict (MonadState, StateT, get, gets, modify)
+import qualified Data.ByteString.Lazy       as B
+import           Data.Functor               (void)
+import qualified Data.Map.Strict            as M
+import qualified Data.Sequence              as Seq
+import qualified Data.Set                   as S
+import           Data.Word                  (Word16)
+import           TextShow                   (TextShow, showb, showt)
 
 import qualified Java.Lang
 import           JVM.Assembler
-import           JVM.Builder                 hiding (locals)
-import           JVM.ClassFile               hiding (Class, Field, Method, toString)
-import qualified JVM.ClassFile               as ClassFile
+import           JVM.Builder                hiding (locals)
+import           JVM.ClassFile              hiding (Class, Field, Method, toString)
+import qualified JVM.ClassFile              as ClassFile
 
-import           Backend.ILA                 (Literal(..), Datatype(..))
+import           Backend.ILA                (Datatype(..), Literal(..))
 import           Backend.ILB
-import           ExtraDefs                   (toLazyBytestring)
-import           Logger                      (LoggerT, MonadLogger, writeLog)
+import           ExtraDefs                  (toLazyBytestring)
+import           Logger                     (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
-import           Names                       (TypeVariableName, VariableName(..), convertName)
-import qualified Typechecker.Types           as Types
+import           Names                      (TypeVariableName, VariableName(..), convertName)
+import qualified Typechecker.Types          as Types
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File
@@ -42,7 +42,7 @@ instance TextShow NamedClass where
 
 data ConverterState = ConverterState
     { -- The variable name that the entry point "_main" has been renamed to
-      mainName :: VariableName
+      mainName        :: VariableName
     ,  -- Which JVM local variable we're up to
       localVarCounter :: LocalVar
     , datatypes       :: M.Map TypeVariableName Datatype
@@ -51,7 +51,7 @@ data ConverterState = ConverterState
       -- The values associated with each symbol is the type of the equivalent field in the class (usually HeapObject).
       topLevelSymbols :: M.Map VariableName FieldType
     , -- A reverse mapping from the renamed top-level variables to what they were originally called.
-      reverseRenames :: M.Map VariableName VariableName
+      reverseRenames  :: M.Map VariableName VariableName
     , -- Local variable names, and an action that can be used to push them onto the stack
       localSymbols    :: M.Map VariableName (Converter ())
     , -- A list of initialisation actions to run as the first instructions inside `main`. Used for initialising fields.

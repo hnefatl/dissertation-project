@@ -5,18 +5,18 @@
 
 module NameGenerator where
 
-import BasicPrelude
-import Control.Monad.Except
-import Control.Monad.Identity
-import Control.Monad.Reader
-import qualified Control.Monad.State as StL
+import           BasicPrelude
+import           Control.Monad.Except
+import           Control.Monad.Identity
+import           Control.Monad.Reader
+import qualified Control.Monad.State        as StL
 import qualified Control.Monad.State.Strict as StS
-import TextShow
+import           TextShow
 
-import JVM.Builder.Monad
+import           JVM.Builder.Monad
 
-import Logger
-import Names
+import           Logger
+import           Names
 
 type NameGeneratorCounter = Int
 class Monad m => MonadNameGenerator m where

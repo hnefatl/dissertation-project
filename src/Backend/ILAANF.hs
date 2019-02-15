@@ -99,9 +99,9 @@ ilaExpToTrivial (ILA.Type t)  = return $ Type t
 ilaExpToTrivial e             = throwError $ "Non-trivial ILA to be converted to an ILA-ANF trivial: " <> showt e
 
 ilaExpIsTrivial :: ILA.Expr -> Bool
-ilaExpIsTrivial ILA.Var{} = True
-ilaExpIsTrivial ILA.Con{} = True
-ilaExpIsTrivial ILA.Lit{} = True
+ilaExpIsTrivial ILA.Var{}  = True
+ilaExpIsTrivial ILA.Con{}  = True
+ilaExpIsTrivial ILA.Lit{}  = True
 ilaExpIsTrivial ILA.Type{} = True
 ilaExpIsTrivial _          = False
 

@@ -1,8 +1,8 @@
+{-# LANGUAGE ConstraintKinds       #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE TypeSynonymInstances  #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ConstraintKinds       #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 
 module Typechecker.Substitution where
 
@@ -42,7 +42,7 @@ instance Ord a => Substitutable a a a where
 instance Substitutable TypeVariableName Type Type where
     applySub (Substitution subs) t@(TypeVar (TypeVariable name _)) = M.findWithDefault t name subs
     applySub (Substitution subs) t@(TypeCon (TypeConstant name _)) = M.findWithDefault t name subs
-    applySub sub (TypeApp t1 t2 k)                              = TypeApp (applySub sub t1) (applySub sub t2) k
+    applySub sub (TypeApp t1 t2 k)                                 = TypeApp (applySub sub t1) (applySub sub t2) k
 instance Substitutable TypeVariableName Type TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
 instance TypeSubstitutable a => Substitutable TypeVariableName Type (Qualified a) where
