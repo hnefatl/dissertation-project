@@ -116,7 +116,7 @@ test = testGroup "Whole Program" $ map makeTest
         )
     ,
         (
-            "_main = (\\(Foo x) -> x) (Foo True)"
+            "_main = all not (False :+ (False :+ []))"
         ,
             [text|
                 data Bool = False | True

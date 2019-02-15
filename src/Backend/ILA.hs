@@ -14,6 +14,7 @@ import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local,
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
+import           Data.Foldable               (foldrM)
 import           Data.List.Extra             (foldl', intersperse, groupOn)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
@@ -291,8 +292,7 @@ toIla (HsModule _ _ _ _ decls) = do
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
-    -- Precompute a mapping from the bound names in the patterns to some fresh names
-    -- TODO(kc506): Do we need these renamings?
+    -- Add the types of bound variables
     (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
     local (addTypes ts) $ do -- $ addRenamings renames $ do
@@ -309,11 +309,9 @@ declToIla (HsFunBind (m:ms)) = do
     (argTypes, retType) <- T.unmakeFun =<< getSimpleType (convertName funName)
     args <- flip zip argTypes <$> replicateM arity freshVarName
     let matchToArg (HsMatch _ _ pats rhs _) = (pats, rhs, retType, subEmpty)
-    body <- patToIla args (map matchToArg (m:ms)) (makeError retType)
-    return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
-
---patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution)] -> Expr -> Converter Expr
-
+    local (addTypes $ M.map (Quantified S.empty) $ M.fromList args) $ do
+        body <- patToIla args (map matchToArg (m:ms)) (makeError retType)
+        return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do
@@ -482,11 +480,13 @@ patToIla ((v, t):vs) cs def = do
     allCon <- allPatType Constructor pats
     if allVariable then do
         -- Extract the variable names `ns` from the patterns, get the new cases
-        pats' <- forM pats $ \(pl, e, et, sub) -> case pl of
-            HsPVar n:ps -> return (ps, e, et, subCompose sub $ subSingle (convertName n) v)
+        (pats', varNames) <- fmap unzip $ forM pats $ \(pl, e, et, sub) -> case pl of
+            HsPVar n:ps -> return ((ps, e, et, subCompose sub $ subSingle (convertName n) v), Just $ convertName n)
+            HsPWildCard:ps -> return ((ps, e, et, sub), Nothing)
             [] -> throwError "Internal: wrong patterns length"
             p:_ -> throwError $ "Non-HsPVar in variables: " <> showt p
-        patToIla vs pats' def
+        local (addTypes $ M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty t)) $ 
+            patToIla vs pats' def
     else if allLiteral then
         -- Not supported yet...
         throwError "Literals in pattern match in ILA"
@@ -496,14 +496,19 @@ patToIla ((v, t):vs) cs def = do
             cont <- asks (M.lookup con . types) >>= \case
                 Just (Quantified _ t) -> return t
                 Nothing -> throwError $ "No type for constructor " <> showt con
-            let (args, _) = T.unmakeCon cont
-            freshArgVars <- replicateM (length args) freshVarName
-            body <- patToIla (zip freshArgVars args <> vs) ((newpats <> ps, r, t, s):es) def
-            return $ Alt (DataCon con freshArgVars) body
+            let (argTypes, _) = T.unmakeCon cont
+            freshArgVars <- replicateM (length argTypes) freshVarName
+            let freshArgTypes = zip freshArgVars argTypes
+            local (addTypes $ M.map (Quantified S.empty) $ M.fromList freshArgTypes) $ do
+                body <- patToIla (freshArgTypes <> vs) ((newpats <> ps, r, t, s):es) def
+                return $ Alt (DataCon con freshArgVars) body
         let defaultAlt = Alt Default def
         return $ Case (Var v t) [] (defaultAlt:alts)
-    else -- Mixture of variables/literals/constructors
-        throwError "Not implemented yet in patToIla"
+    else do -- Mixture of variables/literals/constructors
+        writeLog $ unlines ["mixture", showt ((v,t):vs), showt cs, showt def]
+        patGroups <- map snd <$> groupPatsOn getPat pats
+        writeLog $ "patGroups:\n" <> unlines (map showt patGroups)
+        foldrM (patToIla $ (v,t):vs) def patGroups
 patToIla a b c = throwError $ unlines ["patToIla bug: ", showt a, showt b, showt c]
 
 -- Get the type of each pattern:
@@ -526,7 +531,7 @@ groupPatsOn f xl = do
 groupPatCons :: (MonadError Text m, Eq a) => (a -> HsPat) -> [a] -> m [(VariableName, [a])]
 groupPatCons f xl = do
     tagged <- forM xl $ \x -> case f x of
-        HsPApp n ps -> return (convertName n, x)
+        HsPApp n _ -> return (convertName n, x)
         _ -> throwError "Non-constructor in rearrangePatCons"
     return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortBy (comparing fst) tagged
 
