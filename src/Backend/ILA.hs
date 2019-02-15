@@ -298,7 +298,22 @@ declToIla (HsPatBind _ pat rhs _) = do
     local (addTypes ts) $ do -- $ addRenamings renames $ do
         e <- rhsToIla rhs
         patToBindings pat e
-declToIla HsFunBind{} = throwError "Functions not supported in ILA"
+declToIla (HsFunBind []) = throwError $ "Function definition with empty matches"
+declToIla (HsFunBind (m:ms)) = do
+    let getMatchName (HsMatch _ name _ _ _) = name
+        getMatchArity (HsMatch _ _ ps _ _) = length ps
+        funName = getMatchName m
+        arity = getMatchArity m
+    unless (all ((funName ==) . getMatchName) ms) $ throwError $ unlines ["Matches with different names: ", showt ms]
+    unless (all ((arity ==) . getMatchArity) ms) $ throwError $ unlines ["Matches with different arities: ", showt ms]
+    (argTypes, retType) <- T.unmakeFun =<< getSimpleType (convertName funName)
+    args <- flip zip argTypes <$> replicateM arity freshVarName
+    let matchToArg (HsMatch _ _ pats rhs _) = (pats, rhs, retType, subEmpty)
+    body <- patToIla args (map matchToArg (m:ms)) (makeError retType)
+    return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
+
+--patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution)] -> Expr -> Converter Expr
+
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do
