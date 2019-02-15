@@ -88,6 +88,19 @@ test = testGroup "Whole Program" $ map makeTest
         )
     ,
         (
+            "_main = (True, False, True)"
+        ,
+            [text|
+                data (,,) a b c = (,,) a b c
+                data Bool = False | True
+
+                _main = (True, False, True)
+            |]
+        ,
+            "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }\n"
+        )
+    ,
+        (
             "_main = (\\(Foo x) -> x) (Foo True)"
         ,
             [text|
