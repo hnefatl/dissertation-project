@@ -293,9 +293,9 @@ declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
     -- Precompute a mapping from the bound names in the patterns to some fresh names
     -- TODO(kc506): Do we need these renamings?
-    (boundNames, renames) <- getPatRenamings pat
+    (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    local (addTypes ts) $ addRenamings renames $ do
+    local (addTypes ts) $ do -- $ addRenamings renames $ do
         e <- rhsToIla rhs
         patToBindings pat e
 declToIla HsFunBind{} = throwError "Functions not supported in ILA"

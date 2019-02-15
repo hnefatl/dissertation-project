@@ -76,7 +76,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds'
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
-            print reverseRenames
             mainName <- case M.lookup "_main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No _main symbol found."
                 Just n       -> return n
