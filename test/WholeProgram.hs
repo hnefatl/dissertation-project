@@ -114,4 +114,26 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             "Data: { branch: 1, data: { } }\n"
         )
+    ,
+        (
+            "_main = (\\(Foo x) -> x) (Foo True)"
+        ,
+            [text|
+                data Bool = False | True
+                data [] a = [] | a :+ [a]
+
+                True && True = True
+                _ && _ = False
+
+                all f [] = True
+                all f (x:+xs) = f x && all f xs
+
+                not True = False
+                not False = True
+
+                _main = all not (False :+ (False :+ []))
+            |]
+        ,
+            "Data: { branch: 1, data: { } }\n"
+        )
     ]
