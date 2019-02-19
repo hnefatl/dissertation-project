@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase       #-}
 
 module Backend.ILAANF where
 
@@ -38,7 +39,7 @@ data AnfRhs = Lam VariableName Type AnfRhs -- Lambdas are only allowed at top-le
     deriving (Eq, Ord)
 instance TextShow AnfTrivial where
     showb (Var v t) = showb v <> " :: " <> showb t
-    showb (Con v t) = showb v <> " :: " <> showb t
+    showb (Con c t) = showb c <> " ;; " <> showb t
     showb (Lit l t) = showb l <> " :: " <> showb t
     showb (Type t)  = showb t
 instance TextShow AnfApplication where
@@ -106,6 +107,7 @@ ilaExpIsTrivial ILA.Type{} = True
 ilaExpIsTrivial _          = False
 
 ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
+ilaExpToApp e@ILA.Con{} = CompApp . TrivApp <$> ilaExpToTrivial e
 ilaExpToApp e@ILA.App{} = do
     (fun, args) <- ILA.unmakeApplication e
     if ilaExpIsTrivial fun then do
@@ -123,7 +125,7 @@ ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF 
 
 ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
 ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Con{}        = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Con{}        = ilaExpToApp e
 ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
@@ -138,12 +140,14 @@ ilaExpToRhs e               = Complex <$> ilaExpToComplex e
 ilaAltToAnf :: (MonadNameGenerator m, MonadError Text m) => Alt ILA.Expr -> m (Alt AnfComplex)
 ilaAltToAnf (Alt c e) = Alt c <$> ilaExpToComplex e
 
-
 makeBinding :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> (AnfTrivial -> m AnfComplex) -> m AnfComplex
-makeBinding e makeBody = do
-    n <- freshVarName
-    t <- ILA.getExprType e
-    Let n t <$> ilaExpToRhs e <*> makeBody (Var n t)
+makeBinding e makeBody = ilaExpToRhs e >>= \case
+    Complex (Trivial t) -> makeBody t
+    r -> do
+        n <- freshVarName
+        t <- getAnfRhsType r
+        Let n t r <$> makeBody (Var n t)
+
 makeBindings :: (MonadNameGenerator m, MonadError Text m) => [ILA.Expr] -> ([AnfTrivial] -> m AnfComplex) -> m AnfComplex
 makeBindings as makeBody = helper as []
     where helper [] ns     = makeBody ns
