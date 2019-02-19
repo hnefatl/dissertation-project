@@ -6,7 +6,7 @@ module Backend.ILAANF where
 import           Backend.ILA          (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILA          as ILA
 import           BasicPrelude
-import           Control.Monad.Except (MonadError, runExceptT, throwError)
+import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.Map.Strict      as M
 import           ExtraDefs            (secondM)
 import           NameGenerator        (MonadNameGenerator, freshVarName)
