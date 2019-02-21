@@ -14,6 +14,7 @@ import           Data.Hashable           (Hashable)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (unpack)
+import qualified Data.Text               as T
 import           GHC.Generics            (Generic)
 import           Language.Haskell.Syntax as Syntax
 import           TextShow                (TextShow, fromText, showb, showt)
@@ -21,6 +22,7 @@ import           TextShow                (TextShow, fromText, showb, showt)
 import           ExtraDefs               (synPrint)
 import           NameGenerator
 import           Names
+import           Tuples                  (makeTupleName)
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
@@ -216,7 +218,8 @@ typeList = TypeCon $ TypeConstant "[]" (KindFun KindStar KindStar)
 typeFun = TypeCon $ TypeConstant "->" (KindFun KindStar $ KindFun KindStar KindStar)
 
 typeTuple :: Int -> Type
-typeTuple n = TypeCon $ TypeConstant "(,)" (foldr KindFun KindStar $ replicate n KindStar)
+typeTuple n = TypeCon $ TypeConstant sym (foldr KindFun KindStar $ replicate n KindStar)
+    where sym = TypeVariableName $ makeTupleName n
 
 typeString :: Type
 typeString = makeList typeChar
