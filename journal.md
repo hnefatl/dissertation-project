@@ -172,6 +172,9 @@ clashes (eg. `v` renamed to `v11` by adding 11 and `v1` gets renamed to `v11` by
 
 Do we care about NonRec/Rec after typechecking? Java doesn't differentiate between them, we probably don't need distinct
 handlers.
+We really do care: recursive/mutually recursive functions defined in let need special handling. Might need to make
+function references for all recursive functions in the same level then add as free variables?
+
 Remove String literals: ILA can convert them into constructions of \[Char\]s. Same for Rationals, are a datatype.
 
 hs-java generator monad uses a list internally and keeps appending (ew). Replace with a seq, see if we get a speedup?
@@ -202,3 +205,12 @@ hs-java constant pool deduplication?
 Typeclass instances break eeeeverything. They use the same name as an existing function, but have different types. Can't
 rename them because that's syntactic alterations when the dependency is semantic (renaming `foo` in `foo = all foo` will
 rename the 2nd `foo` although it refers to a different function).
+
+## Optimisations
+
+Lambda/let lifting is super useful because we can't do applications where arguments are constructors: `foo True True`
+becomes `let x = True in let y = True in f x y`. Would like to lift the variable bindings all the way to the top and
+reuse them.
+
+Didn't do register allocation etc because compiling to bytecode, which is JIT'd anyway. Reference some papers or
+something: JVM uses linear scan https://en.wikipedia.org/wiki/Register_allocation#Linear_Scan which might perform better?

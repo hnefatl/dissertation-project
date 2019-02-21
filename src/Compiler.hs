@@ -28,9 +28,11 @@ import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
 import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, getKinds, inferModule)
+import Optimisations.LetLifting (performLetLift)
 
 data Flags = Flags
     { verbose         :: Bool
+    , letLift         :: Bool
     , outputDir       :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -40,6 +42,7 @@ data Flags = Flags
 instance Default Flags where
     def = Flags
         { verbose = False
+        , letLift = True
         , outputDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -84,7 +87,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
             ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb mainName reverseRenames (ILA.datatypes ilaState)
+            ilb' <- if letLift flags then performLetLift ilb else return ilb
+            when (verbose flags) $ writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb' mainName reverseRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags
 

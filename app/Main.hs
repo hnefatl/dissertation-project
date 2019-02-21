@@ -24,6 +24,11 @@ parseFlags = Flags
        <> short 'v'
        <> help "Display (very) verbose logging output"
        <> showDefault)
+    <*> switch
+        ( long "let-lift"
+       <> short 'l'
+       <> help "Perform the let-lifting optimisation"
+       <> showDefault)
     <*> strOption
         ( long "output-dir"
        <> short 'd'
