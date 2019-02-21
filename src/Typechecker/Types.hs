@@ -1,18 +1,20 @@
+{-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TupleSections         #-}
-{-# LANGUAGE TypeSynonymInstances  #-}
 
 module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
 import           Control.Monad.Except    (MonadError, throwError)
 import           Data.Foldable           (foldlM)
+import           Data.Hashable           (Hashable)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (unpack)
+import           GHC.Generics            (Generic)
 import           Language.Haskell.Syntax as Syntax
 import           TextShow                (TextShow, fromText, showb, showt)
 
@@ -22,10 +24,13 @@ import           Names
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
-data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord, Show)
+data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord, Show, Generic)
+instance Hashable Kind
 
-data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord, Show)
-data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord, Show)
+data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord, Show, Generic)
+data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord, Show, Generic)
+instance Hashable TypeVariable
+instance Hashable TypeConstant
 
 -- |The type of a Haskell expression.
 -- A TypeVar is a type variable, a TypeCon is a type constant, and a TypeApp is the application of one type to another
@@ -33,7 +38,8 @@ data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord, Show
 data Type = TypeVar !TypeVariable
           | TypeCon !TypeConstant
           | TypeApp !Type !Type !Kind
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance Hashable Type
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
 applyTypeFun :: MonadError Text m => Type -> Type -> m Type

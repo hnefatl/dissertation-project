@@ -1,7 +1,7 @@
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE DeriveGeneric    #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE TupleSections    #-}
 
 module Backend.ILB where
 
@@ -9,8 +9,11 @@ import           Backend.ILA                 (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILAANF              as ANF
 import           BasicPrelude
 import           Control.Monad.Except        (MonadError, throwError)
+import           Data.Hashable               (Hashable)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
+import           GHC.Generics                (Generic)
+
 import           ExtraDefs                   (secondM)
 import           Names
 import           Preprocessor.ContainedNames
@@ -23,16 +26,19 @@ import           Typechecker.Types           (Type)
 -- place allocation happens.
 data Arg = ArgLit Literal
          | ArgVar VariableName
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance Hashable Arg
 data Exp = ExpLit Literal
          | ExpVar VariableName
          | ExpApp VariableName [Arg] -- Might need to add a type so we know what type of register to assign?
          | ExpConApp VariableName [Arg] -- Application of a constructor: require *all* the arguments to be present.
          | ExpCase Exp Type [VariableName] [Alt Exp] -- Scrutinee, variables the scrutinee's assigned to, alts
          | ExpLet VariableName Rhs Exp
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance Hashable Exp
 data Rhs = RhsClosure [VariableName] Exp -- Thunks: if it has arguments, it's a function; otherwise it's a thunk.
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance Hashable Rhs
 
 instance TextShow Arg where
     showb (ArgLit l) = showb l

@@ -29,6 +29,11 @@ parseFlags = Flags
        <> short 'l'
        <> help "Perform the let-lifting optimisation"
        <> showDefault)
+    <*> switch
+        ( long "top-level-dedupe"
+       <> short 't'
+       <> help "Perform the top-level deduplication optimisation"
+       <> showDefault)
     <*> strOption
         ( long "output-dir"
        <> short 'd'

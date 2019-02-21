@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -15,10 +16,12 @@ import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, 
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
+import           Data.Hashable               (Hashable)
 import           Data.List.Extra             (foldl', groupOn, intersperse)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import qualified Data.Text                   as Text
+import           GHC.Generics                (Generic)
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
@@ -68,7 +71,8 @@ data Literal = LiteralInt Integer
              | LiteralFrac Rational
              | LiteralChar Char
              | LiteralString String
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance Hashable Literal
 instance TextShow Literal where
     showb (LiteralInt i)    = showb i <> " :: Int"
     showb (LiteralFrac r)   = showb r <> " :: Rational"
@@ -80,7 +84,8 @@ instance TextShow Literal where
 -- If there's a literal or nested data constructor then it needs to be bound to a variable
 -- and checked subsequently, as the alternatives can only contain variable names.
 data Alt a = Alt AltConstructor a
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance Hashable a => Hashable (Alt a)
 instance TextShow a => TextShow (Alt a) where
     showb (Alt con e) = showb con <> " -> " <> showb e
 getAltConstructor :: Alt a -> AltConstructor
@@ -90,7 +95,8 @@ getConstructorVariables (DataCon _ vs) = vs
 getConstructorVariables _              = []
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName [VariableName] | LitCon Literal | Default
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance Hashable AltConstructor
 instance TextShow AltConstructor where
     showb (DataCon n vs) = showb n <> (if null vs then "" else " " <> args)
         where args = mconcat $ intersperse " " $ map showb vs
@@ -108,7 +114,10 @@ isLiteralAlt _                  = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance Hashable a => Hashable (Binding a) where
+    hashWithSalt i (NonRec v x) = hashWithSalt i (v, x)
+    hashWithSalt i (Rec m)      = hashWithSalt i (M.toAscList m)
 instance TextShow a => TextShow (Binding a) where
     showb (NonRec v e) = "NonRec: " <> showb v <> " = " <> showb e
     showb (Rec m) = mconcat $ intersperse "\n" $ headline:bodylines

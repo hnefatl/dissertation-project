@@ -29,10 +29,12 @@ import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
 import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, getKinds, inferModule)
 import Optimisations.LetLifting (performLetLift)
+import Optimisations.TopLevelDedupe (performTopLevelDedupe)
 
 data Flags = Flags
     { verbose         :: Bool
     , letLift         :: Bool
+    , topLevelDedupe  :: Bool
     , outputDir       :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -43,6 +45,7 @@ instance Default Flags where
     def = Flags
         { verbose = False
         , letLift = True
+        , topLevelDedupe = True
         , outputDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -87,9 +90,19 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
             ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
-            ilb' <- if letLift flags then performLetLift ilb else return ilb
-            when (verbose flags) $ writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb' mainName reverseRenames (ILA.datatypes ilaState)
+            ilb' <- case letLift flags of
+                True -> do
+                    ilb' <- performLetLift ilb
+                    when (verbose flags) $ writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
+                    return ilb'
+                False -> return ilb
+            ilb'' <- case topLevelDedupe flags of
+                True -> do
+                    ilb'' <- performTopLevelDedupe ilb'
+                    when (verbose flags) $ writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
+                    return ilb''
+                False -> return ilb'
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags
 
