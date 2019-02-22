@@ -27,7 +27,8 @@ import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule)
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
-import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, getKinds, inferModule)
+import           Preprocessor.Info       (getModuleKinds)
+import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, inferModule)
 import Optimisations.LetLifting (performLetLift)
 import Optimisations.TopLevelDedupe (performTopLevelDedupe)
 
@@ -75,7 +76,8 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
           x = do
             m <- embedExceptIOIntoResult $ parse f
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
-            ((taggedModule, types), classEnvironment, kinds) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,,) <$> inferModule renamedModule <*> getClassEnvironment <*> getKinds
+            let kinds = getModuleKinds renamedModule
+            ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds renamedModule <*> getClassEnvironment
             (deoverloadedModule, types', kinds') <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             let deoverloadedTypes = map deoverloadQuantType types'

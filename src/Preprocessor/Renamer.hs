@@ -19,7 +19,7 @@ import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 
-import           AlphaEq                     (stripModuleParens)
+import           AlphaEq                     (stripParens)
 import           ExtraDefs                   (synPrint)
 import           Logger                      (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
@@ -143,7 +143,7 @@ renameModule (HsModule a b c d decls) = do
             rs -> throwError $ unlines ["Got illegal top level renaming:", showt rs]
         writeLog "Renames"
         forM_ (M.toList reverseRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
-        return (stripModuleParens $ HsModule a b c d decls', topLevelRenames, reverseRenames)
+        return (stripParens $ HsModule a b c d decls', topLevelRenames, reverseRenames)
 
 instance Renameable HsQName where
     rename (Qual m n)  = Qual m <$> renameVariable n
@@ -216,8 +216,9 @@ instance Renameable HsPat where
         let tupleCon = UnQual $ HsSymbol $ unpack $ makeTupleName $ length ps
         rename $ HsPApp tupleCon ps
     rename (HsPList ps) = do
-        let listCon = UnQual $ HsSymbol "[]"
-        rename $ HsPApp listCon ps
+        let nilCon = Special HsListCon
+            consCon = Special HsCons
+        rename $ foldr (\x y -> HsPApp consCon [x, y]) (HsPApp nilCon []) ps
     rename (HsPParen p)          = HsPParen <$> rename p
     rename HsPRec{}              = throwError "Record fields not supported"
     rename (HsPAsPat n p)        = HsPAsPat <$> renameVariable n <*> rename p
@@ -244,8 +245,9 @@ instance Renameable HsExp where
         let tupleCon = HsCon $ UnQual $ HsSymbol $ unpack $ makeTupleName $ length es
         rename $ foldl' HsApp tupleCon es
     rename (HsList es) = do
-        let listCon = HsCon $ UnQual $ HsSymbol "[]"
-        rename $ foldl' HsApp listCon es
+        let nilCon = HsCon $ UnQual $ HsSymbol "[]"
+            consCon = HsCon $ UnQual $ HsSymbol ":"
+        rename $ foldr (HsApp . HsApp consCon) nilCon es
     rename (HsParen e) = HsParen <$> rename e
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename _ = throwError "Renaming expression not supported"

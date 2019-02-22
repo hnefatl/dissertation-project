@@ -232,7 +232,8 @@ instance HasFreeTypeConstants HsQualType where
         where qualConsts = S.unions $ map (S.singleton . convertName . fst) quals
 instance HasFreeTypeConstants HsType where
     getFreeTypeConstants (HsTyFun t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
-    getFreeTypeConstants (HsTyTuple ts)  = getFreeTypeConstants ts
+    getFreeTypeConstants (HsTyTuple ts)  =
+        S.insert (TypeVariableName $ makeTupleName $ length ts) $ getFreeTypeConstants ts
     getFreeTypeConstants (HsTyApp t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
     getFreeTypeConstants HsTyVar{}       = S.empty
     getFreeTypeConstants (HsTyCon n)     = S.singleton $ convertName n

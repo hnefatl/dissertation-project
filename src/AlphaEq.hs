@@ -11,14 +11,17 @@ import           Control.Monad.Except       (Except, ExceptT, MonadError, catchE
 import           Control.Monad.Extra        (findM)
 import           Control.Monad.State.Strict (MonadState, State, evalStateT, get, gets, modify, put, runState)
 import           Data.Either                (isRight)
+import           Data.Functor.Identity      (runIdentity)
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
+import qualified Data.HashSet               as HS
 import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showt)
 import           TextShow.Instances         ()
 
 import qualified Backend.ILA                as ILA
 import qualified Backend.ILAANF             as ILAANF
+import           SyntaxTraversals           (SyntaxTraversable, expTraverse)
 import           ExtraDefs                  (synPrint)
 import           Names
 import           TextShowHsSrc              ()
@@ -79,9 +82,9 @@ instance (AlphaEq a, AlphaEq b) => AlphaEq (a, b) where
 -- Sets compare in any order
 instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
     alphaEq' s1 s2
-        | S.null s1 && S.null s2 = return () -- Both empty, both alpha equivalent
-        | S.null s1 = throwError $ "Set is non-empty: " <> showt s2
-        | S.null s2 = throwError $ "Set is non-empty: " <> showt s1
+        | null s1 && null s2 = return () -- Both empty, both alpha equivalent
+        | null s1 = throwError $ "Set is non-empty: " <> showt s2
+        | null s2 = throwError $ "Set is non-empty: " <> showt s1
         | otherwise = do -- Find an element from a set that's alpha-eq to one from the other set, remove it, recurse
             let x = S.findMin s1 -- Arbitrary element from first set
             -- Find an alpha-eq element from the other set
@@ -91,6 +94,16 @@ instance (Ord a, AlphaEq a) => AlphaEq (S.Set a) where
             findM (alphaEqBool . checkpoint . alphaEq' x) (S.toList s2) >>= \case
                 Nothing -> throwError $ unlines ["Failed to alpha-equate the sets", showt s1, "and", showt s2]
                 Just y -> alphaEq' (S.delete x s1) (S.delete y s2) -- Found an equivalent element, remove and recurse
+instance (Eq a, Hashable a, AlphaEq a) => AlphaEq (HS.HashSet a) where
+    alphaEq' s1 s2
+        | null s1 && null s2 = return ()
+        | null s1 = throwError $ "Set is non-empty: " <> showt s2
+        | null s2 = throwError $ "Set is non-empty: " <> showt s1
+        | otherwise = do
+            let x:_ = HS.toList s1
+            findM (alphaEqBool . checkpoint . alphaEq' x) (HS.toList s2) >>= \case
+                Nothing -> throwError $ unlines ["Failed to alpha-equate the sets", showt s1, "and", showt s2]
+                Just y -> alphaEq' (HS.delete x s1) (HS.delete y s2)
 -- Maps compare in any order by converting to sets
 instance (Ord a, Ord b, AlphaEq a, AlphaEq b) => AlphaEq (M.Map a b) where
     alphaEq' m1 m2 = alphaEq' (S.fromList $ M.toList m1) (S.fromList $ M.toList m2)
@@ -137,7 +150,7 @@ instance AlphaEq HsOp where
 instance AlphaEq HsQOp where
     alphaEq' op1 op2 = alphaEq' (convertName op1 :: Text) (convertName op2)
 instance AlphaEq HsModule where
-    alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEq' ds1 ds2
+    alphaEq' (HsModule _ _ _ _ ds1) (HsModule _ _ _ _ ds2) = alphaEq' (HS.fromList ds1) (HS.fromList ds2)
 instance AlphaEq HsDecl where
     alphaEq' (HsPatBind _ pat1 rhs1 ds1) (HsPatBind _ pat2 rhs2 ds2) = do
         alphaEq' pat1 pat2
@@ -295,45 +308,8 @@ instance AlphaEq ILAANF.AnfRhs where
     alphaEq' e1 e2 = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]
 
 
-stripModuleParens :: HsModule -> HsModule
-stripModuleParens (HsModule a b c d e) = HsModule a b c d (stripDeclsParens e)
-stripDeclParens :: HsDecl -> HsDecl
-stripDeclParens (HsPatBind l p r ds) = HsPatBind l (stripPatParens p) (stripRhsParens r) (stripDeclsParens ds)
-stripDeclParens (HsFunBind ms) = HsFunBind $ map stripMatchParens ms
-stripDeclParens d@HsDataDecl{} = d
-stripDeclParens d@HsTypeSig{} = d
-stripDeclParens (HsClassDecl l ctx name args ds) = HsClassDecl l ctx name args (map stripDeclParens ds)
-stripDeclParens (HsInstDecl l ctx name args ds) = HsInstDecl l ctx name args (map stripDeclParens ds)
-stripDeclParens _                    = error "Unsupported declaration in paren strip"
-stripDeclsParens :: [HsDecl] -> [HsDecl]
-stripDeclsParens = map stripDeclParens
-stripMatchParens :: HsMatch -> HsMatch
-stripMatchParens (HsMatch l n ps rhs ds) = HsMatch l n (map stripPatParens ps) (stripRhsParens rhs) (stripDeclsParens ds)
-stripRhsParens :: HsRhs -> HsRhs
-stripRhsParens (HsUnGuardedRhs e) = HsUnGuardedRhs (stripExpParens e)
-stripRhsParens _                  = error "Unsupported RHS in paren strip"
-stripExpParens :: HsExp -> HsExp
-stripExpParens (HsParen e)           = stripExpParens e
-stripExpParens (HsApp e1 e2)         = HsApp (stripExpParens e1) (stripExpParens e2)
-stripExpParens (HsInfixApp e1 op e2) = HsInfixApp (stripExpParens e1) op (stripExpParens e2)
-stripExpParens (HsNegApp e)          = HsNegApp (stripExpParens e)
-stripExpParens (HsLambda l ps e)     = HsLambda l (map stripPatParens ps) (stripExpParens e)
-stripExpParens (HsIf c e1 e2)        = HsIf (stripExpParens c) (stripExpParens e1) (stripExpParens e2)
-stripExpParens (HsLet ds e)          = HsLet (stripDeclsParens ds) (stripExpParens e)
-stripExpParens (HsTuple es)          = HsTuple (map stripExpParens es)
-stripExpParens (HsList es)           = HsList (map stripExpParens es)
-stripExpParens (HsExpTypeSig l e t)  = HsExpTypeSig l (stripExpParens e) t
-stripExpParens e                     = e
-stripPatParens :: HsPat -> HsPat
-stripPatParens (HsPParen p)          = stripPatParens p
-stripPatParens p@HsPVar{}            = p
-stripPatParens p@HsPLit{}            = p
-stripPatParens (HsPNeg p)            = HsPNeg $ stripPatParens p
-stripPatParens (HsPInfixApp p1 n p2) = HsPInfixApp (stripPatParens p1) n (stripPatParens p2)
-stripPatParens (HsPApp con ps)       = HsPApp con $ map stripPatParens ps
-stripPatParens (HsPTuple ps)         = HsPTuple $ map stripPatParens ps
-stripPatParens (HsPList ps)          = HsPList $ map stripPatParens ps
-stripPatParens (HsPAsPat n p)        = HsPAsPat n $ stripPatParens p
-stripPatParens HsPWildCard           = HsPWildCard
-stripPatParens (HsPIrrPat p)         = HsPIrrPat $ stripPatParens p
-stripPatParens HsPRec{}              = error "HsPRec in stripPatParens"
+stripParens :: SyntaxTraversable a => a -> a
+stripParens = runIdentity . expTraverse f
+    where
+        f (HsParen e) = pure e
+        f e = pure e

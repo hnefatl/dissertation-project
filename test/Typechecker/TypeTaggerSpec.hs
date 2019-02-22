@@ -1,18 +1,18 @@
 module Typechecker.TypeTaggerSpec where
 
-import BasicPrelude
-import Test.Tasty              (TestTree, testGroup)
-import Test.Tasty.HUnit        (assertBool, assertFailure, testCase)
+import           BasicPrelude
+import           Test.Tasty              (TestTree, testGroup)
+import           Test.Tasty.HUnit        (assertBool, assertFailure, testCase)
 
-import Control.Monad.Except
-import Data.Text               (unpack)
-import Language.Haskell.Parser (ParseResult(..), parseModule)
+import           Control.Monad.Except
+import           Data.Text               (unpack)
+import           Language.Haskell.Parser (ParseResult(..), parseModule)
 
-import AlphaEq
-import ExtraDefs               (deline, pretty, synPrint)
-import Logger
-import NameGenerator
-import Typechecker.Typechecker
+import           AlphaEq
+import           ExtraDefs               (deline, pretty, synPrint)
+import           Logger
+import           NameGenerator
+import           Typechecker.Typechecker
 
 makeTest :: Text -> Text -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $ do
@@ -20,7 +20,7 @@ makeTest input expected = testCase (unpack $ deline input) $ do
         (ParseFailed _ msg, _) -> assertFailure $ "Failed to parse input: " <> msg
         (_, ParseFailed _ msg) -> assertFailure $ "Failed to parse expected: " <> msg
         (ParseOk m, ParseOk n) -> return (m, n)
-    let expectedModule' = stripModuleParens expectedModule
+    let expectedModule' = stripParens expectedModule
         ((eModule, inferrerState), logs) = evalNameGenerator (runLoggerT $ runTypeInferrer $ inferModuleWithBuiltins inputModule) 0
     case runExcept eModule of
         Left msg -> assertFailure $ unpack $ unlines ["Failed to generate tagged tree: ", msg, "Logs:", unlines logs]

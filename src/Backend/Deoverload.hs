@@ -22,7 +22,7 @@ import           ExtraDefs                   (pretty, synPrint, zipOverM)
 import           Logger
 import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                       (TypeVariableName(..), VariableName(..), convertName)
-import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
+import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
 import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
 import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
@@ -327,7 +327,7 @@ deoverloadExp HsInfixApp{} = throwError "Infix applications should have been rep
 deoverloadExp (HsLambda a pats e) = HsLambda a pats <$> deoverloadExp e
 deoverloadExp (HsIf c e1 e2) = HsIf <$> deoverloadExp c <*> deoverloadExp e1 <*> deoverloadExp e2
 deoverloadExp (HsTuple es) = HsTuple <$> mapM deoverloadExp es
-deoverloadExp (HsList  es) = HsList <$> mapM deoverloadExp es
+deoverloadExp (HsList es) = HsList <$> mapM deoverloadExp es
 deoverloadExp (HsParen e) = HsParen <$> deoverloadExp e
 deoverloadExp (HsLet ds e) = HsLet <$> deoverloadDecls ds <*> deoverloadExp e
 deoverloadExp (HsCase scrut alts) = HsCase <$> deoverloadExp scrut <*> mapM deoverloadAlt alts

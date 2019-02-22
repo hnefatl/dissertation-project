@@ -68,7 +68,7 @@ getAnfAppType (TrivApp e) = getAnfTrivialType e
 getAnfAppType (App e1 e2) = do
     e2Type <- getAnfTrivialType e2
     (argType, retType) <- T.unwrapFun =<< getAnfAppType e1
-    when (argType /= e2Type) $ throwError "Invalid arg type"
+    when (argType /= e2Type) $ throwError $ unlines ["Mismatched arg types:", showt argType, showt e2Type]
     return retType
 getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
 getAnfComplexType (Trivial e)              = getAnfTrivialType e

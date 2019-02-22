@@ -4,26 +4,37 @@ import           BasicPrelude
 import           Test.Tasty              (TestTree, testGroup)
 import           Test.Tasty.HUnit        (Assertion, assertFailure, testCase)
 
+import           Language.Haskell.Syntax
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 
 import           Control.Monad.Except    (runExcept)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
+import           Data.Functor.Identity   (runIdentity)
 import           TextShow                (showt)
 
-import           AlphaEq                 (AlphaEq, alphaEqError, stripModuleParens)
+import           AlphaEq                 (AlphaEq, alphaEqError, stripParens)
 import           ExtraDefs               (deline, pretty, synPrint)
 import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator)
 import           Names                   (VariableName)
 import           Preprocessor.Renamer    (bindVariableForScope, renameModule, runRenamer)
 import           Typechecker.Hardcoded   (builtinConstructors, builtinFunctions)
+import           SyntaxTraversals (expTraverse)
 
 assertAlphaEq :: AlphaEq a => Text -> a -> a -> Assertion
 assertAlphaEq msg x y = case runExcept $ alphaEqError x y of
     Left err -> assertFailure $ unpack $ unlines [err, msg]
     Right () -> return ()
+
+-- We parse `[]` as an empty list comprehension (a `HsList` node) when we want it to be parsed as a constructor `[]` as
+-- that's what we convert it to internally
+listCorrector :: HsModule -> HsModule
+listCorrector = runIdentity . expTraverse f
+    where
+        f (HsList []) = pure $ HsCon $ Special $ HsListCon
+        f e = pure e
 
 makeTest :: Text -> Text -> TestTree
 makeTest = makeTestWith (M.keysSet $ M.union builtinFunctions builtinConstructors)
@@ -36,7 +47,7 @@ makeTestWith bindings input expected =
         ParseOk (input', expected') ->
             case runExcept renamedInput of
                 Right (actual, _, _) -> do
-                    let expected'' = stripModuleParens expected'
+                    let expected'' = listCorrector $ stripParens expected'
                     assertAlphaEq (unlines [showt actual, showt expected'', "", synPrint actual, synPrint expected'', "", pretty state, unlines logs]) expected'' actual
                 Left err     -> assertFailure $ unpack $ unlines [err, pretty state, unlines logs]
             where ((renamedInput, state), logs) = evalNameGenerator (runLoggerT $ runRenamer $ bindVariableForScope bindings $ renameModule input') 0
@@ -65,7 +76,7 @@ test = testGroup "Renamer"
         "z2@(T z0 z1) = T 1 2"
     , makeTest
         "x = 2 ; [a, 2, c] = [1, x, 3]"
-        "z2 = 2 ; L z0 2 z1 = L 1 z2 3"
+        "z2 = 2 ; C z0 (C 2 (C z1 E)) = C 1 (C z2 (C 3 E))"
     , makeTest
         "_ = let { x = 0 ; y = 1 ; z = 2 } in if x then y else z"
         "_ = let { z0 = 0 ; z1 = 1 ; z2 = 2 } in if z0 then z1 else z2"
@@ -97,13 +108,13 @@ test = testGroup "Renamer"
         "data Bool = True | False ; data [] a = E | C a [a] ; f = \\x -> x ; y = f (C True (C False E))"
         "data Bool = True | False ; data [] a = V0 | V1 a [a] ; f = \\x -> x ; y = f (V1 True (V1 False V0))"
     , makeVanillaTest
-        "data Bool = True | False ; data [] a = [] | a :+ [a] ; f = \\x -> x ; y = f (True:+(False:+[]))"
-        "data Bool = True | False ; data [] a = V0 | V1 a [a] ; f = \\x -> x ; y = f (True `V1` (False `V1` V0))"
+        "data Bool = True | False ; data [] a = [] | a : [a] ; f = \\x -> x ; y = f (True:(False:[]))"
+        "data Bool = True | False ; data [] a = E | C a [a] ; f = \\x -> x ; y = f (True `C` (False `C` E))"
     , makeVanillaTest
-        "data [] a = [] | a :+ [a] ; x = []"
-        "data [] a = V0 | V1 a [a] ; x = V0"
+        "data [] a = [] | a : [a] ; x = []"
+        "data [] a = E | C a [a] ; x = E"
     , makeVanillaTest
-        "data [] a = [] | a :+ [a] ; x = []:+[]"
+        "data [] a = [] | a : [a] ; x = []:[]"
         "data [] a = V0 | V1 a [a] ; x = V0 `V1` V0"
     , makeVanillaTest
         "class Functor f where { fmap :: (a -> b) -> f a -> f b }"

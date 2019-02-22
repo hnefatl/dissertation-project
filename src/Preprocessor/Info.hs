@@ -1,9 +1,11 @@
-module Preprocessor.ClassInfo where
+module Preprocessor.Info where
 
 import           BasicPrelude
 import qualified Data.Map.Strict         as M
 import           Language.Haskell.Syntax
 import           TextShow                (TextShow, showb)
+import           Typechecker.Types       (Kind(..))
+import           Names                   (TypeVariableName, convertName)
 
 data ClassInfo = ClassInfo
     { methods      :: M.Map HsName HsQualType
@@ -23,3 +25,16 @@ getDeclClassInfo _ = M.empty
 getDeclTypes :: HsDecl -> M.Map HsName HsQualType
 getDeclTypes (HsTypeSig _ names t) = M.fromList $ zip names (repeat t)
 getDeclTypes _                     = M.empty
+
+
+getModuleKinds :: HsModule -> M.Map TypeVariableName Kind
+getModuleKinds (HsModule _ _ _ _ decls) = getDeclsKinds decls
+
+getDeclsKinds :: [HsDecl] -> M.Map TypeVariableName Kind
+getDeclsKinds = M.unions . map getDeclKinds
+
+getDeclKinds :: HsDecl -> M.Map TypeVariableName Kind
+getDeclKinds (HsDataDecl _ _ name args _ _) = M.singleton (convertName name) typeKind
+    where typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
+getDeclKinds _ = M.empty
+    

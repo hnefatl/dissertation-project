@@ -24,7 +24,8 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ClassInfo      (ClassInfo(..), getClassInfo)
+import           Tuples                      (makeTupleName)
+import           Preprocessor.Info      (ClassInfo(..), getClassInfo, getModuleKinds)
 import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.Dependency
 import           Typechecker.Hardcoded
@@ -57,7 +58,6 @@ data InferrerState = InferrerState
     -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
     -- detect, so we just process them as late as possible.
     , typeclassInstances :: M.Map (HsQName, [HsType]) HsDecl
-    -- Information about classes
     , classInfo          :: M.Map HsQName ClassInfo }
     deriving (Eq, Show)
 
@@ -360,23 +360,16 @@ inferExpression (HsInfixApp lhs op rhs) = do
             HsQConOp n -> HsCon n
     -- Translate eg. `x + y` to `(+) x y` and `x \`foo\` y` to `(foo) x y`
     inferExpression (HsApp (HsApp op' lhs) rhs)
-inferExpression (HsTuple exps) = do
-    (argExps, argVars) <- mapAndUnzipM inferExpression exps
-    argTypes <- mapM nameToType argVars
-    retVar <- freshTypeVarName
-    retType <- nameToType retVar
-    unify retType (makeTuple argTypes)
-    makeExpTypeWrapper (HsTuple argExps) retVar
-inferExpression (HsList args) = do
-    (argExps, argVars) <- mapAndUnzipM inferExpression args
-    argTypes <- mapM nameToType argVars
-    -- Check each element has the same type
-    commonType <- nameToType =<< freshTypeVarName
-    mapM_ (unify commonType) argTypes
-    v <- freshTypeVarName
-    vt <- nameToType v
-    unify vt (makeList commonType)
-    makeExpTypeWrapper (HsList argExps) v
+inferExpression (HsTuple es) = do
+    -- See the note in HsList below
+    let tupleCon = HsCon $ UnQual $ HsSymbol $ unpack $ makeTupleName $ length es
+    inferExpression $ foldl' HsApp tupleCon es
+inferExpression (HsList es) = do
+    -- If the renamer has been run, we should never see a HsList node. The only case we can is if a test is being run
+    -- without renaming, so we should use the non-renamed constructor names
+    let nilCon = HsCon $ UnQual $ HsSymbol "[]"
+        consCon = HsCon $ UnQual $ HsSymbol ":"
+    inferExpression $ foldr (HsApp . HsApp consCon) nilCon es
 inferExpression (HsLet decls body) = do
     -- Process the declarations first (bring into scope any variables etc)
     declExps <- inferDeclGroup decls
@@ -567,8 +560,6 @@ inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
     ([], _)   -> throwError "Multiparameter typeclass instances not supported"
     (_, _)    -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
-    let typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
-    addKinds $ M.singleton (convertName name) typeKind
     let resultType = makeSynApp (HsTyCon $ UnQual name) (map HsTyVar args)
     decls' <- mapM (inferConDecl resultType) decls
     return $ HsDataDecl loc ctx name args decls' derivings
@@ -663,21 +654,21 @@ inferDeclGroup ds = do
         inferDecls group
     return $ concat declExps
 
--- TODO(kc506): Take advantage of explicit type hints
-inferModule :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule m@(HsModule p1 p2 p3 p4 decls) = do
+inferModule :: M.Map TypeVariableName Kind -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
+inferModule ks m@(HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
     let ci = getClassInfo m
-    modify $ \s -> s { classInfo = ci }
+    modify $ \s -> s { classInfo = ci, kinds = ks }
     writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
         isTypeclassInstance _            = False
         (instanceDecls, decls') = partition isTypeclassInstance decls
     typePredMap <- M.fromList <$> forM instanceDecls (\d -> (,d) <$> getTypeclassTypePredicate d)
     modify $ \s -> s { typeclassInstances = typePredMap }
-    -- Process all the non-instance top-level definitions, then process any instance declarations
+    -- Process all the non-instance top-level definitions, then process any instance declarations not already forced to
+    -- be processed
     decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
     mapM_ addTypeclassInstanceFromDecl . M.elems =<< gets typeclassInstances
     let m' = HsModule p1 p2 p3 p4 decls''
@@ -687,6 +678,7 @@ inferModule m@(HsModule p1 p2 p3 p4 decls) = do
     writeLog "Updated explicit type tags"
     checkModuleExpTypes m''
     writeLog "Checked explicit type tags"
+    writeLog . pretty =<< get
     return (m'', ts)
 
 getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
@@ -697,6 +689,8 @@ addTypeclassInstanceFromDecl :: HsDecl -> TypeInferrer ()
 addTypeclassInstanceFromDecl (HsInstDecl _ ctx name args _) = case (ctx, args) of
     ([], [arg]) -> do
         ks <- getKinds
+        writeLog $ showt arg
+        writeLog . showt =<< getKinds
         t <- synToType ks arg
         addTypeclassInstance $ Qualified S.empty $ IsInstance (convertName name) t
     ([], _) -> throwError "Multiparameter typeclass instances not supported"
@@ -715,9 +709,8 @@ addTypeclassInstance inst = do
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
     addClasses builtinClasses
-    addKinds builtinKinds
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-    inferModule m
+    inferModule (M.union builtinKinds $ getModuleKinds m) m
 
 getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getAllVariableTypes = do
@@ -754,7 +747,8 @@ updateMatchTypeTags (HsMatch loc name args rhs wheres) = HsMatch loc name args <
 updateExpTypeTags :: Syntax.HsExp -> TypeInferrer Syntax.HsExp
 updateExpTypeTags (HsExpTypeSig l e t) = HsExpTypeSig l <$> updateExpTypeTags e <*> case t of
     HsQualType [] (HsTyVar tv) -> qualTypeToSyn =<< getQualifiedType (convertName tv)
-    qt                         -> return qt -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+    -- Unless the type tag is an unqualified single type variable as inserted by the 1st pass, ignore it
+    qt                         -> return qt
 updateExpTypeTags v@HsVar{} = return v
 updateExpTypeTags c@HsCon{} = return c
 updateExpTypeTags l@HsLit{} = return l

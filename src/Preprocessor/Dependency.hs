@@ -39,7 +39,6 @@ getDepFreeVariables d@HsInstDecl{} = do
     return $ S.union actualFree fakeFree
 getDepFreeVariables d = variableUnion <$> getFreeVariables d <*> pure (getFreeTypeConstants d)
 
-
 -- |Return a list of declaration groups: groups are potentially recursively defined, so should be compiled "together".
 -- Groups are sorted in dependency order, all groups after an element in the list should be compiled after it. An
 -- exception is any typeclass instance: these are output in syntactic dependency order (any symbols used in the

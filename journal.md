@@ -214,3 +214,7 @@ reuse them.
 
 Didn't do register allocation etc because compiling to bytecode, which is JIT'd anyway. Reference some papers or
 something: JVM uses linear scan https://en.wikipedia.org/wiki/Register_allocation#Linear_Scan which might perform better?
+
+Made some changes to the intermediate language translations and codegen that were not naive: we have a "non-trivial"
+translation/code generation stage (added special cases for thunks etc so that we don't wastefully allocate thunks on the
+heap).

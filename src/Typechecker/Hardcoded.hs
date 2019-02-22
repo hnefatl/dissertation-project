@@ -15,12 +15,15 @@ builtinConstructors = M.fromList
     , ("Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeA)
     , ("Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA)
     , ("(,)", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] $ makeTuple [ta, tb])
+    , ("(,,)", Quantified (S.fromList [a, b, c]) $ Qualified S.empty $ makeFun [ta, tb, tc] $ makeTuple [ta, tb, tc])
     , (":", Quantified (S.fromList [a]) $ Qualified S.empty $ makeFun [ta, makeList ta] $ makeList ta)
     , ("[]", Quantified (S.fromList [a]) $ Qualified S.empty $ makeList ta) ]
     where a = TypeVariable "a" KindStar
           b = TypeVariable "b" KindStar
+          c = TypeVariable "c" KindStar
           ta = TypeVar a
           tb = TypeVar b
+          tc = TypeVar c
           maybeT = TypeCon $ TypeConstant "Maybe" (KindFun KindStar KindStar)
           maybeA = applyTypeFunUnsafe maybeT ta
 
@@ -32,6 +35,7 @@ builtinKinds = M.fromList
     , ("Maybe", KindFun KindStar KindStar)
     , ("[]", KindFun KindStar KindStar)
     , ("(,)", KindFun (KindFun KindStar KindStar) KindStar)
+    , ("(,,)", KindFun (KindFun (KindFun KindStar KindStar) KindStar) KindStar)
     -- Dev cheat: after deoverloading the typeclasses become type constants, add them here rather than in an extra
     -- deoverloading step (which will be required in the end)
     , ("Num", KindFun KindStar KindStar) ]

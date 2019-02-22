@@ -61,7 +61,7 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             [text|
                 data Bool = False | True
-                data [] a = [] | a :+ [a]
+                data [] a = [] | a : [a]
                 data (,) a = (,) a
 
                 (&&) = \x y -> case x of
@@ -72,7 +72,7 @@ test = testGroup "Whole Program" $ map makeTest
 
                 all = \f xl -> case xl of
                     [] -> True
-                    (x:+xs) -> f x && all f xs
+                    (x:xs) -> f x && all f xs
 
                 class Foo a where
                     foo :: a -> Bool
@@ -81,7 +81,7 @@ test = testGroup "Whole Program" $ map makeTest
                 instance Foo [Bool] where
                     foo = all foo
 
-                _main = foo (True:+(False:+[]))
+                _main = foo [True, False]
             |]
         ,
             "Data: { branch: 0, data: { } }\n"
@@ -116,22 +116,37 @@ test = testGroup "Whole Program" $ map makeTest
         )
     ,
         (
-            "_main = all not (False :+ (False :+ []))"
+            "[x, y] = [False, True]"
         ,
             [text|
                 data Bool = False | True
-                data [] a = [] | a :+ [a]
+                data [] a = [] | a : [a]
+
+                [x, y] = [False, True]
+
+                _main = x
+            |]
+        ,
+            "Data: { branch: 0, data: { } }\n"
+        )
+    ,
+        (
+            "_main = all not [False, True]"
+        ,
+            [text|
+                data Bool = False | True
+                data [] a = [] | a : [a]
 
                 True && True = True
                 _ && _ = False
 
                 all f [] = True
-                all f (x:+xs) = f x && all f xs
+                all f (x:xs) = f x && all f xs
 
                 not True = False
                 not False = True
 
-                _main = all not (False :+ (False :+ []))
+                _main = all not [False, False]
             |]
         ,
             "Data: { branch: 1, data: { } }\n"

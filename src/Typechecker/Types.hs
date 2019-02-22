@@ -14,7 +14,6 @@ import           Data.Hashable           (Hashable)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (unpack)
-import qualified Data.Text               as T
 import           GHC.Generics            (Generic)
 import           Language.Haskell.Syntax as Syntax
 import           TextShow                (TextShow, fromText, showb, showt)
@@ -192,17 +191,6 @@ unwrapSynFun :: MonadError Text m => HsType -> m (HsType, HsType)
 unwrapSynFun (HsTyFun t1 t2) = return (t1, t2)
 unwrapSynFun t               = throwError $ synPrint t <> " isn't a function type."
 
-unmakeList :: MonadError Text m => Type -> m Type
-unmakeList t@(TypeApp t1 t2 _)
-    | t1 == typeList = return t2
-    | otherwise = throwError $ showt t <> " isn't a list type"
-unmakeList t = throwError $ showt t <> " isn't a list type"
-
-unmakeTuple :: MonadError Text m => Type -> m [Type]
-unmakeTuple (TypeApp (TypeCon (TypeConstant "(,)" _)) r _) = return [r]
-unmakeTuple (TypeApp l r _)                                = (r:) <$> unmakeTuple l
-unmakeTuple t                                              = throwError $ showt t <> " isn't a tuple type"
-
 -- |Built-in types
 typeUnit, typeBool, typeInt, typeInteger, typeFloat, typeDouble, typeChar :: Type
 typeUnit = TypeCon $ TypeConstant "()" KindStar
@@ -223,7 +211,6 @@ typeTuple n = TypeCon $ TypeConstant sym (foldr KindFun KindStar $ replicate n K
 
 typeString :: Type
 typeString = makeList typeChar
-
 
 -- Utility functions for converting from our type representations to the AST representations and back
 typeToSyn :: MonadError Text m => Type -> m Syntax.HsType
