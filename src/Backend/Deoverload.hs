@@ -211,6 +211,18 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
                 Right v -> return v
             d' <- HsPatBind l pat' <$> deoverloadRhs rhs <*> deoverloadDecls wheres
             return (d', renaming)
+        HsFunBind matches -> do
+            newName <- freshVarName
+            let synName = convertName newName
+                transform (HsMatch loc fname args rhs wheres) = do
+                    match' <- deoverloadMatch (HsMatch loc synName args rhs wheres)
+                    return (match', fname)
+            (matches', fnames) <- unzip <$> mapM transform matches
+            case fnames of
+                [] -> throwError $ "No matches in function bind"
+                fname:_ -> do
+                    unless (all (== fname) fnames) $ throwError $ "Function name mismatch in deoverloader"
+                    return (HsFunBind matches', M.singleton (convertName fname) newName)
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.

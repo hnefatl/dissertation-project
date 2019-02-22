@@ -570,8 +570,8 @@ inferDecl _ = throwError "Declaration not yet supported"
 -- binding. We need to process them separately to normal declarations as normal declarations assume they're the only
 -- definition of the symbol: typeclass instance definitions might be one of many.
 checkInstanceDecl :: HsQName -> [HsType] -> Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
-checkInstanceDecl cname argTypes (HsPatBind loc pat rhs wheres) = do
-    writeLog $ "Processing instance declaration for " <> synPrint pat
+checkInstanceDecl cname argTypes d = do
+    writeLog $ "Processing instance declaration for " <> synPrint d
     -- When inferring the pattern type, we want to inject the type of the binding given the instance variables: in
     -- `instance Num Int`, `(+)` doesn't have type `Num a => a -> a -> a`, it has type `Int -> Int -> Int`.
     ci <- gets (M.lookup cname . classInfo) >>= \case
@@ -579,25 +579,34 @@ checkInstanceDecl cname argTypes (HsPatBind loc pat rhs wheres) = do
         Just info -> return info
     ks <- getKinds
     sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci :: [TypeVariableName]) <$> mapM (synToType ks) argTypes
-    methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m,t) -> do
+    methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m, t) -> do
         qt@(Qualified quals _) <- applySub sub <$> synToQualType ks t
         unless (null quals) $ throwError "Unexpected qualifiers in typeclass method context"
         -- TODO(kc506): Should probably actually fill out the quantified vars
         t' <- instantiateToVar $ Quantified S.empty qt
         return (convertName m, t')
-    -- Temporarily add the renamed types, infer the pattern, then reset to the old types
     origTypes <- gets variableTypes
-    modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
-    patType <- nameToType =<< inferPattern pat
-    modify $ \s -> s { variableTypes = origTypes }
-    writeLog $ "methodTypes: " <> showt methodTypes
-    writeLog $ "Pattern type: " <> showt patType
-    -- Infer the RHS type, unify
-    (rhsExp, rhsVar) <- inferRhs rhs
-    rhsType <- nameToType rhsVar
-    unify patType rhsType
-    return $ HsPatBind loc pat rhsExp wheres
-checkInstanceDecl _ _ d = throwError $ unlines ["Illegal declaration in typeclass instance:", synPrint d]
+    case d of
+        HsPatBind loc pat rhs wheres -> do
+            -- Temporarily add the renamed types, infer the pattern, then reset to the old types
+            modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
+            patType <- nameToType =<< inferPattern pat
+            modify $ \s -> s { variableTypes = origTypes }
+            -- Infer the RHS type, unify
+            (rhsExp, rhsVar) <- inferRhs rhs
+            rhsType <- nameToType rhsVar
+            unify patType rhsType
+            return $ HsPatBind loc pat rhsExp wheres
+        HsFunBind matches -> do
+            modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
+            (matches', matchTypeVars) <- unzip <$> mapM inferMatch matches
+            matchTypes <- mapM nameToType matchTypeVars
+            modify $ \s -> s { variableTypes = origTypes }
+            -- Infer the RHS type, unify
+            commonType <- nameToType =<< freshTypeVarName
+            mapM_ (unify commonType) matchTypes
+            return $ HsFunBind matches'
+        _ -> throwError $ unlines ["Illegal declaration in typeclass instance:", synPrint d]
 
 inferMatch :: Syntax.HsMatch -> TypeInferrer (Syntax.HsMatch, TypeVariableName)
 inferMatch (HsMatch loc name args rhs wheres) = do
