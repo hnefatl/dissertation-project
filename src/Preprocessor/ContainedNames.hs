@@ -215,9 +215,12 @@ instance HasFreeTypeVariables TypePredicate where
     getFreeTypeVariables (IsInstance _ t) = getFreeTypeVariables t
 
 instance HasFreeTypeConstants HsDecl where
+    getFreeTypeConstants (HsPatBind _ pat rhs wheres) =
+        S.unions [getFreeTypeConstants pat, getFreeTypeConstants rhs, getFreeTypeConstants wheres]
+    getFreeTypeConstants (HsFunBind matches) = getFreeTypeConstants matches
     getFreeTypeConstants (HsClassDecl _ _ _ _ ds) = getFreeTypeConstants ds
     getFreeTypeConstants (HsInstDecl _ _ name ts ds) =
-            S.unions [S.singleton $ convertName name, getFreeTypeConstants ts, getFreeTypeConstants ds]
+        S.unions [S.singleton $ convertName name, getFreeTypeConstants ts, getFreeTypeConstants ds]
     getFreeTypeConstants (HsTypeSig _ _ t)        = getFreeTypeConstants t
     getFreeTypeConstants (HsDataDecl _ _ _ _ cons _) = getFreeTypeConstants cons
     getFreeTypeConstants _                        = S.empty
@@ -227,14 +230,61 @@ instance HasFreeTypeConstants HsConDecl where
 instance HasFreeTypeConstants HsBangType where
     getFreeTypeConstants (HsBangedTy t)   = getFreeTypeConstants t
     getFreeTypeConstants (HsUnBangedTy t) = getFreeTypeConstants t
+instance HasFreeTypeConstants HsRhs where
+    getFreeTypeConstants (HsUnGuardedRhs e)   = getFreeTypeConstants e
+    getFreeTypeConstants (HsGuardedRhss rhss) = getFreeTypeConstants rhss
+instance HasFreeTypeConstants HsGuardedRhs where
+    getFreeTypeConstants (HsGuardedRhs _ e1 e2) = getFreeTypeConstants [e1, e2]
+instance HasFreeTypeConstants HsAlt where
+    getFreeTypeConstants (HsAlt _ pat alts wheres) = S.unions [getFreeTypeConstants pat, getFreeTypeConstants alts, getFreeTypeConstants wheres]
+instance HasFreeTypeConstants HsGuardedAlts where
+    getFreeTypeConstants (HsUnGuardedAlt e) = getFreeTypeConstants e
+    getFreeTypeConstants (HsGuardedAlts as) = getFreeTypeConstants as
+instance HasFreeTypeConstants HsGuardedAlt where
+    getFreeTypeConstants (HsGuardedAlt _ e1 e2) = getFreeTypeConstants [e1, e2]
+instance HasFreeTypeConstants HsMatch where
+    getFreeTypeConstants (HsMatch _ _ pats rhs wheres) = S.unions [getFreeTypeConstants pats, getFreeTypeConstants rhs, getFreeTypeConstants wheres]
+instance HasFreeTypeConstants HsLiteral where
+    -- For the sake of dependency analysis, we pretend literals have their typeclasses free so we compile those first
+    getFreeTypeConstants HsChar{} = S.singleton "Char"
+    getFreeTypeConstants HsString{} = S.singleton "String"
+    getFreeTypeConstants HsInt{} = S.fromList ["Integer", "Num"]
+    getFreeTypeConstants HsFrac{} = S.fromList ["Rational", "Num"]
+    getFreeTypeConstants _ = error "Unsupported literal"
+instance HasFreeTypeConstants HsExp where
+    getFreeTypeConstants (HsLit l) = getFreeTypeConstants l
+    getFreeTypeConstants (HsInfixApp e1 _ e2)  = S.union (getFreeTypeConstants e1) (getFreeTypeConstants e2)
+    getFreeTypeConstants (HsApp e1 e2)         = S.union (getFreeTypeConstants e1) (getFreeTypeConstants e2)
+    getFreeTypeConstants (HsNegApp e)          = getFreeTypeConstants e
+    getFreeTypeConstants (HsLambda _ pats e)   = S.union (getFreeTypeConstants e) (getFreeTypeConstants pats)
+    getFreeTypeConstants (HsLet ds e)          = S.union (getFreeTypeConstants ds) (getFreeTypeConstants e)
+    getFreeTypeConstants (HsCase scrut alts)   = S.union (getFreeTypeConstants scrut) (getFreeTypeConstants alts)
+    getFreeTypeConstants (HsIf e1 e2 e3)       = getFreeTypeConstants [e1, e2, e3]
+    getFreeTypeConstants (HsTuple es)          = S.insert tupleCon (getFreeTypeConstants es)
+        where tupleCon = TypeVariableName $ makeTupleName $ length es
+    getFreeTypeConstants (HsList es)           = S.insert "[]" (getFreeTypeConstants es)
+    getFreeTypeConstants (HsParen e)           = getFreeTypeConstants e
+    getFreeTypeConstants (HsExpTypeSig _ e _)  = getFreeTypeConstants e
+    getFreeTypeConstants _                     = S.empty
+instance HasFreeTypeConstants HsPat where
+    getFreeTypeConstants (HsPNeg p)              = getFreeTypeConstants p
+    getFreeTypeConstants (HsPParen p)            = getFreeTypeConstants p
+    getFreeTypeConstants (HsPIrrPat p)           = getFreeTypeConstants p
+    getFreeTypeConstants (HsPAsPat _ p)          = getFreeTypeConstants p
+    getFreeTypeConstants (HsPInfixApp p1 _ p2) = getFreeTypeConstants [p1, p2]
+    getFreeTypeConstants (HsPApp _ ps)         = getFreeTypeConstants ps
+    getFreeTypeConstants (HsPTuple ps)           = S.insert tupleCon (getFreeTypeConstants ps)
+        where tupleCon = TypeVariableName $ makeTupleName $ length ps
+    getFreeTypeConstants (HsPList ps)            = S.insert "[]" (getFreeTypeConstants ps)
+    getFreeTypeConstants _                       = S.empty
 instance HasFreeTypeConstants HsQualType where
     getFreeTypeConstants (HsQualType quals t) = S.union qualConsts (getFreeTypeConstants t)
         where qualConsts = S.unions $ map (S.singleton . convertName . fst) quals
 instance HasFreeTypeConstants HsType where
-    getFreeTypeConstants (HsTyFun t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
+    getFreeTypeConstants (HsTyFun t1 t2) = getFreeTypeConstants [t1, t2]
     getFreeTypeConstants (HsTyTuple ts)  =
         S.insert (TypeVariableName $ makeTupleName $ length ts) $ getFreeTypeConstants ts
-    getFreeTypeConstants (HsTyApp t1 t2) = S.union (getFreeTypeConstants t1) (getFreeTypeConstants t2)
+    getFreeTypeConstants (HsTyApp t1 t2) = getFreeTypeConstants [t1, t2]
     getFreeTypeConstants HsTyVar{}       = S.empty
     getFreeTypeConstants (HsTyCon n)     = S.singleton $ convertName n
 
