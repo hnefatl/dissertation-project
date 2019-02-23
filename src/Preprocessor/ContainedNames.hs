@@ -248,8 +248,8 @@ instance HasFreeTypeConstants HsLiteral where
     -- For the sake of dependency analysis, we pretend literals have their typeclasses free so we compile those first
     getFreeTypeConstants HsChar{} = S.singleton "Char"
     getFreeTypeConstants HsString{} = S.singleton "String"
-    getFreeTypeConstants HsInt{} = S.fromList ["Integer", "Num"]
-    getFreeTypeConstants HsFrac{} = S.fromList ["Rational", "Num"]
+    getFreeTypeConstants HsInt{} = S.singleton "Num"
+    getFreeTypeConstants HsFrac{} = S.singleton "Num"
     getFreeTypeConstants _ = error "Unsupported literal"
 instance HasFreeTypeConstants HsExp where
     getFreeTypeConstants (HsLit l) = getFreeTypeConstants l
