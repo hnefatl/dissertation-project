@@ -206,6 +206,11 @@ Typeclass instances break eeeeverything. They use the same name as an existing f
 rename them because that's syntactic alterations when the dependency is semantic (renaming `foo` in `foo = all foo` will
 rename the 2nd `foo` although it refers to a different function).
 
+Don't support functors/monads :( Anything using higher order kinds is broken, as we can't carry kind information in
+unification. Some progress was made on the `higher-order-kinds` branch. Would probably have worked if used a constraint
+generation approach, but with the "solve constraints while processing" approach taken originally, seems too complicated
+now.
+
 ## Optimisations
 
 Lambda/let lifting is super useful because we can't do applications where arguments are constructors: `foo True True`
