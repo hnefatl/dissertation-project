@@ -140,7 +140,7 @@ deoverloadModule m@(HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
-    let ci = getClassInfo m
+    ci <- getClassInfo m
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls
@@ -226,7 +226,7 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.
-    let typeSub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci :: [TypeVariableName]) [paramType]
+    let typeSub = Substitution $ M.fromList $ zip (map fst $ argVariables ci :: [TypeVariableName]) [paramType]
     Quantified _ t' <- deoverloadQuantType <$> getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''

@@ -52,7 +52,6 @@ data InferrerState = InferrerState
     -- Type predicates: this is not redundant given `classEnvironment`, this contains eg. "type variable t74 is
     -- constrained by these classes", whereas `classEnvironment` contains eg. "Bool" is an instance of "Monoid".
     , typePredicates     :: M.Map Type (S.Set ClassName)
-    , variableCounter    :: Int
     -- Any typeclass instances we find when typechecking: we process these either after all the other decls or when
     -- another declaration needs a typeclass instance we can provide by processing one of these. It's weird, but
     -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
@@ -69,7 +68,6 @@ instance Default InferrerState where
             , classEnvironment = M.empty
             , kinds = M.empty
             , typePredicates = M.empty
-            , variableCounter = 0
             , typeclassInstances = M.empty
             , classInfo = M.empty }
 instance TextShow InferrerState where
@@ -112,8 +110,9 @@ nameSimpleType t = do
 synToQuantType :: HsQualType -> TypeInferrer QuantifiedType
 synToQuantType t = do
     ks <- getKinds
+    writeLog $ "Type " <> showt t
     t' <- synToQualType ks t
-    let freeVars = S.map (\v -> TypeVariable v KindStar) $ getTypeVars t'
+    let freeVars = S.map (\v -> TypeVariable v $ M.findWithDefault KindStar v ks) $ getTypeVars t'
     return $ Quantified freeVars t'
 
 -- |Returns the current substitution in the monad
@@ -578,7 +577,7 @@ checkInstanceDecl cname argTypes d = do
         Nothing -> throwError $ "No class with name " <> showt cname <> " found."
         Just info -> return info
     ks <- getKinds
-    sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci :: [TypeVariableName]) <$> mapM (synToType ks) argTypes
+    sub <- Substitution . M.fromList . zip (map fst $ argVariables ci :: [TypeVariableName]) <$> mapM (synToType ks) argTypes
     methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m, t) -> do
         qt@(Qualified quals _) <- applySub sub <$> synToQualType ks t
         unless (null quals) $ throwError "Unexpected qualifiers in typeclass method context"
@@ -668,8 +667,10 @@ inferModule ks m@(HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
-    let ci = getClassInfo m
-    modify $ \s -> s { classInfo = ci, kinds = ks }
+    ci <- getClassInfo m
+    let classArgKinds = M.fromList $ concatMap argVariables $ M.elems ci
+    writeLog $ "Got class argument kinds: " <> showt classArgKinds
+    modify $ \s -> s { classInfo = ci, kinds = M.union ks classArgKinds }
     writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
         isTypeclassInstance _            = False
@@ -698,8 +699,6 @@ addTypeclassInstanceFromDecl :: HsDecl -> TypeInferrer ()
 addTypeclassInstanceFromDecl (HsInstDecl _ ctx name args _) = case (ctx, args) of
     ([], [arg]) -> do
         ks <- getKinds
-        writeLog $ showt arg
-        writeLog . showt =<< getKinds
         t <- synToType ks arg
         addTypeclassInstance $ Qualified S.empty $ IsInstance (convertName name) t
     ([], _) -> throwError "Multiparameter typeclass instances not supported"

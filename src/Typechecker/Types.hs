@@ -231,7 +231,8 @@ typeToSyn (TypeApp t1 t2 _) = do
         HsTyCon (Special (HsTupleCon _))        -> HsTyTuple [t2']
         _                                       -> HsTyApp t1' t2'
 synToType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsType -> m Type
-synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
+synToType ks (HsTyVar v) = return $ TypeVar $ TypeVariable name (M.findWithDefault KindStar name ks)
+    where name = convertName v
 synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
     Nothing -> throwError $ "Type constructor not in kind mapping: " <> showt name
     Just k  -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
