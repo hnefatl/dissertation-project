@@ -52,7 +52,6 @@ data InferrerState = InferrerState
     -- Type predicates: this is not redundant given `classEnvironment`, this contains eg. "type variable t74 is
     -- constrained by these classes", whereas `classEnvironment` contains eg. "Bool" is an instance of "Monoid".
     , typePredicates     :: M.Map Type (S.Set ClassName)
-    , variableCounter    :: Int
     -- Any typeclass instances we find when typechecking: we process these either after all the other decls or when
     -- another declaration needs a typeclass instance we can provide by processing one of these. It's weird, but
     -- necessary as other decls depend on them at the type level instead of at the syntactic level, which we can't
@@ -69,7 +68,6 @@ instance Default InferrerState where
             , classEnvironment = M.empty
             , kinds = M.empty
             , typePredicates = M.empty
-            , variableCounter = 0
             , typeclassInstances = M.empty
             , classInfo = M.empty }
 instance TextShow InferrerState where
