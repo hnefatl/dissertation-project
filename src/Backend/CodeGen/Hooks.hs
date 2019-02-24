@@ -10,6 +10,7 @@ import           Names                     (VariableName(..), TypeVariableName, 
 
 import           Java.Lang                 (runtimeException, stringClass)
 import           JVM.Builder               hiding (locals)
+import           JVM.Assembler
 import           JVM.ClassFile             hiding (Class, Field, Method, toString)
 
 
@@ -18,53 +19,58 @@ import           JVM.ClassFile             hiding (Class, Field, Method, toStrin
 primitiveTypes :: S.Set TypeVariableName
 primitiveTypes = S.fromList [ "_Int", "_Integer" ]
 
+makeSimpleHook :: M.Map VariableName VariableName -> VariableName -> Int -> Converter () -> (S.Set VariableName, Text -> Converter ())
+makeSimpleHook renamings symbol arity implementation = 
+    (
+        S.fromList [renameVar $ symbol <> "Impl", renameVar $ "make" <> symbol, renameVar symbol]
+    ,
+        \cname -> do
+            -- Create an "Impl" function that perform the action
+            void $ newMethod [ACC_PUBLIC, ACC_STATIC] (renameBs $ symbol <> "Impl") args ret implementation
+            -- Make a function to create a Function object of the implementation function
+            makeImpl <- compileMakerFunction (rename $ "make" <> symbol) arity 0 (rename $ symbol <> "Impl")
+            -- Create a field we can treat as a variable in the program to call the crasher
+            void $ makePublicStaticField (rename symbol) heapObjectClass $ \field -> do
+                -- Store the Function object wrapping the implementation function in the field
+                invokeStatic (toLazyBytestring cname) makeImpl
+                putStaticField (toLazyBytestring cname) field
+    )
+    where
+        rename n = jvmSanitise $ convertName $ M.findWithDefault n n renamings :: Text
+        renameVar = VariableName . rename
+        renameBs = toLazyBytestring . rename
+        args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
+        ret = Returns heapObjectClass
+
 -- |A collection of extra generator actions, used to generate extra code in the main class. Allows injecting
 -- compiler-defined code like `error`, `undefined`, and dictionaries for builtin instances like `Num Int`.
 compilerGeneratedHooks :: M.Map VariableName VariableName -> M.Map (S.Set VariableName) (Text -> Converter ())
 compilerGeneratedHooks renamings = M.fromList
     [
-        (
-            S.fromList [renameVar "compilerErrorImpl", renameVar "makeCompilerError", renameVar "compilerError"]
-        ,
-            \cname -> do
-                -- Create a function to force a crash
-                void $ newMethod [ACC_PUBLIC, ACC_STATIC] (renameBs "compilerErrorImpl") args ret $ do
-                    -- Create a new exception and throw it
-                    new runtimeException
-                    dup
-                    loadString "Compiler error :("
-                    invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
-                    throw
-                -- Make a function to create a Function object of the crasher
-                -- TODO(kc506): If we switch to makeFunction1, makeFunction2 etc, replace this
-                makeImpl <- compileMakerFunction (rename "makeCompilerError") 0 0 (rename "compilerErrorImpl")
-                -- Create a field we can treat as a variable in the program to call the crasher
-                void $ makePublicStaticField (rename "compilerError") heapObjectClass $ \field -> do
-                    -- Store the Function object wrapping the implementation function in the field
-                    invokeStatic (toLazyBytestring cname) makeImpl
-                    putStaticField (toLazyBytestring cname) field
-        )
-    , 
-        (
-            S.singleton (renameVar "undefined")
-        ,
-            \cname -> do
-                void $ newMethod [ACC_PUBLIC, ACC_STATIC] (renameBs "undefinedImpl") args ret $ do
-                    new runtimeException
-                    dup
-                    loadString "undefined"
-                    invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
-                    throw
-                makeImpl <- compileMakerFunction (rename "makeUndefined") 0 0 (rename "undefinedImpl")
-                -- Create a field we can treat as a variable in the program to call the crasher
-                void $ makePublicStaticField (rename "undefined") heapObjectClass $ \field -> do
-                    -- Store the Function object wrapping the implementation function in the field
-                    invokeStatic (toLazyBytestring cname) makeImpl
-                    putStaticField (toLazyBytestring cname) field
-        )
+        makeSimpleHook renamings "compilerError" 0 $ do
+            -- Create a new exception and throw it
+            new runtimeException
+            dup
+            loadString "Compiler error :("
+            invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
+            throw
+    ,
+        makeSimpleHook renamings "undefined" 0 $ do
+            new runtimeException
+            dup
+            loadString "undefined"
+            invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
+            throw
+    ,
+        makeSimpleHook renamings "primNumIntAdd" 2 $ do
+            -- Load the two argument _Int objects from the argument array
+            aload_ I0
+            iconst_0
+            aaload
+            aload_ I0
+            iconst_1
+            aaload
+            -- Invoke _Int's add method
+            invokeStatic int $ NameType "add" $ MethodSignature [intClass, intClass] (Returns intClass)
+            i0 ARETURN
     ]
-    where args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
-          ret = Returns heapObjectClass
-          rename n = jvmSanitise $ convertName $ M.findWithDefault n n renamings :: Text
-          renameVar = VariableName . rename
-          renameBs = toLazyBytestring . rename

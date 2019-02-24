@@ -7,6 +7,10 @@ public class _Int extends Data {
         return i;
     }
 
+    public static _Int add(_Int x, _Int y) {
+        return _make_Int(x.value + y.value);
+    }
+
     @Override
     public String toString() {
         return "Int: " + value;

@@ -90,19 +90,6 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
 
-printTopOfStack :: MonadGenerator m => m ()
-printTopOfStack = do
-    dup
-    getStaticField Java.Lang.system Java.IO.out
-    JVM.Builder.swap
-    invokeVirtual Java.Lang.object toString
-    invokeVirtual Java.IO.printStream Java.IO.println
-printText :: MonadGenerator m => Text -> m ()
-printText t = do
-    getStaticField Java.Lang.system Java.IO.out
-    loadString $ unpack t
-    invokeVirtual Java.IO.printStream Java.IO.println
-
 loadPrimitiveClasses :: MonadIO m => FilePath -> m [Tree CPEntry]
 loadPrimitiveClasses dirPath = liftIO $ execClassPath (mapM_ (loadClass . (dirPath </>)) classes)
     where classes = ["HeapObject", "Function"]
@@ -216,8 +203,7 @@ addBootstrapPoolItems (Converter x) s = do
             , methodName = "metafactory"
             , methodSignature = metafactorySig
             , methodAttributesCount = 0
-            , methodAttributes = AR M.empty
-            }
+            , methodAttributes = AR M.empty }
     mfIndex <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
     -- Add some constants to the pool that we'll need later, when we're creating the bootstrap method attribute
     arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")

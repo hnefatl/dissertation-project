@@ -8,6 +8,7 @@ import           Control.Monad.Except       (Except, ExceptT, runExcept, throwEr
 import           Control.Monad.State.Strict (MonadState, StateT, get, gets, modify)
 import qualified Data.ByteString.Lazy       as B
 import           Data.Functor               (void)
+import           Data.Text                  (unpack)
 import qualified Data.Map.Strict            as M
 import qualified Data.Sequence              as Seq
 import qualified Data.Set                   as S
@@ -15,6 +16,7 @@ import           Data.Word                  (Word16)
 import           TextShow                   (TextShow, showb, showt)
 
 import qualified Java.Lang
+import qualified Java.IO
 import           JVM.Assembler
 import           JVM.Builder                hiding (locals)
 import           JVM.ClassFile              hiding (Class, Field, Method, toString)
@@ -270,3 +272,16 @@ loadLocal 1 = aload_ I1
 loadLocal 2 = aload_ I2
 loadLocal 3 = aload_ I3
 loadLocal i = if i < 256 then aload $ fromIntegral i else aloadw $ fromIntegral i
+
+printTopOfStack :: MonadGenerator m => m ()
+printTopOfStack = do
+    dup
+    getStaticField Java.Lang.system Java.IO.out
+    JVM.Builder.swap
+    invokeVirtual Java.Lang.object toString
+    invokeVirtual Java.IO.printStream Java.IO.println
+printText :: MonadGenerator m => Text -> m ()
+printText t = do
+    getStaticField Java.Lang.system Java.IO.out
+    loadString $ unpack t
+    invokeVirtual Java.IO.printStream Java.IO.println
