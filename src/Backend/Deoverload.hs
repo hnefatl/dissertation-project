@@ -248,9 +248,12 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
     forM_ (M.toList $ methods ci) $ \(n, t) -> do
         methodType <- quantifyType . applySub typeSub =<< synToQualType ks t
-        let methodName = renamings M.! convertName n
-        addTypes $ M.singleton methodName methodType
-        writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
+        case M.lookup (convertName n) renamings of
+            Nothing -> throwError $ unwords
+                ["Instance declaration for", synPrint name, synPrint arg, "missing definition of", convertName n]
+            Just methodName -> do
+                addTypes $ M.singleton methodName methodType
+                writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
     return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 

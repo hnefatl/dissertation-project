@@ -167,7 +167,7 @@ clone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
 toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 makeInt :: NameType Method
-makeInt = NameType "_makeInt" $ MethodSignature [IntType] (Returns intClass)
+makeInt = NameType "_make_Int" $ MethodSignature [IntType] (Returns intClass)
 boxedDataBranch :: NameType Field
 boxedDataBranch = NameType "branch" IntType
 boxedDataData :: NameType Field

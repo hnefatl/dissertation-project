@@ -32,7 +32,7 @@ import qualified JVM.ClassFile                  as ClassFile
 import           JVM.Converter
 
 import           Backend.CodeGen.Converter
-import           Backend.CodeGen.Hooks          (compilerGeneratedHooks)
+import           Backend.CodeGen.Hooks          (compilerGeneratedHooks, primitiveTypes)
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise, jvmSanitises)
 import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
                                                  getBindingVariables, getBranchNames, getConstructorVariables,
@@ -56,21 +56,23 @@ freeVariables name args x = do
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs main reverseRenames ds = do
+convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname primitiveClassDir bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let ds' = jvmSanitises ds
         bindings = jvmSanitises bs
+        hooks = compilerGeneratedHooks topRenames
+        topSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys hooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
         initialState = ConverterState
             { mainName = main
             , localVarCounter = 0
             , datatypes = ds'
-            , topLevelSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys compilerGeneratedHooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
-            , reverseRenames = reverseRenames
+            , topLevelSymbols = topSymbols
+            , reverseRenames = revRenames
             , localSymbols = M.empty
-            , initialisers = map (\gen -> gen cname) $ M.elems compilerGeneratedHooks
+            , initialisers = map (\gen -> gen cname) $ M.elems hooks
             , dynamicMethods = Seq.empty
-            , dictionaries = S.empty --S.singleton $ Types.IsInstance "Num" Types.typeInt  --M.keysSet builtinDictionaries
+            , dictionaries = S.empty
             , classname = toLazyBytestring cname }
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
@@ -83,7 +85,7 @@ convert cname primitiveClassDir bs main reverseRenames ds = do
     writeLog "- CodeGen -"
     writeLog "-----------"
     writeLog "Renames"
-    forM_ (M.toList reverseRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
+    forM_ (M.toList revRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
     dataClasses <- compileDatatypes (M.elems ds') classpath
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
@@ -123,7 +125,7 @@ addMainMethod = do
 compileDatatypes :: [Datatype] -> [Tree CPEntry] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
 compileDatatypes ds classpath = do
     writeLog $ "Compiling datatypes: " <> showt ds
-    forM ds $ \datatype -> do
+    fmap catMaybes $ forM ds $ \datatype -> do
         let dname = convertName (typeName datatype)
             dclass = toLazyBytestring dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
@@ -162,11 +164,14 @@ compileDatatypes ds classpath = do
                         putField dclass boxedDataData
                         -- Return the instance of our class, fully initialised
                         i0 ARETURN
-        case runExcept $ generate classpath dclass compileDatatype of
+        -- Don't codegen this datatype if it's provided by the runtime classes
+        if S.member (typeName datatype) primitiveTypes then
+            return Nothing
+        else case runExcept $ generate classpath dclass compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
                 let out' = out { superClass = boxedData }
-                return $ NamedClass dname (classDirect2File out')
+                return $ Just $ NamedClass dname (classDirect2File out')
 
 -- TODO(kc506): Should be uneccessary: dictionaries should be created by `instance` decls in ILA conversion
 compileDictionaries :: Converter ()
