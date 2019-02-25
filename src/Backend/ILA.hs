@@ -74,10 +74,10 @@ data Literal = LiteralInt Integer
     deriving (Eq, Ord, Show, Generic)
 instance Hashable Literal
 instance TextShow Literal where
-    showb (LiteralInt i)    = showb i <> " :: Int"
-    showb (LiteralFrac r)   = showb r <> " :: Rational"
-    showb (LiteralChar c)   = showb c <> " :: Char"
-    showb (LiteralString s) = showb s <> " :: String"
+    showb (LiteralInt i)    = showb i
+    showb (LiteralFrac r)   = showb r
+    showb (LiteralChar c)   = showb c
+    showb (LiteralString s) = showb s
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
