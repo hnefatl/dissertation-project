@@ -67,9 +67,11 @@ compilerGeneratedHooks renamings = M.fromList
             aload_ I0
             iconst_0
             aaload
+            invokeVirtual heapObject enter
             aload_ I0
             iconst_1
             aaload
+            invokeVirtual heapObject enter
             -- Invoke _Int's add method
             invokeStatic int $ NameType "add" $ MethodSignature [intClass, intClass] (Returns intClass)
             i0 ARETURN
