@@ -104,7 +104,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                     when (verbose flags) $ writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
                     return ilb''
                 False -> return ilb'
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames (ILA.datatypes ilaState)
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags
 

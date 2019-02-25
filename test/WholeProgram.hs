@@ -151,4 +151,29 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             "Data: { branch: 1, data: { } }\n"
         )
+    ,
+        (
+            "_main = sum [1,2,3,4,5,6,7,8,9,10]"
+        ,
+            [text|
+                data Int
+                data [] a = [] | a : [a]
+                            
+                class Num a where
+                    (+) :: a -> a -> a
+                instance Num Int where
+                    (+) = primNumIntAdd
+                
+                primNumIntAdd :: Int -> Int -> Int
+
+                foldl _ a [] = a
+                foldl f a (x:xs) = foldl f (f a x) xs
+
+                sum = foldl (+) 0
+
+                _main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
+            |]
+        ,
+            "Int: 55\n"
+        )
     ]

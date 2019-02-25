@@ -21,10 +21,18 @@ public class Function extends HeapObject {
             return this; // If we're not fully applied, we get a partially applied function
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
-            Function result = (Function)inner.apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables).enter();
-            for (HeapObject arg : arguments.subList(arity, arguments.size()))
-                result.addArgument(arg);
-            return result;
+            try {
+                Function result = (Function)inner
+                    .apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables)
+                    .enter()
+                    .clone();
+                for (HeapObject arg : arguments.subList(arity, arguments.size()))
+                    result.addArgument(arg);
+                return result;
+            }
+            catch (CloneNotSupportedException e) {
+                throw new RuntimeException(e);
+            }
         }
         else { // Perfect number of arguments
             return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables).enter();

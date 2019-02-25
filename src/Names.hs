@@ -5,17 +5,18 @@
 module Names where
 
 import BasicPrelude
+import Data.Semigroup          (Semigroup)
 import Data.Text               (pack, unpack)
 import Language.Haskell.Syntax as Syntax
 import TextShow                (TextShow, fromText, showb)
 import Tuples                  (makeTupleName)
 
-newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable)
-newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable)
+newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
+newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
 type ClassName = TypeVariableName
 -- Unique variants are only used within the renamer
-newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable)
-newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable)
+newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
+newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
 instance TextShow VariableName where
     showb (VariableName s) = fromText s
 instance TextShow TypeVariableName where

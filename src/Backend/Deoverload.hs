@@ -248,40 +248,54 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
     forM_ (M.toList $ methods ci) $ \(n, t) -> do
         methodType <- quantifyType . applySub typeSub =<< synToQualType ks t
-        let methodName = renamings M.! convertName n
-        addTypes $ M.singleton methodName methodType
-        writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
+        case M.lookup (convertName n) renamings of
+            Nothing -> throwError $ unwords
+                ["Instance declaration for", synPrint name, synPrint arg, "missing definition of", convertName n]
+            Just methodName -> do
+                addTypes $ M.singleton methodName methodType
+                writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
     return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
-deoverloadMatch (HsMatch loc name pats rhs wheres) = HsMatch loc name pats <$> deoverloadRhs rhs <*> deoverloadDecls wheres
+deoverloadMatch (HsMatch loc name pats rhs wheres) = do
+    -- Replace each constraint with a lambda for a dictionary
+    Quantified _ (Qualified quals _) <- getType (convertName name)
+    let constraints = S.toAscList quals
+    args <- mapM makeDictName constraints
+    let dictArgs = M.fromList $ zip constraints args
+        funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
+    writeLog $ "Processing match " <> showt name <> " " <> showt pats
+    (wheres', rhs') <- addScopedDictionaries dictArgs $ (,) <$> deoverloadDecls wheres <*> deoverloadRhsWithoutAddingDicts rhs
+    writeLog $ "Finish processing. New args: " <> showt (funArgs <> pats)
+    return $ HsMatch loc name (funArgs <> pats) rhs' wheres'
 
 isTypeSig :: HsDecl -> Bool
 isTypeSig HsTypeSig{} = True
 isTypeSig _           = False
 
+deoverloadRhsWithoutAddingDicts :: HsRhs -> Deoverload HsRhs
+deoverloadRhsWithoutAddingDicts (HsUnGuardedRhs expr) = HsUnGuardedRhs <$> deoverloadExp expr
+deoverloadRhsWithoutAddingDicts _ = throwError "Unsupported RHS in deoverloader"
+
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
-deoverloadRhs (HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
-    e@(HsExpTypeSig loc _ t@(HsQualType _ simpleType)) -> do
+deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
+    (HsExpTypeSig loc _ t@(HsQualType _ simpleType)) -> do
         -- Replace each constraint with a lambda for a dictionary
         ks                <- getKinds
         Qualified quals _ <- synToQualType ks t
         let constraints = S.toAscList quals
         args <- mapM makeDictName constraints
-        let dictArgs = M.fromList $ zip constraints args
-            funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
-        e' <- addScopedDictionaries dictArgs (deoverloadExp e) >>= \case
-            HsExpTypeSig _ e' _ -> return e'
-            _ -> throwError "Got untagged expression from adding dictionaries"
+        let funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
+            dictArgs = M.fromList $ zip constraints args
+        e' <- addScopedDictionaries dictArgs (deoverloadRhsWithoutAddingDicts rhs) >>= \case
+            HsUnGuardedRhs e' -> return e'
+            _ -> undefined
         -- Wrap the expression in a lambda that takes the dictionary arguments
         let outerType = HsQualType [] $ deoverloadType t
-            innerType = HsQualType [] simpleType
-            -- The original expression now has the unconstrained simple type
-            innerExp  = HsExpTypeSig loc e' innerType
             -- The wrapping expression is a lambda taking dictionaries around the inner expression and has modified type
-            outerExp = HsExpTypeSig loc (HsLambda loc funArgs innerExp) outerType
-        return $ HsUnGuardedRhs $ if null constraints then innerExp else outerExp
+            outerExp = HsExpTypeSig loc (HsLambda loc funArgs e') outerType
+        return $ HsUnGuardedRhs $ if null constraints then e' else outerExp
     _ -> throwError $ "Found rhs without top-level type annotation: forgot to run type tagger?\n" <> showt expr
 deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 
