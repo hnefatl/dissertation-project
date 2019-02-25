@@ -293,12 +293,9 @@ deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint
             _ -> undefined
         -- Wrap the expression in a lambda that takes the dictionary arguments
         let outerType = HsQualType [] $ deoverloadType t
-            innerType = HsQualType [] simpleType
-            -- The original expression now has the unconstrained simple type
-            innerExp  = HsExpTypeSig loc e' innerType
             -- The wrapping expression is a lambda taking dictionaries around the inner expression and has modified type
-            outerExp = HsExpTypeSig loc (HsLambda loc funArgs innerExp) outerType
-        return $ HsUnGuardedRhs $ if null constraints then innerExp else outerExp
+            outerExp = HsExpTypeSig loc (HsLambda loc funArgs e') outerType
+        return $ HsUnGuardedRhs $ if null constraints then e' else outerExp
     _ -> throwError $ "Found rhs without top-level type annotation: forgot to run type tagger?\n" <> showt expr
 deoverloadRhs _ = throwError "Unsupported RHS in deoverloader"
 
