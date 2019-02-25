@@ -211,6 +211,9 @@ unification. Some progress was made on the `higher-order-kinds` branch. Would pr
 generation approach, but with the "solve constraints while processing" approach taken originally, seems too complicated
 now.
 
+When talking about deoverloading, explain that literals are the only terms that can have overloaded types but not
+require a dictionary to evaluate: shows complexity and understanding.
+
 ## Optimisations
 
 Lambda/let lifting is super useful because we can't do applications where arguments are constructors: `foo True True`
@@ -223,3 +226,4 @@ something: JVM uses linear scan https://en.wikipedia.org/wiki/Register_allocatio
 Made some changes to the intermediate language translations and codegen that were not naive: we have a "non-trivial"
 translation/code generation stage (added special cases for thunks etc so that we don't wastefully allocate thunks on the
 heap).
+
