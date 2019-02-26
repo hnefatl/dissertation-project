@@ -29,6 +29,7 @@ import           Logger                     (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                      (TypeVariableName, VariableName(..), convertName)
 import qualified Typechecker.Types          as Types
+import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File
@@ -52,6 +53,8 @@ data ConverterState = ConverterState
       -- when working out which free variables we need to pass to functions, and which it can get for itself.
       -- The values associated with each symbol is the type of the equivalent field in the class (usually HeapObject).
       topLevelSymbols :: M.Map VariableName FieldType
+    , -- A forward mapping from original top-level variables to their renamed versions
+      topLevelRenames :: M.Map VariableName VariableName
     , -- A reverse mapping from the renamed top-level variables to what they were originally called.
       reverseRenames  :: M.Map VariableName VariableName
     , -- Local variable names, and an action that can be used to push them onto the stack
@@ -272,6 +275,26 @@ loadLocal 1 = aload_ I1
 loadLocal 2 = aload_ I2
 loadLocal 3 = aload_ I3
 loadLocal i = if i < 256 then aload $ fromIntegral i else aloadw $ fromIntegral i
+
+-- |Given a java-land Boolean on the top of the stack, convert it to a haskell-land True/False BoxedData value
+makeBoxedBool :: Converter ()
+makeBoxedBool = do
+    rs <- gets topLevelRenames
+    case (M.lookup "True" rs, M.lookup "False" rs) of
+        (Nothing, _) -> throwTextError "Missing renaming for True in CodeGen"
+        (_, Nothing) -> throwTextError "Missing renaming for False in CodeGen"
+        (Just trueName, Just falseName) -> do
+            let makeTrue = toLazyByteString $ convertName $ "_make" <> jvmSanitise trueName
+                makeFalse = toLazyByteString $ convertName $ "_make" <> jvmSanitise falseName
+                invokeStaticBytes = 3
+                jumpBytes = 3
+            i0 (IF C_EQ $ jumpBytes + invokeStaticBytes + jumpBytes)
+            -- If the value is 1, make true and jump past the other case
+            invokeStatic "_Bool" $ NameType makeTrue $ MethodSignature [] (Returns $ ObjectType "_Bool")
+            goto invokeStaticBytes
+            -- If the value is 0, make false
+            invokeStatic "_Bool" $ NameType makeFalse $ MethodSignature [] (Returns $ ObjectType "_Bool")
+
 
 printTopOfStack :: MonadGenerator m => m ()
 printTopOfStack = do

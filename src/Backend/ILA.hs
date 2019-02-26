@@ -500,7 +500,7 @@ patToIla ((v, t):vs) cs def = do
     allLiteral <- allPatType Literal pats
     allCon <- allPatType Constructor pats
     if allVariable then do
-        -- Extract the variable names `ns` from the patterns, get the new cases
+        -- Extract the variable names from the patterns, get the new cases
         (pats', varNames) <- fmap unzip $ forM pats $ \(pl, e, et, sub) -> case pl of
             HsPVar n:ps -> return ((ps, e, et, subCompose sub $ subSingle (convertName n) v), Just $ convertName n)
             HsPWildCard:ps -> return ((ps, e, et, sub), Nothing)
@@ -508,9 +508,28 @@ patToIla ((v, t):vs) cs def = do
             p:_ -> throwError $ "Non-HsPVar in variables: " <> showt p
         local (addTypes $ M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty t)) $
             patToIla vs pats' def
-    else if allLiteral then
-        -- Not supported yet...
-        throwError "Literals in pattern match in ILA"
+    else if allLiteral then do
+        -- To check literals we create a right-leaning tree of case statements, like:
+        -- > case x == 0 of { True -> E1 ; False -> case x == 1 of { ... } }
+        rs <- asks topLevelRenames
+        writeLog $ showt rs
+        case (M.lookup "True" rs, M.lookup "False" rs, M.lookup "==" rs) of
+            (Nothing, _, _) -> throwError "True constructor not found in ILA lowering"
+            (_, Nothing, _) -> throwError "False constructor not found in ILA lowering"
+            (_, _, Nothing) -> throwError "(==) function not found in ILA lowering"
+            (Just trueName, Just falseName, Just equals) -> do
+                equalsType <- T.makeFun [t, t] T.typeBool
+                let trueCon = DataCon trueName []
+                    falseCon = DataCon falseName []
+                    equalsFun = Var equals equalsType
+                    customFoldM d xs f = foldrM f d xs
+                customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
+                    [HsPLit l] -> do
+                        l' <- litToIla l
+                        let cond = App (App equalsFun (Var v t)) (Lit l' t)
+                        expr <- rhsToIla rhs
+                        return $ Case cond [] [ Alt trueCon (applySub sub expr), Alt falseCon body ]
+                    p -> throwError $ "Expected single literal in ILA lowering, got: " <> showt p
     else if allCon then do
         conGroups <- groupPatCons getPat pats
         alts <- forM conGroups $ \(con, (HsPApp _ newpats:ps, r, t, s):es) -> do
@@ -554,7 +573,7 @@ groupPatCons f xl = do
     tagged <- forM xl $ \x -> case f x of
         HsPApp n _ -> return (convertName n, x)
         _          -> throwError "Non-constructor in rearrangePatCons"
-    return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortBy (comparing fst) tagged
+    return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortOn fst tagged
 
 -- |Reduce patterns so that the root of each pattern is a variable/literal/constructor
 reducePats :: MonadError Text m => VariableName -> ([HsPat], HsRhs, Type, NameSubstitution) -> m ([HsPat], HsRhs, Type, NameSubstitution)

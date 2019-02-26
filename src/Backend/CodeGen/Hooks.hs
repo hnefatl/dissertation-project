@@ -54,6 +54,22 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntSub" 2 $ invokeClassStaticMethod int "sub" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntMult" 2 $ invokeClassStaticMethod int "mult" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns intClass)
+    , makeSimpleHook renamings "primEqIntEq" 2 $ do
+        -- Load and evaluate the arguments to Ints
+        aload_ I0
+        iconst_0
+        aaload
+        invokeVirtual heapObject enter
+        checkCast int
+        aload_ I0
+        iconst_1
+        aaload
+        invokeVirtual heapObject enter
+        checkCast int
+        invokeStatic int $ NameType "eq" $ MethodSignature [intClass, intClass] (Returns $ ObjectType "java/lang/Boolean")
+        -- Convert the Java Boolean to a Haskell Bool
+        makeBoxedBool
+        i0 ARETURN
     ]
 
 invokeClassStaticMethod :: ByteString -> ByteString -> [ByteString] -> ReturnSignature -> Converter ()

@@ -68,6 +68,7 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
             , localVarCounter = 0
             , datatypes = ds'
             , topLevelSymbols = topSymbols
+            , topLevelRenames = topRenames
             , reverseRenames = revRenames
             , localSymbols = M.empty
             , initialisers = map (\gen -> gen cname) $ M.elems hooks

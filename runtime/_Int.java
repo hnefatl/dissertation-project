@@ -19,6 +19,9 @@ public class _Int extends Data {
     public static _Int div(_Int x, _Int y) {
         return _make_Int(x.value / y.value);
     }
+    public static Boolean eq(_Int x, _Int y) {
+        return x.value == y.value;
+    }
 
     @Override
     public String toString() {
