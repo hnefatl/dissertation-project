@@ -513,7 +513,7 @@ patToIla ((v, t):vs) cs def = do
         -- To check literals we create a right-leaning tree of case statements, like:
         -- > case x == 0 of { True -> E1 ; False -> case x == 1 of { ... } }
         rs <- asks topLevelRenames
-        eqDictName <- makeDictName $ IsInstance "Eq" t
+        eqDictPlainName <- makeDictName $ IsInstance "Eq" t -- Might need to be renamed with a substitution below
         eqDictType <- T.makeApp (T.TypeCon $ T.TypeConstant "Eq" (KindFun KindStar KindStar)) [t]
         case (M.lookup "True" rs, M.lookup "False" rs, M.lookup "==" rs) of
             (Nothing, _, _) -> throwError "True constructor not found in ILA lowering"
@@ -524,12 +524,13 @@ patToIla ((v, t):vs) cs def = do
                 let trueCon = DataCon trueName []
                     falseCon = DataCon falseName []
                     equalsFun = Var equals equalsType
-                    eqDict = Var eqDictName eqDictType
                     customFoldM d xs f = foldrM f d xs
                 customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
                     [HsPLit l] -> do
                         l' <- litToIla l
                         let cond = foldl App equalsFun [eqDict, Var v t, Lit l' t]
+                            eqDictName = applySub sub eqDictPlainName
+                            eqDict = Var eqDictName eqDictType
                         expr <- rhsToIla rhs
                         return $ Case cond [] [ Alt trueCon (applySub sub expr), Alt falseCon body ]
                     p -> throwError $ "Expected single literal in ILA lowering, got: " <> showt p
@@ -548,9 +549,7 @@ patToIla ((v, t):vs) cs def = do
         let defaultAlt = Alt Default def
         return $ Case (Var v t) [] (defaultAlt:alts)
     else do -- Mixture of variables/literals/constructors
-        writeLog $ unlines ["mixture", showt ((v,t):vs), showt cs, showt def]
         patGroups <- map snd <$> groupPatsOn getPat pats
-        writeLog $ "patGroups:\n" <> unlines (map showt patGroups)
         foldrM (patToIla $ (v,t):vs) def patGroups
 patToIla a b c = throwError $ unlines ["patToIla bug: ", showt a, showt b, showt c]
 

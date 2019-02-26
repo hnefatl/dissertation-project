@@ -246,9 +246,9 @@ instance HasFreeTypeConstants HsMatch where
     getFreeTypeConstants (HsMatch _ _ pats rhs wheres) = S.unions [getFreeTypeConstants pats, getFreeTypeConstants rhs, getFreeTypeConstants wheres]
 instance HasFreeTypeConstants HsLiteral where
     -- For the sake of dependency analysis, we pretend literals have their typeclasses free so we compile those first
-    getFreeTypeConstants HsChar{} = S.singleton "Char"
+    getFreeTypeConstants HsChar{} = S.fromList ["Char", "Eq"]
     getFreeTypeConstants HsString{} = S.singleton "String"
-    getFreeTypeConstants HsInt{} = S.singleton "Num"
+    getFreeTypeConstants HsInt{} = S.fromList ["Num", "Eq"]
     getFreeTypeConstants HsFrac{} = S.singleton "Num"
     getFreeTypeConstants _ = error "Unsupported literal"
 instance HasFreeTypeConstants HsExp where

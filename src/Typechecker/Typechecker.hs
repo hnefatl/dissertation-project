@@ -321,10 +321,12 @@ inferLiteral (HsString _) = nameSimpleType typeString
 inferLiteral (HsInt _) = do
     v <- freshTypeVarName
     addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Num")
+    addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Eq")
     return v
 inferLiteral (HsFrac _) = do
     v <- freshTypeVarName
     addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Fractional")
+    addTypeConstraint (TypeVar $ TypeVariable v KindStar) (TypeVariableName "Eq")
     return v
 inferLiteral l = throwError $ "Unboxed literals not supported: " <> showt l
 

@@ -90,7 +90,7 @@ ilaToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [Binding
 ilaToAnf bs = writeLog "ILAANF" >> mapM ilaBindingToAnf bs
 
 ilaBindingToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => Binding ILA.Expr -> m (Binding AnfRhs)
-ilaBindingToAnf (NonRec v e) = (writeLog (showt e) >>) $ NonRec v <$> ilaExpToRhs e
+ilaBindingToAnf (NonRec v e) = NonRec v <$> ilaExpToRhs e
 ilaBindingToAnf (Rec m)      = Rec . M.fromList <$> mapM (secondM ilaExpToRhs) (M.toList m)
 
 ilaExpToTrivial :: MonadError Text m => ILA.Expr -> m AnfTrivial
@@ -125,14 +125,14 @@ ilaExpToApp e@ILA.App{} = do
 ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF application: " <> showt e
 
 ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
-ilaExpToComplex e@ILA.Var{}        = (writeLog "var" >>) $ Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Con{}        = (writeLog "con" >>) $ ilaExpToApp e
-ilaExpToComplex e@ILA.Lit{}        = (writeLog "lit" >>) $ Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Type{}       = (writeLog "typ" >>) $ Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.App{}        = (writeLog "app" >>) $ ilaExpToApp e
-ilaExpToComplex e@ILA.Lam{}        = (writeLog "lam" >>) $ makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
-ilaExpToComplex (ILA.Let v t e b)  = (writeLog "let" >>) $ Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
-ilaExpToComplex (ILA.Case s vs as) = (writeLog "cas" >>) $ Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
+ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Con{}        = ilaExpToApp e
+ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
+ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
+ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
+ilaExpToComplex (ILA.Case s vs as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
 
 ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfRhs
 ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b
