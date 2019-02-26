@@ -291,7 +291,7 @@ makeBoxedBool = do
             i0 (IF C_EQ $ jumpBytes + invokeStaticBytes + jumpBytes)
             -- If the value is 1, make true and jump past the other case
             invokeStatic "_Bool" $ NameType makeTrue $ MethodSignature [] (Returns $ ObjectType "_Bool")
-            goto invokeStaticBytes
+            goto (jumpBytes + invokeStaticBytes)
             -- If the value is 0, make false
             invokeStatic "_Bool" $ NameType makeFalse $ MethodSignature [] (Returns $ ObjectType "_Bool")
 

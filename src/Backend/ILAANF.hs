@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE DataKinds        #-}
 
 module Backend.ILAANF where
 
@@ -14,6 +15,8 @@ import           Names
 import           TextShow             (TextShow, showb, showt)
 import           Typechecker.Types    (Type)
 import qualified Typechecker.Types    as T
+import           Logger               (MonadLogger, writeLog)
+import           AlphaEq              (AlphaEq, alphaEq')
 
 -- These datatypes are inspired by the grammar in https://github.com/ghc/ghc/blob/6353efc7694ba8ec86c091918e02595662169ae2/compiler/coreSyn/CorePrep.hs#L144-L160
 -- |Trivial ANF expressions are "atoms": variables, literals, types.
@@ -55,28 +58,26 @@ instance TextShow AnfRhs where
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
     showb (Complex c) = showb c
 
--- Need function to get the free variables of an ILA-ANF expression, so we know what free variables a thunk has. Needed
--- for STG translation? Info tables? Can write as a new get_ContainedName function.
 
 getAnfTrivialType :: MonadError Text m => AnfTrivial -> m Type
 getAnfTrivialType (Var _ t) = return t
 getAnfTrivialType (Con _ t) = return t
 getAnfTrivialType (Lit _ t) = return t
 getAnfTrivialType (Type t)  = return t
-getAnfAppType :: MonadError Text m => AnfApplication -> m Type
+getAnfAppType :: (MonadError Text m, MonadLogger m) => AnfApplication -> m Type
 getAnfAppType (TrivApp e) = getAnfTrivialType e
 getAnfAppType (App e1 e2) = do
     e2Type <- getAnfTrivialType e2
     (argType, retType) <- T.unwrapFun =<< getAnfAppType e1
     when (argType /= e2Type) $ throwError $ unlines ["Mismatched arg types:", showt argType, showt e2Type]
     return retType
-getAnfComplexType :: MonadError Text m => AnfComplex -> m Type
+getAnfComplexType :: (MonadError Text m, MonadLogger m) => AnfComplex -> m Type
 getAnfComplexType (Trivial e)              = getAnfTrivialType e
 getAnfComplexType (CompApp e)              = getAnfAppType e
 getAnfComplexType (Let _ _ _ e)            = getAnfComplexType e
 getAnfComplexType (Case _ _ _ [])          = throwError "No alts in case"
 getAnfComplexType (Case _ _ _ (Alt _ e:_)) = getAnfComplexType e
-getAnfRhsType :: MonadError Text m => AnfRhs -> m Type
+getAnfRhsType :: (MonadError Text m, MonadLogger m) => AnfRhs -> m Type
 getAnfRhsType (Lam _ t e) = T.makeFun [t] =<< getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
 
@@ -85,11 +86,11 @@ makeError :: Type -> AnfTrivial
 makeError = Var "compilerError"
 
 
-ilaToAnf :: (MonadNameGenerator m, MonadError Text m) => [Binding ILA.Expr] -> m [Binding AnfRhs]
-ilaToAnf = mapM ilaBindingToAnf
+ilaToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [Binding ILA.Expr] -> m [Binding AnfRhs]
+ilaToAnf bs = writeLog "ILAANF" >> mapM ilaBindingToAnf bs
 
-ilaBindingToAnf :: (MonadNameGenerator m, MonadError Text m) => Binding ILA.Expr -> m (Binding AnfRhs)
-ilaBindingToAnf (NonRec v e) = NonRec v <$> ilaExpToRhs e
+ilaBindingToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => Binding ILA.Expr -> m (Binding AnfRhs)
+ilaBindingToAnf (NonRec v e) = (writeLog (showt e) >>) $ NonRec v <$> ilaExpToRhs e
 ilaBindingToAnf (Rec m)      = Rec . M.fromList <$> mapM (secondM ilaExpToRhs) (M.toList m)
 
 ilaExpToTrivial :: MonadError Text m => ILA.Expr -> m AnfTrivial
@@ -106,7 +107,7 @@ ilaExpIsTrivial ILA.Lit{}  = True
 ilaExpIsTrivial ILA.Type{} = True
 ilaExpIsTrivial _          = False
 
-ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
+ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
 ilaExpToApp e@ILA.Con{} = CompApp . TrivApp <$> ilaExpToTrivial e
 ilaExpToApp e@ILA.App{} = do
     (fun, args) <- ILA.unmakeApplication e
@@ -123,24 +124,24 @@ ilaExpToApp e@ILA.App{} = do
         Let v t fun' <$> makeBindings args (return . CompApp . foldl' App (TrivApp $ Var v t))
 ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF application: " <> showt e
 
-ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfComplex
-ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Con{}        = ilaExpToApp e
-ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
-ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
-ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
-ilaExpToComplex (ILA.Case s vs as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
+ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
+ilaExpToComplex e@ILA.Var{}        = (writeLog "var" >>) $ Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Con{}        = (writeLog "con" >>) $ ilaExpToApp e
+ilaExpToComplex e@ILA.Lit{}        = (writeLog "lit" >>) $ Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Type{}       = (writeLog "typ" >>) $ Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.App{}        = (writeLog "app" >>) $ ilaExpToApp e
+ilaExpToComplex e@ILA.Lam{}        = (writeLog "lam" >>) $ makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
+ilaExpToComplex (ILA.Let v t e b)  = (writeLog "let" >>) $ Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
+ilaExpToComplex (ILA.Case s vs as) = (writeLog "cas" >>) $ Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
 
-ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> m AnfRhs
+ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfRhs
 ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b
 ilaExpToRhs e               = Complex <$> ilaExpToComplex e
 
-ilaAltToAnf :: (MonadNameGenerator m, MonadError Text m) => Alt ILA.Expr -> m (Alt AnfComplex)
+ilaAltToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => Alt ILA.Expr -> m (Alt AnfComplex)
 ilaAltToAnf (Alt c e) = Alt c <$> ilaExpToComplex e
 
-makeBinding :: (MonadNameGenerator m, MonadError Text m) => ILA.Expr -> (AnfTrivial -> m AnfComplex) -> m AnfComplex
+makeBinding :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> (AnfTrivial -> m AnfComplex) -> m AnfComplex
 makeBinding e makeBody = ilaExpToRhs e >>= \case
     Complex (Trivial t) -> makeBody t
     r -> do
@@ -148,7 +149,32 @@ makeBinding e makeBody = ilaExpToRhs e >>= \case
         t <- getAnfRhsType r
         Let n t r <$> makeBody (Var n t)
 
-makeBindings :: (MonadNameGenerator m, MonadError Text m) => [ILA.Expr] -> ([AnfTrivial] -> m AnfComplex) -> m AnfComplex
+makeBindings :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [ILA.Expr] -> ([AnfTrivial] -> m AnfComplex) -> m AnfComplex
 makeBindings as makeBody = helper as []
     where helper [] ns     = makeBody ns
           helper (e:es) ns = makeBinding e (\n -> helper es (n:ns))
+
+instance AlphaEq AnfTrivial where
+    alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (Con n1 t1) (Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (Lit l1 t1) (Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
+    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq AnfApplication where
+    alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (TrivApp e1) (TrivApp e2) = alphaEq' e1 e2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfApplication mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq AnfComplex where
+    alphaEq' (Let v1 t1 e1a e1b) (Let v2 t2 e2a e2b) = do
+        alphaEq' v1 v2
+        alphaEq' t1 t2
+        alphaEq' e1a e2a
+        alphaEq' e1b e2b
+    alphaEq' (Case e1 t1 vs1 as1) (Case e2 t2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' t1 t2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (Trivial e1) (Trivial e2) = alphaEq' e1 e2
+    alphaEq' (CompApp e1) (CompApp e2) = alphaEq' e1 e2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]
+instance AlphaEq AnfRhs where
+    alphaEq' (Lam v1 t1 e1) (Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (Complex c1) (Complex c2) = alphaEq' c1 c2
+    alphaEq' e1 e2 = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]

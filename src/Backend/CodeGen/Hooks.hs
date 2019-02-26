@@ -66,7 +66,7 @@ compilerGeneratedHooks renamings = M.fromList
         aaload
         invokeVirtual heapObject enter
         checkCast int
-        invokeStatic int $ NameType "eq" $ MethodSignature [intClass, intClass] (Returns $ ObjectType "java/lang/Boolean")
+        invokeStatic int $ NameType "eq" $ MethodSignature [intClass, intClass] (Returns BoolType)
         -- Convert the Java Boolean to a Haskell Bool
         makeBoxedBool
         i0 ARETURN

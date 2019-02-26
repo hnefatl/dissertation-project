@@ -88,6 +88,6 @@ instance Unifiable t => Unifiable (Maybe t) where
 unifyVar :: MonadError Text m => TypeVariable -> Type -> m TypeSubstitution
 unifyVar var@(TypeVariable name _) t
     | TypeVar var == t = return subEmpty
-    | name `S.member` getTypeVars t = throwError $ "Fails occurs check: " <> showt var <> " vs " <> showt t
+    | var `S.member` getTypeVars t = throwError $ "Fails occurs check: " <> showt var <> " vs " <> showt t
     | kind var /= kind t = throwError "Kind mismatch"
     | otherwise = return (subSingle name t)

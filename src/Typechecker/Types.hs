@@ -266,10 +266,10 @@ synToQualType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsQu
 synToQualType ks (HsQualType quals t) = Qualified <$> (S.fromList <$> mapM (synToTypePred ks) quals) <*> synToType ks t
 
 class HasTypeVars t where
-    getTypeVars :: t -> S.Set TypeVariableName
+    getTypeVars :: t -> S.Set TypeVariable
 
 instance HasTypeVars Type where
-    getTypeVars (TypeVar (TypeVariable name _)) = S.singleton name
+    getTypeVars (TypeVar v) = S.singleton v
     getTypeVars (TypeCon _)                     = S.empty
     getTypeVars (TypeApp t1 t2 _)               = S.union (getTypeVars t1) (getTypeVars t2)
 instance HasTypeVars TypePredicate where
@@ -284,13 +284,13 @@ instance HasTypeVars t => HasTypeVars [t] where
     getTypeVars = S.unions . map getTypeVars
 instance HasTypeVars a => HasTypeVars (Maybe a) where
     getTypeVars = maybe S.empty getTypeVars
-instance HasTypeVars HsType where
-    getTypeVars (HsTyVar n)     = S.singleton $ convertName n
-    getTypeVars (HsTyCon _)     = S.empty
-    getTypeVars (HsTyApp t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
-    getTypeVars (HsTyFun t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
-    getTypeVars (HsTyTuple ts)  = getTypeVars ts
-instance HasTypeVars HsAsst where
-    getTypeVars (_, ts) = S.unions $ map getTypeVars ts
-instance HasTypeVars HsQualType where
-    getTypeVars (HsQualType as t) = S.union (getTypeVars as) (getTypeVars t)
+--instance HasTypeVars HsType where
+--    getTypeVars (HsTyVar n)     = S.singleton $ convertName n
+--    getTypeVars (HsTyCon _)     = S.empty
+--    getTypeVars (HsTyApp t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
+--    getTypeVars (HsTyFun t1 t2) = S.union (getTypeVars t1) (getTypeVars t2)
+--    getTypeVars (HsTyTuple ts)  = getTypeVars ts
+--instance HasTypeVars HsAsst where
+--    getTypeVars (_, ts) = S.unions $ map getTypeVars ts
+--instance HasTypeVars HsQualType where
+--    getTypeVars (HsQualType as t) = S.union (getTypeVars as) (getTypeVars t)

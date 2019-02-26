@@ -47,6 +47,13 @@ instance Substitutable TypeVariableName Type TypePredicate where
     applySub sub (IsInstance name t) = IsInstance name (applySub sub t)
 instance TypeSubstitutable a => Substitutable TypeVariableName Type (Qualified a) where
     applySub sub (Qualified ps x) = Qualified (applySub sub ps) (applySub sub x)
+instance TypeSubstitutable a => Substitutable TypeVariableName Type (Quantified a) where
+    applySub sub@(Substitution m) (Quantified quants t) = Quantified quants' (applySub sub t)
+        where quants' = S.fromList $ catMaybes $ map f $ S.toList quants
+              f x@(TypeVariable n _) = case M.lookup n m of
+                Nothing -> Just x
+                Just (TypeVar v) -> Just v
+                Just _ -> Nothing
 instance (Ord c, Substitutable a b c) => Substitutable a b (S.Set c) where
     applySub subs = S.map (applySub subs)
 instance (Ord c, Substitutable a b d) => Substitutable a b (M.Map c d) where

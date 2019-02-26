@@ -19,8 +19,6 @@ import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showt)
 import           TextShow.Instances         ()
 
-import qualified Backend.ILA                as ILA
-import qualified Backend.ILAANF             as ILAANF
 import           SyntaxTraversals           (SyntaxTraversable, expTraverse)
 import           ExtraDefs                  (synPrint)
 import           Names
@@ -246,66 +244,6 @@ instance AlphaEq HsBangType where
     alphaEq' t1 t2 = throwError $ unlines ["Banged type mismatch", showt t1, "vs", showt t2]
 
 
--- ILA instances
-instance (AlphaEq a, Ord a) => AlphaEq (ILA.Binding a) where
-    alphaEq' (ILA.NonRec v1 e1) (ILA.NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (ILA.Rec m1) (ILA.Rec m2) = alphaEq' m1 m2
-    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
-instance AlphaEq a => AlphaEq (ILA.Alt a) where
-    alphaEq' (ILA.Alt ac1 e1) (ILA.Alt ac2 e2) = alphaEq' ac1 ac2 >> alphaEq' e1 e2
-instance AlphaEq ILA.Literal where
-    alphaEq' (ILA.LiteralInt i1) (ILA.LiteralInt i2) =
-        unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
-    alphaEq' (ILA.LiteralFrac f1) (ILA.LiteralFrac f2) =
-        unless (f1 == f2) $ throwError $ "Rational literal mismatch:" <> showt f1 <> " vs " <> showt f2
-    alphaEq' (ILA.LiteralChar c1) (ILA.LiteralChar c2) =
-        unless (c1 == c2) $ throwError $ "Character literal mismatch:" <> showt c1 <> " vs " <> showt c2
-    alphaEq' (ILA.LiteralString s1) (ILA.LiteralString s2) =
-        unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
-    alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
-instance AlphaEq ILA.AltConstructor where
-    alphaEq' (ILA.DataCon con1 vs1) (ILA.DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
-    alphaEq' (ILA.LitCon l1) (ILA.LitCon l2) = alphaEq' l1 l2
-    alphaEq' ILA.Default ILA.Default = return ()
-    alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
-instance AlphaEq ILA.Expr where
-    alphaEq' (ILA.Var n1 t1) (ILA.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILA.Con n1 t1) (ILA.Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILA.Lit l1 t1) (ILA.Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
-    alphaEq' (ILA.App e1a e1b) (ILA.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
-    alphaEq' (ILA.Lam v1 t1 e1) (ILA.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
-    alphaEq' (ILA.Let v1 t1 e1a e1b) (ILA.Let v2 t2 e2a e2b) = do
-        alphaEq' v1 v2
-        alphaEq' t1 t2
-        alphaEq' e1a e2a
-        alphaEq' e1b e2b
-    alphaEq' (ILA.Case e1 vs1 as1) (ILA.Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
-    alphaEq' (ILA.Type t1) (ILA.Type t2) = alphaEq' t1 t2
-    alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq ILAANF.AnfTrivial where
-    alphaEq' (ILAANF.Var n1 t1) (ILAANF.Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILAANF.Con n1 t1) (ILAANF.Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
-    alphaEq' (ILAANF.Lit l1 t1) (ILAANF.Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
-    alphaEq' (ILAANF.Type t1) (ILAANF.Type t2) = alphaEq' t1 t2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq ILAANF.AnfApplication where
-    alphaEq' (ILAANF.App e1a e1b) (ILAANF.App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
-    alphaEq' (ILAANF.TrivApp e1) (ILAANF.TrivApp e2) = alphaEq' e1 e2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfApplication mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq ILAANF.AnfComplex where
-    alphaEq' (ILAANF.Let v1 t1 e1a e1b) (ILAANF.Let v2 t2 e2a e2b) = do
-        alphaEq' v1 v2
-        alphaEq' t1 t2
-        alphaEq' e1a e2a
-        alphaEq' e1b e2b
-    alphaEq' (ILAANF.Case e1 t1 vs1 as1) (ILAANF.Case e2 t2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' t1 t2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
-    alphaEq' (ILAANF.Trivial e1) (ILAANF.Trivial e2) = alphaEq' e1 e2
-    alphaEq' (ILAANF.CompApp e1) (ILAANF.CompApp e2) = alphaEq' e1 e2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]
-instance AlphaEq ILAANF.AnfRhs where
-    alphaEq' (ILAANF.Lam v1 t1 e1) (ILAANF.Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
-    alphaEq' (ILAANF.Complex c1) (ILAANF.Complex c2) = alphaEq' c1 c2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]
 
 
 stripParens :: SyntaxTraversable a => a -> a

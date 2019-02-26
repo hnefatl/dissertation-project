@@ -26,7 +26,7 @@ import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
 import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
 import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
-import           Typechecker.Substitution    (Substitution(..), applySub)
+import           Typechecker.Substitution    (Substitution(..), TypeSubstitution, applySub)
 import           Typechecker.Typechecker     (nullSrcLoc)
 import           Typechecker.Typeclasses     (ClassEnvironment, TypeClass(Class), entails)
 import           Typechecker.Types
@@ -225,7 +225,13 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
             let synName = convertName newName
                 transform (HsMatch loc fname args rhs wheres) = do
                     fType <- getType (convertName fname)
-                    match' <- addScopedTypes (M.singleton newName fType) $
+                    argType <- synToType ks arg
+                    -- Change the type of this instance of the function to use the instance argument instead of the
+                    -- class variable
+                    let sub :: TypeSubstitution
+                        sub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) [argType]
+                        fType' = applySub sub fType
+                    match' <- addScopedTypes (M.singleton newName fType') $
                         deoverloadMatch (HsMatch loc synName args rhs wheres)
                     return (match', fname)
             (matches', fnames) <- unzip <$> mapM transform matches
@@ -271,10 +277,11 @@ deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloade
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
-    writeLog $ "Getting type for " <> showt name
-    Quantified _ (Qualified quals _) <- getType (convertName name)
-    writeLog $ "Got type for " <> showt name
-    let constraints = S.toAscList quals
+    t@(Quantified _ (Qualified quals _)) <- getType (convertName name)
+    -- Remove any constraints that we need and are already provided by dictionaries
+    dicts <- gets dictionaries
+    let quals' = S.difference quals (M.keysSet dicts)
+        constraints = S.toAscList quals'
     args <- mapM makeDictName constraints
     let dictArgs = M.fromList $ zip constraints args
         funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]

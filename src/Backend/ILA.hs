@@ -28,6 +28,7 @@ import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
 import           ExtraDefs                   (allM, inverseMap, mapError, middleText, synPrint)
+import           AlphaEq                     (AlphaEq, alphaEq')
 import           Logger
 import           NameGenerator
 import           Names
@@ -38,6 +39,7 @@ import           Typechecker.Substitution    (NameSubstitution, Substitutable, S
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypePredicate(..))
 import qualified Typechecker.Types           as T
+import           Backend.Deoverload          (makeDictName)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -319,7 +321,7 @@ declToIla (HsPatBind _ pat rhs _) = do
     local (addTypes ts) $ do
         e <- rhsToIla rhs
         patToBindings pat e
-declToIla (HsFunBind []) = throwError $ "Function definition with empty matches"
+declToIla (HsFunBind []) = throwError "Function definition with empty matches"
 declToIla (HsFunBind (m:ms)) = do
     let getMatchName (HsMatch _ name _ _ _) = name
         getMatchArity (HsMatch _ _ ps _ _) = length ps
@@ -383,9 +385,8 @@ expToIla (HsLambda _ [] e) = expToIla e
 expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
     argNames <- replicateM (length pats) freshVarName
     expType <- getSimpleFromSynType t
-    (argTypes, bodyType) <- T.unmakeFun expType
-    reducedType <- T.qualTypeToSyn $ Qualified S.empty bodyType
-    renames <- M.unions . snd . unzip <$> mapM getPatRenamings pats
+    (argTypes, _) <- T.unmakeFun expType
+    renames <- M.unions . map snd <$> mapM getPatRenamings pats
     patVariableTypes <- fmap (Quantified S.empty) . M.unions <$> zipWithM getPatVariableTypes pats argTypes
     let renamedVariableTypes = M.mapKeys (renames M.!) patVariableTypes
         log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
@@ -453,7 +454,7 @@ patToBindings p e = do
     -- main variable
     v <- freshVarName
     eType <- getExprType e
-    fmap (NonRec v e:) . mapM ($ (Var v eType)) =<< patToBindings' p
+    fmap (NonRec v e:) . mapM ($ Var v eType) =<< patToBindings' p
 
 -- |Generates bindings of values to variables from the given pattern and expression. Essentially traverse the pattern
 -- tree looking for bound variables, then creates a binding that unwraps the given expression down to the value bound to
@@ -468,7 +469,7 @@ patToBindings' (HsPAsPat n p) = (return . NonRec (convertName n):) <$> patToBind
 patToBindings' (HsPApp con ps) = do
     newBindingConts <- concat . zipWith (\i -> map (i,)) [0..] <$> mapM patToBindings' ps
     let wrapInCase :: (Int, Expr -> Converter (Binding Expr)) -> Expr -> Converter (Binding Expr)
-        wrapInCase (i, c) = \e -> do
+        wrapInCase (i, c) e = do
             -- TODO(kc506): rather than generating loads of new variable names, use Nothing/Just.
             vs <- replicateM (length ps) freshVarName
             let v = vs !! i
@@ -512,21 +513,23 @@ patToIla ((v, t):vs) cs def = do
         -- To check literals we create a right-leaning tree of case statements, like:
         -- > case x == 0 of { True -> E1 ; False -> case x == 1 of { ... } }
         rs <- asks topLevelRenames
-        writeLog $ showt rs
+        eqDictName <- makeDictName $ IsInstance "Eq" t
+        eqDictType <- T.makeApp (T.TypeCon $ T.TypeConstant "Eq" (KindFun KindStar KindStar)) [t]
         case (M.lookup "True" rs, M.lookup "False" rs, M.lookup "==" rs) of
             (Nothing, _, _) -> throwError "True constructor not found in ILA lowering"
             (_, Nothing, _) -> throwError "False constructor not found in ILA lowering"
             (_, _, Nothing) -> throwError "(==) function not found in ILA lowering"
             (Just trueName, Just falseName, Just equals) -> do
-                equalsType <- T.makeFun [t, t] T.typeBool
+                equalsType <- T.makeFun [eqDictType, t, t] T.typeBool
                 let trueCon = DataCon trueName []
                     falseCon = DataCon falseName []
                     equalsFun = Var equals equalsType
+                    eqDict = Var eqDictName eqDictType
                     customFoldM d xs f = foldrM f d xs
                 customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
                     [HsPLit l] -> do
                         l' <- litToIla l
-                        let cond = App (App equalsFun (Var v t)) (Lit l' t)
+                        let cond = foldl App equalsFun [eqDict, Var v t, Lit l' t]
                         expr <- rhsToIla rhs
                         return $ Case cond [] [ Alt trueCon (applySub sub expr), Alt falseCon body ]
                     p -> throwError $ "Expected single literal in ILA lowering, got: " <> showt p
@@ -617,3 +620,39 @@ instance Substitutable VariableName VariableName Expr where
     applySub _ t@Type{}                   = t
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)
+
+instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
+    alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
+    alphaEq' (Rec m1) (Rec m2) = alphaEq' m1 m2
+    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+instance AlphaEq a => AlphaEq (Alt a) where
+    alphaEq' (Alt ac1 e1) (Alt ac2 e2) = alphaEq' ac1 ac2 >> alphaEq' e1 e2
+instance AlphaEq Literal where
+    alphaEq' (LiteralInt i1) (LiteralInt i2) =
+        unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
+    alphaEq' (LiteralFrac f1) (LiteralFrac f2) =
+        unless (f1 == f2) $ throwError $ "Rational literal mismatch:" <> showt f1 <> " vs " <> showt f2
+    alphaEq' (LiteralChar c1) (LiteralChar c2) =
+        unless (c1 == c2) $ throwError $ "Character literal mismatch:" <> showt c1 <> " vs " <> showt c2
+    alphaEq' (LiteralString s1) (LiteralString s2) =
+        unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
+    alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
+instance AlphaEq AltConstructor where
+    alphaEq' (DataCon con1 vs1) (DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
+    alphaEq' (LitCon l1) (LitCon l2) = alphaEq' l1 l2
+    alphaEq' Default Default = return ()
+    alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
+instance AlphaEq Expr where
+    alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (Con n1 t1) (Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
+    alphaEq' (Lit l1 t1) (Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
+    alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
+    alphaEq' (Lam v1 t1 e1) (Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
+    alphaEq' (Let v1 t1 e1a e1b) (Let v2 t2 e2a e2b) = do
+        alphaEq' v1 v2
+        alphaEq' t1 t2
+        alphaEq' e1a e2a
+        alphaEq' e1b e2b
+    alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
+    alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]

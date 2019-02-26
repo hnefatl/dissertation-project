@@ -111,7 +111,7 @@ synToQuantType :: HsQualType -> TypeInferrer QuantifiedType
 synToQuantType t = do
     ks <- getKinds
     t' <- synToQualType ks t
-    let freeVars = S.map (\v -> TypeVariable v KindStar) $ getTypeVars t'
+    let freeVars = getTypeVars t'
     return $ Quantified freeVars t'
 
 -- |Returns the current substitution in the monad
@@ -177,7 +177,7 @@ instantiateToVar qt = do
 instantiate :: (MonadError Text m, MonadNameGenerator m) => QuantifiedType -> m QualifiedType
 instantiate qt@(Quantified _ ql) = do
     -- Create a "default" mapping from each type variable in the type to itself
-    let identityMap = M.fromList $ map (\x -> (x, TypeVar $ TypeVariable x KindStar)) $ S.toList $ getTypeVars ql
+    let identityMap = M.fromList $ map (\var@(TypeVariable name _) -> (name, TypeVar var)) $ S.toList $ getTypeVars ql
     -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
     sub <- Substitution <$> (M.union <$> getInstantiatingTypeMap qt <*> pure identityMap)
     return $ applySub sub ql
@@ -252,6 +252,16 @@ unify t1 t2 = do
     updateTypeConstraints newSub
     composeSubstitution newSub
 
+-- |Like unify but only updates variables in the left argument
+unifyLeft :: Type -> Type -> TypeInferrer ()
+unifyLeft t1 t2 = do
+    writeLog $ "Matching " <> showt t1 <> " with " <> showt t2
+    currentSub <- getSubstitution
+    -- Update the qualifiers
+    newSub <- match (applySub currentSub t1) (applySub currentSub t2)
+    updateTypeConstraints newSub
+    composeSubstitution newSub
+
 
 getTypePredicates :: Type -> TypeInferrer (S.Set TypePredicate)
 getTypePredicates t = do
@@ -264,19 +274,19 @@ getQualifiedType :: TypeVariableName -> TypeInferrer QualifiedType
 getQualifiedType name = do
     ce <- getClassEnvironment
     t <- getSimpleType name
-    types <- mapM (\v -> TypeVar . TypeVariable v <$> getTypeVariableKind v) (S.toList $ getTypeVars t)
+    let types = map TypeVar (S.toList $ getTypeVars t)
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates types
     let qt = Qualified predicates t
     writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
 qualToQuant :: Bool -> QualifiedType -> TypeInferrer QuantifiedType
 qualToQuant freshen qt = do
-    quantifiers <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qt)
+    let quantifiers = getTypeVars qt
     case freshen of
         False -> return $ Quantified quantifiers qt
         True -> do
             qt' <- instantiate $ Quantified quantifiers qt
-            quantifiers' <- S.fromList <$> mapM nameToTypeVariable (S.toList $ getTypeVars qt')
+            let quantifiers' = getTypeVars qt'
             return $ Quantified quantifiers' qt'
 getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name = do
@@ -558,7 +568,7 @@ inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
     ([], _) -> throwError "Multiparameter typeclasses not supported"
     (_, _) -> throwError "Contexts not yet supported in typeclasses"
 inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
-    ([], [_]) -> HsInstDecl loc ctx name args <$> mapM (checkInstanceDecl name args) decls
+    ([], [_]) -> HsInstDecl loc ctx name args <$> checkInstanceDecls name args decls
     ([], _)   -> throwError "Multiparameter typeclass instances not supported"
     (_, _)    -> throwError "Contexts not yet supported in instances"
 inferDecl (HsDataDecl loc ctx name args decls derivings) = do
@@ -571,26 +581,29 @@ inferDecl _ = throwError "Declaration not yet supported"
 -- substituting the class type variable parameters for the concrete types in the instance head in the type of each
 -- binding. We need to process them separately to normal declarations as normal declarations assume they're the only
 -- definition of the symbol: typeclass instance definitions might be one of many.
-checkInstanceDecl :: HsQName -> [HsType] -> Syntax.HsDecl -> TypeInferrer Syntax.HsDecl
-checkInstanceDecl cname argTypes d = do
-    writeLog $ "Processing instance declaration for " <> synPrint d
+checkInstanceDecls :: HsQName -> [HsType] -> [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]
+checkInstanceDecls cname argSynTypes ds = do
+    writeLog $ "Processing instance declaration for:" <> unlines (map synPrint ds)
     -- When inferring the pattern type, we want to inject the type of the binding given the instance variables: in
     -- `instance Num Int`, `(+)` doesn't have type `Num a => a -> a -> a`, it has type `Int -> Int -> Int`.
     ci <- gets (M.lookup cname . classInfo) >>= \case
         Nothing -> throwError $ "No class with name " <> showt cname <> " found."
         Just info -> return info
     ks <- getKinds
-    sub <- Substitution . M.fromList . zip (map convertName $ argVariables ci :: [TypeVariableName]) <$> mapM (synToType ks) argTypes
+    argTypes <- mapM (synToType ks) argSynTypes
+    let sub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) argTypes  :: TypeSubstitution
+    writeLog $ "Sub: " <> showt sub
     methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m, t) -> do
-        qt@(Qualified quals _) <- applySub sub <$> synToQualType ks t
-        unless (null quals) $ throwError "Unexpected qualifiers in typeclass method context"
-        -- TODO(kc506): Should probably actually fill out the quantified vars
-        t' <- instantiateToVar $ Quantified S.empty qt
+        qualType <- synToQualType ks t
+        writeLog $ "Before: " <> showt (m, qualType)
+        let qt = applySub sub $ Quantified (getTypeVars qualType) qualType
+        t' <- instantiateToVar qt
+        writeLog $ "After: " <> showt (m, t')
         return (convertName m, t')
-    origTypes <- gets variableTypes
-    case d of
+    forM ds $ \d -> case d of
         HsPatBind loc pat rhs wheres -> do
             -- Temporarily add the renamed types, infer the pattern, then reset to the old types
+            origTypes <- gets variableTypes
             modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
             patType <- nameToType =<< inferPattern pat
             modify $ \s -> s { variableTypes = origTypes }
@@ -600,13 +613,17 @@ checkInstanceDecl cname argTypes d = do
             unify patType rhsType
             return $ HsPatBind loc pat rhsExp wheres
         HsFunBind matches -> do
-            modify $ \s -> s { variableTypes = M.union methodTypes (variableTypes s) }
+            funName <- case matches of
+                (HsMatch _ name _ _ _):_ -> return $ convertName name
+                _ -> throwError "No matches in HsFunBind"
+            funType <- case M.lookup funName methodTypes of
+                Just ft -> nameToType ft
+                Nothing -> throwError $ "No type for method " <> showt funName
             (matches', matchTypeVars) <- unzip <$> mapM inferMatch matches
             matchTypes <- mapM nameToType matchTypeVars
-            modify $ \s -> s { variableTypes = origTypes }
-            -- Infer the RHS type, unify
-            commonType <- nameToType =<< freshTypeVarName
-            mapM_ (unify commonType) matchTypes
+            -- Infer the RHS type, match against 
+            mapM_ (unifyLeft funType) matchTypes
+            writeLog $ "Match types: " <> showt matchTypes
             return $ HsFunBind matches'
         _ -> throwError $ unlines ["Illegal declaration in typeclass instance:", synPrint d]
 
@@ -617,7 +634,9 @@ inferMatch (HsMatch loc name args rhs wheres) = do
     retType <- nameToType retVar
     argVars <- inferPatterns args
     argTypes <- mapM nameToType argVars
+    writeLog $ "RHS before: " <> showt rhs
     (rhs', rhsVar) <- inferRhs rhs
+    writeLog $ "RHS after: " <> showt rhs'
     rhsType <- nameToType rhsVar
     targetType <- makeFun argTypes rhsType
     unify targetType retType
