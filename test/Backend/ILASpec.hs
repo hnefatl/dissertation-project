@@ -22,7 +22,7 @@ import           NameGenerator           (evalNameGenerator, freshDummyVarName)
 import           Names
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
-import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
+import           Typechecker.Types       hiding (makeFunUnsafe, makeList, makeTuple)
 import qualified Typechecker.Types       as T
 
 parse :: MonadError Text m => Text -> m HsModule
@@ -42,7 +42,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
             (m'', _, _) <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
-            let dets = map deoverloadQuantType ts
+            dets <- mapM deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
             evalConverter (toIla m'') M.empty dets builtinKinds
 
@@ -51,8 +51,8 @@ test :: TestTree
 test = testGroup "ILA"
     [
 --        let t = T.makeTuple [typeBool, typeBool]
---            t' = T.makeFun [typeBool, typeBool] t
---            t'' = T.makeFun [t] $ T.makeTuple [t]
+--            t' = T.makeFunUnsafe [typeBool, typeBool] t
+--            t'' = T.makeFunUnsafe [t] $ T.makeTuple [t]
 --            mainBind = Rec $ M.fromList [
 --                ( t2
 --                , Case (makeTuple' [true, false] t') [t1] [ Alt Default $ makeTuple' [Var t1 t] t'' ] )]
@@ -60,7 +60,7 @@ test = testGroup "ILA"
 --        in makeTest "x = (True, False)" [mainBind, auxBind]
 --    ,
 --        let t = T.makeTuple [typeBool, typeBool]
---            t' = T.makeFun [typeBool, typeBool] t
+--            t' = T.makeFunUnsafe [typeBool, typeBool] t
 --            mainBind = Rec $ M.fromList [
 --                ( t5
 --                , Case (makeTuple' [true, false] t') []
@@ -95,7 +95,7 @@ test = testGroup "ILA"
 --    ,
 --        let a = TypeVar $ TypeVariable (TypeVariableName "a") KindStar
 --            b = TypeVar $ TypeVariable (TypeVariableName "b") KindStar
---            fType = T.makeFun [a, b] a
+--            fType = T.makeFunUnsafe [a, b] a
 --            lambdaBody =
 --                Lam t2 a $ Case (Var t2 a) [t3]
 --                    [ Alt Default $ Lam t4 b $ Case (Var t4 b) [t5]
@@ -126,15 +126,15 @@ test = testGroup "ILA"
 --            num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
 --            numa = TypeApp num a KindStar
 --            numInt = TypeApp num typeInt KindStar
---            plus = Var "+" $ T.makeFun [numa, a, a] a
+--            plus = Var "+" $ T.makeFunUnsafe [numa, a, a] a
 --            fBody = Lam "x2" numa $ Case (Var "x2" numa) ["x3"] -- \dNuma ->
 --                [ Alt Default $ Lam "x4" a $ Case (Var "x4" a) ["x5"] -- \x ->
 --                    [ Alt Default $
 --                        App (App (App plus $ Var "x3" numa) $ Var "x5" a) $ Var "x5" a ] -- (+) dNuma x x
 --                ]
---            fType = T.makeFun [numa, a] a
+--            fType = T.makeFunUnsafe [numa, a] a
 --            fTupleType = T.makeTuple [fType]
---            fIntType = T.makeFun [numInt, typeInt] typeInt
+--            fIntType = T.makeFunUnsafe [numInt, typeInt] typeInt
 --            yBody = App (App (Var f fIntType) (Var "dNumInt" numInt)) (Lit (LiteralInt 1) typeInt)
 --            yType = typeInt
 --            yTupleType = T.makeTuple [yType]

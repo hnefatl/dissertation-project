@@ -70,8 +70,8 @@ test = let
     [
         -- Utility checks
         let args = [makeMaybe ta, typeBool, typeString, tb]
-            output = unmakeFun (makeFun args tc)
-        in testCase "unmakeFun . makeFun" $ assertBool "" $ Right (args, tc) == output
+            output = unmakeFun (makeFunUnsafe args tc)
+        in testCase "unmakeFun . makeFunUnsafe" $ assertBool "" $ Right (args, tc) == output
     ,
         let [sa, sb, sc] = map (HsTyVar . HsIdent) ["a", "b", "c"]
             args = [sa, HsTyApp (HsTyCon $ UnQual $ HsIdent "Maybe") sb]
@@ -116,13 +116,13 @@ test = let
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
     ,
         let s = "a@(x, _, _) = (True, False, True)"
-            t = makeTuple (replicate 3 typeBool)
+            t = makeTupleUnsafe (replicate 3 typeBool)
         in testBindings s
             [ ("x", Quantified S.empty $ Qualified S.empty typeBool)
             , ("a", Quantified S.empty $ Qualified S.empty t) ]
     ,
         let s = "a@(_, y) = (1, True)"
-            t = makeTuple [ta, typeBool]
+            t = makeTupleUnsafe [ta, typeBool]
         in testBindings s
             [ ("y", Quantified S.empty $ Qualified S.empty typeBool)
             , ("a", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t) ]
@@ -143,26 +143,26 @@ test = let
         -- TODO(kc506): Test pattern matching with data constructors
     ,
         let s = "x = [True, False]"
-        in testBindings s [("x", Quantified S.empty $ Qualified S.empty (makeList typeBool))]
+        in testBindings s [("x", Quantified S.empty $ Qualified S.empty (makeListUnsafe typeBool))]
     ,
         let s = "x = [1, 2, 3]"
         in testBindings s
-            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (makeList ta))]
+            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (makeListUnsafe ta))]
     ,
         let s = "x = [True, 2]"
         in testBindingsFail s
     ,
         let s = "x = [1, 2.2]"
         in testBindings s
-            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) (makeList ta))]
+            [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance fractional ta) (makeListUnsafe ta))]
     ,
         let s = "x = (+)"
-            t = makeFun [ta, ta] ta
+            t = makeFunUnsafe [ta, ta] ta
         in testBindings s [("+", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
     ,
         -- Function application (prefix and infix)
         let s = "x = (+) 3"
-            t = makeFun [ta] ta
+            t = makeFunUnsafe [ta] ta
         in testBindings s [("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) t)]
     ,
         let s = "x = (+) 3 4"
@@ -184,18 +184,18 @@ test = let
         let s = "x = \\y -> 1 + y"
             q = S.singleton $ IsInstance num ta
         in testBindings s
-            [ ("x", Quantified (S.singleton a) $ Qualified q (makeFun [ta] ta))
+            [ ("x", Quantified (S.singleton a) $ Qualified q (makeFunUnsafe [ta] ta))
             , ("y", Quantified S.empty $ Qualified q ta) ]
     ,
         let s = "x = (\\y -> False && y)"
         in testBindings s
-            [ ("x", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
+            [ ("x", Quantified S.empty $ Qualified S.empty (makeFunUnsafe [typeBool] typeBool))
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         let s = "x = (\\f -> f True)"
         in testBindings s
-            [ ("x", Quantified (S.singleton b) $ Qualified S.empty (makeFun [makeFun [typeBool] tb] tb))
-            , ("f", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] ta))]
+            [ ("x", Quantified (S.singleton b) $ Qualified S.empty (makeFunUnsafe [makeFunUnsafe [typeBool] tb] tb))
+            , ("f", Quantified S.empty $ Qualified S.empty (makeFunUnsafe [typeBool] ta))]
     ,
         let s = "x = (\\f -> f True) (\\y -> y)"
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
@@ -204,13 +204,13 @@ test = let
         in testBindings s [("x", Quantified S.empty $ Qualified S.empty typeBool)]
     ,
         let s = "y = let f = \\x -> x in f 5"
-            tf = makeFun [ta] ta
+            tf = makeFunUnsafe [ta] ta
         in testBindings s
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
         let s = "y = let f = \\x -> x in f 5 + f 6"
-            tf = makeFun [ta] ta
+            tf = makeFunUnsafe [ta] ta
         in testBindings s
             [ ("f", Quantified (S.singleton a) $ Qualified S.empty tf)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
@@ -250,15 +250,15 @@ test = let
         in testBindingsFail s
     ,
         let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
-            helper t = makeFun [t] typeBool
+            helper t = makeFunUnsafe [t] typeBool
         in testBindings s
             [ ("even", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (helper ta))
             , ("odd", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) (helper tb)) ]
     ,
         let s = "_ = let const = \\a b -> a in let { f = \\x -> const (g True) (g x) ; g = \\y -> const (f True) (f y) } in True"
-            t = makeFun [typeBool] ta
+            t = makeFunUnsafe [typeBool] ta
         in testBindings s
-            [ ("const", Quantified (S.fromList [a,b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            [ ("const", Quantified (S.fromList [a,b]) $ Qualified S.empty $ makeFunUnsafe [ta, tb] ta)
             , ("f", Quantified (S.singleton a) $ Qualified S.empty t)
             , ("g", Quantified (S.singleton a) $ Qualified S.empty t) ]
     ,
@@ -267,34 +267,34 @@ test = let
     ,
         let s = "_ = let { id = \\x -> x ; g = \\y -> id (h y) ; h = \\z -> g z } in True"
         in testBindings s
-            [ ("id", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
-            , ("g", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc)
-            , ("h", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFun [tb] tc) ]
+            [ ("id", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [ta] ta)
+            , ("g", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFunUnsafe [tb] tc)
+            , ("h", Quantified (S.fromList [b, c]) $ Qualified S.empty $ makeFunUnsafe [tb] tc) ]
     ,
         testBindings "x = Nothing" [ ("x", Quantified (S.singleton a) $ Qualified S.empty $ makeMaybe ta) ]
     ,
         testBindings "x = Just True" [ ("x", Quantified S.empty $ Qualified S.empty $ makeMaybe typeBool) ]
     ,
         testBindings "f = \\(Just x) -> x"
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [makeMaybe ta] ta) ]
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [makeMaybe ta] ta) ]
     ,
         testBindings "f = \\(Just x) -> x ; y = f (Just 5)"
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [makeMaybe ta] ta)
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [makeMaybe ta] ta)
             , ("y", Quantified (S.singleton b) $ Qualified (S.singleton $ IsInstance num tb) tb) ]
     ,
         testBindings "f = \\(Just True) -> False ; y = f (Just False)"
-            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFun [makeMaybe typeBool] typeBool)
+            [ ("f", Quantified S.empty $ Qualified S.empty $ makeFunUnsafe [makeMaybe typeBool] typeBool)
             , ("y", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindingsFail "f = \\Just -> True"
     ,
         testBindings "const = \\x y -> x ; z = const 1 2 ; w = const True False"
-            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFunUnsafe [ta, tb] ta)
             , ("z", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ ta)
             , ("w", Quantified S.empty $ Qualified S.empty typeBool) ]
     ,
         testBindings "const = \\x y -> x ; z = const True 1 ; w = const 1 2"
-            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] ta)
+            [ ("const", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFunUnsafe [ta, tb] ta)
             , ("z", Quantified S.empty $ Qualified S.empty typeBool)
             , ("w", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]
     --,
@@ -304,11 +304,11 @@ test = let
         testBindings "x = 0 :: Int" [("x", Quantified S.empty $ Qualified S.empty typeInt)]
     ,
         testBindings "f = \\x -> x + x ; y = (f :: Int -> Int) 0"
-            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta] ta)
+            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFunUnsafe [ta] ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeInt) ]
     ,
         testBindings "f = \\x -> x ; y = f (0 :: Int)"
-            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+            [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [ta] ta)
             , ("y", Quantified S.empty $ Qualified S.empty typeInt) ]
     ,
         testBindingsFail "f = (\\x -> x + x) :: Bool -> Bool"
@@ -319,18 +319,18 @@ test = let
     ,
         testBindingsFail "f = (\\x -> (x :: Int) + x) :: a -> a"
     ,
-        let t = makeFun [typeInt, ta] ta
+        let t = makeFunUnsafe [typeInt, ta] ta
         in testBindings "class Foo b where { bar :: Int -> b -> b }"
             [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) t) ]
     ,
         testBindings "class Foo a where { bar :: a -> a } ; x = bar 5"
-            [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) $ makeFun [ta] ta)
+            [ ("bar", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Foo" ta) $ makeFunUnsafe [ta] ta)
             , ("x", Quantified (S.singleton b) $ Qualified (S.fromList [IsInstance "Foo" tb, IsInstance "Num" tb]) tb) ]
     ,
-        testBindings "f x = x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta) ]
+        testBindings "f x = x" [ ("f", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [ta] ta) ]
     ,
         testBindings "f 0 0 = 1 ; f x y = x + y"
-            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFun [ta, ta] ta) ]
+            [ ("f", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) $ makeFunUnsafe [ta, ta] ta) ]
     ,
         testBindings "x = case True of { True -> 0 ; False -> 1 }"
             [ ("x", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) ta) ]

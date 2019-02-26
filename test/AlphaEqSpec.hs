@@ -41,29 +41,29 @@ test = testGroup "AlphaEq"
     , makeFailTest (S.fromList [a, b]) (S.singleton c)
     , makeTest (Qualified (S.singleton $ num ta) ta) (Qualified (S.singleton $ num tb) tb)
     , makeTest
-        (Qualified (S.fromList [num ta, num tb]) $ makeFun [ta] tb)
-        (Qualified (S.fromList [num td, num tc]) $ makeFun [td] tc)
+        (Qualified (S.fromList [num ta, num tb]) $ makeFunUnsafe [ta] tb)
+        (Qualified (S.fromList [num td, num tc]) $ makeFunUnsafe [td] tc)
     , makeTest
-        (Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
-        (Qualified (S.fromList [num tc, fractional td]) $ makeFun [tc] td)
+        (Qualified (S.fromList [num ta, fractional tb]) $ makeFunUnsafe [ta] tb)
+        (Qualified (S.fromList [num tc, fractional td]) $ makeFunUnsafe [tc] td)
     , makeFailTest
-        (Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
-        (Qualified (S.fromList [num tc, fractional td]) $ makeFun [td] tc)
+        (Qualified (S.fromList [num ta, fractional tb]) $ makeFunUnsafe [ta] tb)
+        (Qualified (S.fromList [num tc, fractional td]) $ makeFunUnsafe [td] tc)
     , makeFailTest
-        (Qualified (S.singleton $ num ta) $ makeFun [ta] ta)
-        (Qualified S.empty $ makeFun [ta] ta)
+        (Qualified (S.singleton $ num ta) $ makeFunUnsafe [ta] ta)
+        (Qualified S.empty $ makeFunUnsafe [ta] ta)
     , makeTest
-        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
-        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num tc, fractional td]) $ makeFun [tc] td)
+        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFunUnsafe [ta] tb)
+        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num tc, fractional td]) $ makeFunUnsafe [tc] td)
     , makeTest
-        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
-        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num td, fractional tc]) $ makeFun [td] tc)
+        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFunUnsafe [ta] tb)
+        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num td, fractional tc]) $ makeFunUnsafe [td] tc)
     , makeFailTest
-        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFun [ta] tb)
-        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num td, fractional tc]) $ makeFun [tc] td)
+        (Quantified (S.fromList [a, b]) $ Qualified (S.fromList [num ta, fractional tb]) $ makeFunUnsafe [ta] tb)
+        (Quantified (S.fromList [c, d]) $ Qualified (S.fromList [num td, fractional tc]) $ makeFunUnsafe [tc] td)
     , makeFailTest
-        (Quantified (S.singleton a) $ Qualified (S.singleton $ num ta) $ makeFun [ta] ta)
-        (Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] ta)
+        (Quantified (S.singleton a) $ Qualified (S.singleton $ num ta) $ makeFunUnsafe [ta] ta)
+        (Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [ta] ta)
     , makeTestWith synPrint
         (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "a"])] $ HsTyVar $ HsIdent "a")
         (HsQualType [(UnQual $ HsIdent "Num", [HsTyVar $ HsIdent "b"])] $ HsTyVar $ HsIdent "b")

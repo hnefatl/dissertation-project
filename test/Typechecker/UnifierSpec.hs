@@ -23,13 +23,13 @@ test =
     in testGroup "Unification"
     [
         let -- x = [(a, (Int, c))]
-            x = makeList (makeTuple [ta, makeTuple [typeInt, tc]])
+            x = makeListUnsafe (makeTupleUnsafe [ta, makeTupleUnsafe [typeInt, tc]])
             -- y = [(Char -> c, (b, Bool))]
-            y = makeList (makeTuple [makeFun [typeChar] tc, makeTuple [tb, typeBool]])
+            y = makeListUnsafe (makeTupleUnsafe [makeFunUnsafe [typeChar] tc, makeTupleUnsafe [tb, typeBool]])
 
             actual = mgu x y :: Either Text TypeSubstitution
             -- expected = [(Char -> Bool)/a, Int/b, Bool/c]
-            expected = Right $ subMultiple [(a, makeFun [typeChar] typeBool), (b, typeInt), (c, typeBool)]
+            expected = Right $ subMultiple [(a, makeFunUnsafe [typeChar] typeBool), (b, typeInt), (c, typeBool)]
 
         in testCase (unpack $ "mgu (" <> showt x <> ") (" <> showt y <> ")") $ assertEqual "" expected actual
     ,
@@ -38,6 +38,6 @@ test =
         in testCase "match (Eq a) (Eq Bool)" $ assertEqual "" (Right $ subMultiple [(a, typeBool)]) (match x y)
     ,
         let expected = Substitution $ M.fromList $ map (,typeBool) [a,b,c]
-            actual = mgu (makeFun [makeFun [typeBool] ta] ta) (makeFun [makeFun [tb] tb] tc)
+            actual = mgu (makeFunUnsafe [makeFunUnsafe [typeBool] ta] ta) (makeFunUnsafe [makeFunUnsafe [tb] tb] tc)
         in testCase "mgu ((Bool -> a) -> a) ((b -> b) -> c)" $ assertEqual "" (Right expected) actual
     ]

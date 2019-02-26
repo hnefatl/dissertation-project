@@ -15,12 +15,12 @@ test = testGroup "Substitution"
     [
         let [a, b, c] = map TypeVariableName ["a", "b", "c"]
             -- x = [(a -> b)/c]
-            x = subSingle c (makeFun [TypeVar (TypeVariable a KindStar)] (TypeVar (TypeVariable b KindStar)))
+            x = subSingle c (makeFunUnsafe [TypeVar (TypeVariable a KindStar)] (TypeVar (TypeVariable b KindStar)))
             -- y = [Int/a, Bool/b]
             y = subMultiple [(a, typeInt), (b, typeBool)]
 
             actual = subCompose x y
             -- expected = [Int/a, Bool/b, (Int -> Bool)/c]
-            expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFun [typeInt] typeBool)]
+            expected = subMultiple [(a, typeInt), (b, typeBool), (c, makeFunUnsafe [typeInt] typeBool)]
         in testCase (unpack $ "subCompose (" <> showt x <> ") (" <> showt y <> ")") $ assertEqual "" expected actual
     ]

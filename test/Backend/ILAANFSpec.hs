@@ -22,7 +22,7 @@ import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
-import           Typechecker.Types       hiding (makeFun, makeList, makeTuple)
+import           Typechecker.Types       hiding (makeFunUnsafe, makeList, makeTuple)
 import qualified Typechecker.Types       as T
 
 parse :: MonadError Text m => Text -> m HsModule
@@ -42,7 +42,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
             (m'', _, _) <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
-            let dets = map deoverloadQuantType ts
+            dets <- mapM deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
             evalConverter (toIla m'' >>= ilaToAnf) M.empty dets builtinKinds
 
@@ -52,8 +52,8 @@ test = testGroup "ILA-ANF"
     [
     --    let input = "f = \\x -> x"
     --        fBody = Lam "x" a $ Complex $ Case (Trivial $ Var "x" a) ["x'"] [ Alt Default $ Trivial $ Var "x'" a]
-    --        fType = T.makeFun [a] a
-    --        fWrappedType = T.makeTuple [T.makeFun [a] a]
+    --        fType = T.makeFunUnsafe [a] a
+    --        fWrappedType = T.makeTuple [T.makeFunUnsafe [a] a]
     --        fBodyWrappedBinding = Complex $ evalNameGenerator (makeTupleUnsafe [Var "fBody'" fType]) 100
     --        fBodyWrapped = Trivial $ Var "fBodyWrapped" fWrappedType
     --        fWrapped = Trivial $ Var "fWrapped" fWrappedType
@@ -71,7 +71,7 @@ test = testGroup "ILA-ANF"
     --    let input = "f = \\x -> x + x ; y = f 1 :: Int"
     --        num = TypeCon $ TypeConstant "Num" (KindFun KindStar KindStar)
     --        numa = TypeApp num a KindStar
-    --        plus = Var "+" (T.makeFun [numa, a, a] a)
+    --        plus = Var "+" (T.makeFunUnsafe [numa, a, a] a)
     --        fBody = Lam "d" numa $
     --            Case (Trivial $ Var "d" numa) ["d'"]
     --                [ Alt Default $ Lam "x" a $
