@@ -81,6 +81,13 @@ getType name = tryGetType name >>= \case
     Nothing ->
         throwError $ "Variable " <> showt name <> " not found in environment"
     Just qt -> return qt
+addScopedTypes :: M.Map VariableName QuantifiedType -> Deoverload a -> Deoverload a
+addScopedTypes ts action = do
+    oldTypes <- gets types
+    addTypes ts
+    res <- action
+    modify $ \s -> s { types = oldTypes }
+    return res
 
 addKinds :: M.Map TypeVariableName Kind -> Deoverload ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
@@ -104,7 +111,8 @@ addDictionaries dicts = do
         , types = M.union newTypes (types s) }
 addScopedDictionaries :: M.Map TypePredicate VariableName -> Deoverload a -> Deoverload a
 addScopedDictionaries dicts action = do
-    -- Add dictionaries, run the action, remove them
+    -- Add dictionaries, run the action, remove them. We don't just reset to the old dictionaries in case we added any
+    -- new ones while performing the action
     addDictionaries dicts
     result <- action
     modify (\s -> s { dictionaries = M.difference (dictionaries s) dicts })
@@ -216,7 +224,9 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
             newName <- freshVarName
             let synName = convertName newName
                 transform (HsMatch loc fname args rhs wheres) = do
-                    match' <- deoverloadMatch (HsMatch loc synName args rhs wheres)
+                    fType <- getType (convertName fname)
+                    match' <- addScopedTypes (M.singleton newName fType) $
+                        deoverloadMatch (HsMatch loc synName args rhs wheres)
                     return (match', fname)
             (matches', fnames) <- unzip <$> mapM transform matches
             case fnames of
@@ -261,7 +271,9 @@ deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloade
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
+    writeLog $ "Getting type for " <> showt name
     Quantified _ (Qualified quals _) <- getType (convertName name)
+    writeLog $ "Got type for " <> showt name
     let constraints = S.toAscList quals
     args <- mapM makeDictName constraints
     let dictArgs = M.fromList $ zip constraints args
