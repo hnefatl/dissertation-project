@@ -157,14 +157,20 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             [text|
                 data Int
+                data Bool = False | True
                 data [] a = [] | a : [a]
                             
                 class Num a where
                     (+) :: a -> a -> a
                 instance Num Int where
                     (+) = primNumIntAdd
+                class Eq a where
+                    (==) :: a -> a -> Bool
+                instance Eq Int where
+                    (==) = primEqIntEq
                 
                 primNumIntAdd :: Int -> Int -> Int
+                primEqIntEq :: Int -> Int -> Bool
 
                 foldl _ a [] = a
                 foldl f a (x:xs) = foldl f (f a x) xs
@@ -175,5 +181,40 @@ test = testGroup "Whole Program" $ map makeTest
             |]
         ,
             "Int: 55\n"
+        )
+    ,
+        (
+            "_main = factorial 10"
+        ,
+            [text|
+                data Int
+                data [] a = [] | a : [a]
+                data Bool = False | True
+
+                class Num a where
+                    (-) :: a -> a -> a
+                    (*) :: a -> a -> a
+                instance Num Int where
+                    (-) = primNumIntSub
+                    (*) = primNumIntMult
+                
+                primNumIntAdd :: Int -> Int -> Int
+                primNumIntSub :: Int -> Int -> Int
+                primNumIntMult :: Int -> Int -> Int
+                
+                class Eq a where
+                    (==) :: a -> a -> Bool
+                instance Eq Int where
+                    (==) = primEqIntEq
+                
+                primEqIntEq :: Int -> Int -> Bool
+                
+                factorial 0 = 1
+                factorial n = n * factorial (n - 1)
+                
+                _main = factorial 10 :: Int
+            |]
+        ,
+            "Int: 3628800\n"
         )
     ]
