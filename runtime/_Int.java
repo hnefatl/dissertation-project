@@ -10,6 +10,15 @@ public class _Int extends Data {
     public static _Int add(_Int x, _Int y) {
         return _make_Int(x.value + y.value);
     }
+    public static _Int sub(_Int x, _Int y) {
+        return _make_Int(x.value - y.value);
+    }
+    public static _Int mult(_Int x, _Int y) {
+        return _make_Int(x.value * y.value);
+    }
+    public static _Int div(_Int x, _Int y) {
+        return _make_Int(x.value / y.value);
+    }
 
     @Override
     public String toString() {

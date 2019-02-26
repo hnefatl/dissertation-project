@@ -9,7 +9,7 @@ module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
 import           Control.Monad.Except    (MonadError, throwError)
-import           Data.Foldable           (foldlM)
+import           Data.Foldable           (foldlM, foldrM)
 import           Data.Hashable           (Hashable)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
@@ -139,14 +139,20 @@ mergeQuantifiedTypes f qts = Quantified (S.unions quants) $ Qualified (S.unions 
 
 -- TODO(kc506): Find a better place to put these
 -- |Utility functions on types
-makeFun :: [Type] -> Type -> Type
-makeFun args ret = foldr (applyTypeFunUnsafe . applyTypeFunUnsafe typeFun) ret args
+makeFunUnsafe :: [Type] -> Type -> Type
+makeFunUnsafe args ret = foldr (applyTypeFunUnsafe . applyTypeFunUnsafe typeFun) ret args
+makeFun :: MonadError Text m => [Type] -> Type -> m Type
+makeFun args ret = foldrM (\arg r -> makeApp typeFun [arg, r]) ret args
 makeApp :: MonadError Text m => Type -> [Type] -> m Type
 makeApp = foldlM applyTypeFun
-makeList :: Type -> Type
-makeList = applyTypeFunUnsafe typeList
-makeTuple :: [Type] -> Type
-makeTuple elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
+makeListUnsafe :: Type -> Type
+makeListUnsafe = applyTypeFunUnsafe typeList
+makeList :: MonadError Text m => Type -> m Type
+makeList = applyTypeFun typeList
+makeTupleUnsafe :: [Type] -> Type
+makeTupleUnsafe elements = foldl' applyTypeFunUnsafe (typeTuple $ length elements) elements
+makeTuple :: MonadError Text m => [Type] -> m Type
+makeTuple elements = foldlM applyTypeFun (typeTuple $ length elements) elements
 makeSynFun :: [HsType] -> HsType -> HsType
 makeSynFun as e = foldr HsTyFun e as
 makeSynApp :: HsType -> [HsType] -> HsType
@@ -210,7 +216,7 @@ typeTuple n = TypeCon $ TypeConstant sym (foldr KindFun KindStar $ replicate n K
     where sym = TypeVariableName $ makeTupleName n
 
 typeString :: Type
-typeString = makeList typeChar
+typeString = makeListUnsafe typeChar
 
 -- Utility functions for converting from our type representations to the AST representations and back
 typeToSyn :: MonadError Text m => Type -> m Syntax.HsType
@@ -236,8 +242,11 @@ synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
     Nothing -> throwError $ "Type constructor not in kind mapping: " <> showt name
     Just k  -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
     where name = convertName c
-synToType ks (HsTyFun arg body) = makeFun <$> sequence [synToType ks arg] <*> synToType ks body
-synToType ks (HsTyTuple ts) = makeTuple <$> mapM (synToType ks) ts
+synToType ks (HsTyFun arg body) = do
+    arg' <- synToType ks arg
+    body' <- synToType ks body
+    makeFun [arg'] body'
+synToType ks (HsTyTuple ts) = makeTuple =<< mapM (synToType ks) ts
 synToType ks (HsTyApp t1 t2) = do
     t1' <- synToType ks t1
     t2' <- synToType ks t2

@@ -24,7 +24,7 @@ import qualified JVM.ClassFile              as ClassFile
 
 import           Backend.ILA                (Datatype(..), Literal(..))
 import           Backend.ILB
-import           ExtraDefs                  (toLazyBytestring)
+import           ExtraDefs                  (toLazyByteString)
 import           Logger                     (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                      (TypeVariableName, VariableName(..), convertName)
@@ -111,7 +111,7 @@ pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
 pushGlobalSymbol v t = do
     writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
-    getStaticField cname $ NameType { ntName = toLazyBytestring $ convertName v, ntSignature = t }
+    getStaticField cname $ NameType { ntName = toLazyByteString $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
     Just pusher -> do
@@ -179,7 +179,7 @@ boxedDataData = NameType "data" $ arrayOf heapObjectClass
 -- The given action will be run at the start of `main`, and should be used to initialise the field
 makePublicStaticField :: Text -> FieldType -> (ClassFile.NameType Field -> Converter ()) -> Converter (ClassFile.NameType Field)
 makePublicStaticField name fieldType init = do
-    field <- newField [ ACC_PUBLIC, ACC_STATIC ] (toLazyBytestring name) fieldType
+    field <- newField [ ACC_PUBLIC, ACC_STATIC ] (toLazyByteString name) fieldType
     modify $ \s -> s
         { initialisers = initialisers s <> [init field]
         , topLevelSymbols = M.insert (VariableName name) fieldType (topLevelSymbols s) }
@@ -190,7 +190,7 @@ compileMakerFunction :: Text -> Int -> Int -> Text -> Converter (ClassFile.NameT
 compileMakerFunction name arity numFreeVars implName = do
     let accs = [ACC_PUBLIC, ACC_STATIC]
         wrapperArgs = replicate numFreeVars heapObjectClass
-    inScope $ newMethod accs (toLazyBytestring name) wrapperArgs (Returns functionClass) $ do
+    inScope $ newMethod accs (toLazyByteString name) wrapperArgs (Returns functionClass) $ do
         setLocalVarCounter (fromIntegral numFreeVars) -- Local variables [0..numFreeVars) are used for arguments
         -- Record that we're using a dynamic function invocation, remember the implementation function's name
         methodIndex <- addDynamicMethod implName

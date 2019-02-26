@@ -13,11 +13,11 @@ builtinConstructors = M.fromList
     [ ("True", Quantified S.empty $ Qualified S.empty typeBool)
     , ("False", Quantified S.empty $ Qualified S.empty typeBool)
     , ("Nothing", Quantified (S.singleton a) $ Qualified S.empty maybeA)
-    , ("Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFun [ta] maybeA)
-    , ("(,)", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFun [ta, tb] $ makeTuple [ta, tb])
-    , ("(,,)", Quantified (S.fromList [a, b, c]) $ Qualified S.empty $ makeFun [ta, tb, tc] $ makeTuple [ta, tb, tc])
-    , (":", Quantified (S.fromList [a]) $ Qualified S.empty $ makeFun [ta, makeList ta] $ makeList ta)
-    , ("[]", Quantified (S.fromList [a]) $ Qualified S.empty $ makeList ta) ]
+    , ("Just", Quantified (S.singleton a) $ Qualified S.empty $ makeFunUnsafe [ta] maybeA)
+    , ("(,)", Quantified (S.fromList [a, b]) $ Qualified S.empty $ makeFunUnsafe [ta, tb] $ makeTupleUnsafe [ta, tb])
+    , ("(,,)", Quantified (S.fromList [a, b, c]) $ Qualified S.empty $ makeFunUnsafe [ta, tb, tc] $ makeTupleUnsafe [ta, tb, tc])
+    , (":", Quantified (S.fromList [a]) $ Qualified S.empty $ makeFunUnsafe [ta, makeListUnsafe ta] $ makeListUnsafe ta)
+    , ("[]", Quantified (S.fromList [a]) $ Qualified S.empty $ makeListUnsafe ta) ]
     where a = TypeVariable "a" KindStar
           b = TypeVariable "b" KindStar
           c = TypeVariable "c" KindStar
@@ -44,20 +44,20 @@ builtinKinds = M.fromList
 builtinFunctions :: M.Map VariableName QuantifiedType
 builtinFunctions = M.fromList
     [
-        let t = makeFun [ta, ta] ta
+        let t = makeFunUnsafe [ta, ta] ta
         in ("+", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance "Num" ta)) t)
     ,
-        let t = makeFun [ta, ta] ta
+        let t = makeFunUnsafe [ta, ta] ta
         in ("-", Quantified (S.singleton a) $ Qualified (S.singleton (IsInstance "Num" ta)) t)
     ,
-        let t = makeFun [ta, ta] typeBool
+        let t = makeFunUnsafe [ta, ta] typeBool
         in ("==", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance "Eq" ta) t)
     ,
-        ("&&", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        ("&&", Quantified S.empty $ Qualified S.empty (makeFunUnsafe [typeBool, typeBool] typeBool))
     ,
-        ("||", Quantified S.empty $ Qualified S.empty (makeFun [typeBool, typeBool] typeBool))
+        ("||", Quantified S.empty $ Qualified S.empty (makeFunUnsafe [typeBool, typeBool] typeBool))
     ,
-        ("not", Quantified S.empty $ Qualified S.empty (makeFun [typeBool] typeBool))
+        ("not", Quantified S.empty $ Qualified S.empty (makeFunUnsafe [typeBool] typeBool))
     ]
     where a = TypeVariable "a" KindStar
           ta = TypeVar a
@@ -70,8 +70,8 @@ builtinClasses = M.fromList
                 Qualified S.empty (IsInstance "Eq" typeBool),
                 Qualified S.empty (IsInstance "Eq" typeInt),
                 Qualified S.empty (IsInstance "Eq" typeChar),
-                Qualified (S.fromList [IsInstance "Eq" a]) (IsInstance "Eq" $ makeList a),
-                Qualified (S.fromList [IsInstance "Eq" a, IsInstance "Eq" b]) (IsInstance "Eq" $ makeTuple [a, b])
+                Qualified (S.fromList [IsInstance "Eq" a]) (IsInstance "Eq" $ makeListUnsafe a),
+                Qualified (S.fromList [IsInstance "Eq" a, IsInstance "Eq" b]) (IsInstance "Eq" $ makeTupleUnsafe [a, b])
             ]
         ),
         ("Num", Class (S.singleton "Eq") $ S.fromList
@@ -89,8 +89,8 @@ builtinClasses = M.fromList
                 Qualified S.empty (IsInstance "Show" typeBool),
                 Qualified S.empty (IsInstance "Show" typeInt),
                 Qualified S.empty (IsInstance "Show" typeChar),
-                Qualified (S.singleton $ IsInstance "Show" a) (IsInstance "Show" $ makeList a),
-                Qualified (S.fromList [IsInstance "Show" a, IsInstance "Show" b]) (IsInstance "Show" $ makeTuple [a, b])
+                Qualified (S.singleton $ IsInstance "Show" a) (IsInstance "Show" $ makeListUnsafe a),
+                Qualified (S.fromList [IsInstance "Show" a, IsInstance "Show" b]) (IsInstance "Show" $ makeTupleUnsafe [a, b])
             ])
     ]
     where

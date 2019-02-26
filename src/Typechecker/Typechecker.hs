@@ -338,7 +338,8 @@ inferExpression (HsLambda l pats body) = do
     argTypes <- mapM nameToType argVars
     (bodyExp, bodyVar) <- inferExpression body
     bodyType <- nameToType bodyVar
-    unify (makeFun argTypes bodyType) retType
+    targetType <- makeFun argTypes bodyType
+    unify targetType retType
     makeExpTypeWrapper (HsLambda l pats bodyExp) retVar
 inferExpression (HsApp f e) = do
     -- Infer the function's type and the expression's type, and instantiate any quantified variables
@@ -350,7 +351,8 @@ inferExpression (HsApp f e) = do
     retVar <- freshTypeVarName
     retType <- nameToType retVar
     -- Unify `function` with `argument -> returntype` to match up the types.
-    unify (makeFun [argType] retType) funType
+    targetType <- makeFun [argType] retType
+    unify targetType funType
     makeExpTypeWrapper (HsApp funExp argExp) retVar
 inferExpression (HsInfixApp lhs op rhs) = do
     let op' = case op of
@@ -425,13 +427,14 @@ inferPattern (HsPApp con pats) = do
     ts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVarName
     vt <- nameToType v
-    unify (makeFun ts vt) conType
+    targetType <- makeFun ts vt
+    unify targetType conType
     return v
 inferPattern (HsPTuple pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
     v <- freshTypeVarName
     vt <- nameToType v
-    unify vt (makeTuple pts)
+    unify vt =<< makeTuple pts
     return v
 inferPattern (HsPList pats) = do
     pts <- mapM nameToType =<< inferPatterns pats
@@ -440,7 +443,7 @@ inferPattern (HsPList pats) = do
     mapM_ (unify commonType) pts
     v <- freshTypeVarName
     vt <- nameToType v
-    unify vt (makeList commonType)
+    unify vt =<< makeList commonType
     return v
 inferPattern p = throwError $ "Unsupported pattern: " <> showt p
 
@@ -491,7 +494,8 @@ inferAlternative pats e = do
     patTypes <- mapM nameToType =<< inferPatterns pats
     (bodyExp, bodyVar) <- inferExpression e
     bodyType <- nameToType bodyVar
-    unify (makeFun patTypes retType) bodyType
+    targetType <- makeFun patTypes retType
+    unify targetType bodyType
     return (bodyExp, retVar)
 
 inferAlternatives :: [([Syntax.HsPat], Syntax.HsExp)] -> TypeInferrer ([Syntax.HsExp], TypeVariableName)
@@ -615,7 +619,8 @@ inferMatch (HsMatch loc name args rhs wheres) = do
     argTypes <- mapM nameToType argVars
     (rhs', rhsVar) <- inferRhs rhs
     rhsType <- nameToType rhsVar
-    unify (makeFun argTypes rhsType) retType
+    targetType <- makeFun argTypes rhsType
+    unify targetType retType
     retInferred <- getQualifiedType retVar
     writeLog $ "Got match type " <> showt retInferred
     return (HsMatch loc name args rhs' wheres, retVar)

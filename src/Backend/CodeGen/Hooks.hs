@@ -2,10 +2,12 @@ module Backend.CodeGen.Hooks where
 
 import           Backend.CodeGen.Converter
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
-import           BasicPrelude
+import           BasicPrelude              hiding (ByteString)
+import           Data.Text                 (unpack)
+import           Data.ByteString.Lazy      (ByteString)
 import qualified Data.Map.Strict           as M
 import qualified Data.Set                  as S
-import           ExtraDefs                 (toLazyBytestring)
+import           ExtraDefs                 (toLazyByteString, fromLazyByteString)
 import           Names                     (VariableName(..), TypeVariableName, convertName)
 
 import           Java.Lang                 (runtimeException, stringClass)
@@ -32,13 +34,13 @@ makeSimpleHook renamings symbol arity implementation =
             -- Create a field we can treat as a variable in the program to call the crasher
             void $ makePublicStaticField (rename symbol) heapObjectClass $ \field -> do
                 -- Store the Function object wrapping the implementation function in the field
-                invokeStatic (toLazyBytestring cname) makeImpl
-                putStaticField (toLazyBytestring cname) field
+                invokeStatic (toLazyByteString cname) makeImpl
+                putStaticField (toLazyByteString cname) field
     )
     where
         rename n = jvmSanitise $ convertName $ M.findWithDefault n n renamings :: Text
         renameVar = VariableName . rename
-        renameBs = toLazyBytestring . rename
+        renameBs = toLazyByteString . rename
         args = [arrayOf heapObjectClass, arrayOf heapObjectClass]
         ret = Returns heapObjectClass
 
@@ -46,35 +48,31 @@ makeSimpleHook renamings symbol arity implementation =
 -- compiler-defined code like `error`, `undefined`, and dictionaries for builtin instances like `Num Int`.
 compilerGeneratedHooks :: M.Map VariableName VariableName -> M.Map (S.Set VariableName) (Text -> Converter ())
 compilerGeneratedHooks renamings = M.fromList
-    [
-        makeSimpleHook renamings "compilerError" 0 $ do
-            -- Create a new exception and throw it
-            new runtimeException
-            dup
-            loadString "Compiler error :("
-            invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
-            throw
-    ,
-        makeSimpleHook renamings "undefined" 0 $ do
-            new runtimeException
-            dup
-            loadString "undefined"
-            invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
-            throw
-    ,
-        makeSimpleHook renamings "primNumIntAdd" 2 $ do
-            -- Load the two argument _Int objects from the argument array
-            aload_ I0
-            iconst_0
-            aaload
-            invokeVirtual heapObject enter
-            checkCast int
-            aload_ I0
-            iconst_1
-            aaload
-            invokeVirtual heapObject enter
-            checkCast int
-            -- Invoke _Int's add method
-            invokeStatic int $ NameType "add" $ MethodSignature [intClass, intClass] (Returns intClass)
-            i0 ARETURN
+    [ makeSimpleHook renamings "compilerError" 0 (throwRuntimeException "Compiler error :(")
+    , makeSimpleHook renamings "undefined" 0 (throwRuntimeException "undefined")
+    , makeSimpleHook renamings "primNumIntAdd" 2 $ invokeClassStaticMethod int "add" [int, int] (Returns intClass)
+    , makeSimpleHook renamings "primNumIntSub" 2 $ invokeClassStaticMethod int "sub" [int, int] (Returns intClass)
+    , makeSimpleHook renamings "primNumIntMult" 2 $ invokeClassStaticMethod int "mult" [int, int] (Returns intClass)
+    , makeSimpleHook renamings "primNumIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns intClass)
     ]
+
+invokeClassStaticMethod :: ByteString -> ByteString -> [ByteString] -> ReturnSignature -> Converter ()
+invokeClassStaticMethod clsName methName args ret = do
+    forM_ (zip args [0..]) $ \(arg, i) -> do
+        -- Load the ith argument
+        aload_ I0
+        pushInt i
+        aaload
+        invokeVirtual heapObject enter
+        checkCast arg
+    invokeStatic clsName $ NameType methName $ MethodSignature (map (ObjectType . unpack . fromLazyByteString) args) ret
+    i0 ARETURN
+
+throwRuntimeException :: Text -> Converter ()
+throwRuntimeException s = do
+    -- Create a new exception and throw it
+    new runtimeException
+    dup
+    loadString $ unpack s
+    invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
+    throw

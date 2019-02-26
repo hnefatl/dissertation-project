@@ -154,7 +154,7 @@ getExprType (Var _ t)              = return t
 getExprType (Con _ t)              = return t
 getExprType (Lit _ t)              = return t
 getExprType (App e1 _)             = snd <$> (T.unwrapFun =<< getExprType e1)
-getExprType (Lam _ t e)            = T.makeFun [t] <$> getExprType e
+getExprType (Lam _ t e)            = T.makeFun [t] =<< getExprType e
 getExprType (Let _ _ _ e)          = getExprType e
 getExprType (Case _ _ [])          = throwError "No alts in case"
 getExprType (Case _ _ (Alt _ e:_)) = getExprType e
@@ -235,10 +235,14 @@ getTupleName = maybe (throwError "No top-level rename found for \"(,)\"") return
 
 -- |Construct an expression representing a tuple given the expressions and types of each element
 makeTuple :: [(Expr, Type)] -> Converter Expr
-makeTuple ps = makeTuple' es t
-  where (es, ts) = unzip ps
-        t        = T.makeFun ts (T.makeTuple ts)
--- |Construct an expression representing a tuple given the expressions of each element and the type of the tuple
+makeTuple ps = do
+    let (es, ts) = unzip ps
+    resultType <- T.makeTuple ts
+    funType <- T.makeFun ts resultType
+    makeTuple' es funType
+   
+-- |Construct an expression representing a tuple given the expressions of each element and the type of the function
+-- constructing the tuple
 makeTuple' :: [Expr] -> Type -> Converter Expr
 makeTuple' es t = foldl' App <$> (Con <$> getTupleName <*> pure t) <*> pure es
 
@@ -256,8 +260,9 @@ makeList ps = case S.toList uniqueTypes of
           uniqueTypes = S.fromList ts
 makeList' :: [Expr] -> Type -> Converter Expr
 makeList' es t = do
-    cons <- Con <$> getListConsName <*> pure (T.makeFun [t, T.makeList t] $ T.makeList t)
-    nil  <- Con <$> getListNilName <*> pure (T.makeList t)
+    tList <- T.makeList t
+    cons <- Con <$> getListConsName <*> T.makeFun [t, tList] tList
+    nil  <- Con <$> getListNilName <*> pure tList
     return $ foldr (\x y -> App (App cons x) y) nil es
 
 makeError :: Type -> Expr
@@ -269,13 +274,19 @@ getPatRenamings pat = do
     renames    <- M.fromList <$> mapM (\n -> (n, ) <$> freshVarName) boundNames
     return (boundNames, renames)
 
-getPatVariableTypes :: MonadError Text m => HsPat -> Type -> m (M.Map VariableName Type)
+getPatVariableTypes :: HsPat -> Type -> Converter (M.Map VariableName Type)
 getPatVariableTypes (HsPVar v   ) t = return $ M.singleton (convertName v) t
 getPatVariableTypes (HsPLit _   ) _ = return M.empty
-getPatVariableTypes (HsPApp _ ps) t = do
-    let (_, argTypes) = T.unmakeApp t
-    unless (length ps == length argTypes) $ throwError "Partially applied data constructor in ILA lowering"
-    M.unions <$> zipWithM getPatVariableTypes ps argTypes
+getPatVariableTypes (HsPApp con ps) t = do
+    ds <- gets (M.elems . datatypes)
+    case mapMaybe (M.lookup (convertName con) . branches) ds of
+        [conArgs] -> do
+            let argTypes = map fst conArgs
+            unless (length ps == length argTypes) $ throwError $
+                unwords ["Partially applied data constructor in ILA: got type", showt t, "and patterns", showt ps]
+            M.unions <$> zipWithM getPatVariableTypes ps argTypes
+        [] -> throwError $ "No datatype found with constructor " <> convertName con
+        _ -> throwError $ "Multiple datatypes found with constructor " <> convertName con
 getPatVariableTypes HsPTuple{} _ = throwError "HsPTuple should've been removed in the renamer"
 getPatVariableTypes HsPList{} _ = throwError "HsPList should've been removed in the renamer"
 getPatVariableTypes (HsPParen p) t = getPatVariableTypes p t

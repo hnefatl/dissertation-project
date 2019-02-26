@@ -38,7 +38,7 @@ import           Backend.ILA                    (Alt(..), AltConstructor(..), Bi
                                                  getBindingVariables, getBranchNames, getConstructorVariables,
                                                  isDataAlt, isDefaultAlt, isLiteralAlt)
 import           Backend.ILB
-import           ExtraDefs                      (toLazyBytestring, zipOverM_)
+import           ExtraDefs                      (toLazyByteString, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
@@ -73,7 +73,7 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
             , initialisers = map (\gen -> gen cname) $ M.elems hooks
             , dynamicMethods = Seq.empty
             , dictionaries = S.empty
-            , classname = toLazyBytestring cname }
+            , classname = toLazyByteString cname }
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
@@ -114,7 +114,7 @@ compileDatatypes ds classpath = do
     writeLog $ "Compiling datatypes: " <> showt ds
     fmap catMaybes $ forM ds $ \datatype -> do
         let dname = convertName (typeName datatype)
-            dclass = toLazyBytestring dname
+            dclass = toLazyByteString dname
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
             compileDatatype = do
                 -- Create a boring constructor
@@ -126,7 +126,7 @@ compileDatatypes ds classpath = do
                 zipOverM_ (M.toList $ branches datatype) [0..] $ \(branchName, args) branchTag -> do
                     void $ addToPool (CClass boxedData)
                     let numArgs = length args
-                        methName = toLazyBytestring $ "_make" <> convertName branchName
+                        methName = toLazyByteString $ "_make" <> convertName branchName
                         methArgs = replicate numArgs heapObjectClass
                         methRet = Returns $ ObjectType $ unpack dname
                     newMethod methFlags methName methArgs methRet $ do
@@ -172,8 +172,8 @@ compileDictionaries = do
         let name = showt c <> showt t
             datatype = ObjectType $ unpack name
         makePublicStaticField ("d" <> name) datatype $ \field -> do
-            let method = ClassFile.NameType (toLazyBytestring $ "_make" <> name) $ MethodSignature [] (Returns datatype)
-            invokeStatic (toLazyBytestring name) method
+            let method = ClassFile.NameType (toLazyByteString $ "_make" <> name) $ MethodSignature [] (Returns datatype)
+            invokeStatic (toLazyByteString name) method
             putStaticField cname field
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
@@ -213,7 +213,7 @@ addBootstrapPoolItems (Converter x) s = do
         let sig = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
             method = ClassFile.Method
                 { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
-                , methodName = toLazyBytestring name
+                , methodName = toLazyByteString name
                 , methodSignature = sig
                 , methodAttributesCount = 0
                 , methodAttributes = AR M.empty }
@@ -283,7 +283,7 @@ compileFunction name args body = do
             pushInt n
             aaload
         -- The actual implementation of the function
-        void $ newMethod implAccs (toLazyBytestring implName) implArgs (Returns heapObjectClass) $ do
+        void $ newMethod implAccs (toLazyByteString implName) implArgs (Returns heapObjectClass) $ do
             compileExp body
             i0 ARETURN
     let wrapperName = "_make" <> convertName name
@@ -317,7 +317,7 @@ compileExp (ExpConApp con args) = do
         numArgs = length args
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
-    invokeStatic (toLazyBytestring cname) $ NameType (toLazyBytestring methodname) methodSig
+    invokeStatic (toLazyByteString cname) $ NameType (toLazyByteString methodname) methodSig
 compileExp (ExpCase head t vs alts) = do
     let headType = case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData

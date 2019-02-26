@@ -77,7 +77,7 @@ getAnfComplexType (Let _ _ _ e)            = getAnfComplexType e
 getAnfComplexType (Case _ _ _ [])          = throwError "No alts in case"
 getAnfComplexType (Case _ _ _ (Alt _ e:_)) = getAnfComplexType e
 getAnfRhsType :: MonadError Text m => AnfRhs -> m Type
-getAnfRhsType (Lam _ t e) = T.makeFun [t] <$> getAnfRhsType e
+getAnfRhsType (Lam _ t e) = T.makeFun [t] =<< getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
 
 

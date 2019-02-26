@@ -181,13 +181,14 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     -- Add the type and kind of the data constructor to our environment
     let conName = convertName cname
         argNames = map convertName args
-        conKind = foldr KindFun KindStar (replicate numMethods KindStar)
+        -- The kind of the datatype is how many class arguments it has
+        conKind = foldr KindFun KindStar (replicate (length args) KindStar)
     writeLog $ "Added kind " <> showt conKind <> " for constructor " <> showt conName
     addKinds $ M.singleton conName conKind
     ks <- getKinds
     argTypes <- mapM (synToType ks . snd) methods
     resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (map (\a -> TypeCon $ TypeConstant a KindStar) argNames)
-    let conType = makeFun argTypes resultType
+    conType <- makeFun argTypes resultType
     conQuantType <- quantifyType $ Qualified S.empty conType
     writeLog $ "Added type " <> showt conQuantType <> " for constructor " <> showt conName
     addTypes $ M.singleton (convertName cname) conQuantType
@@ -227,7 +228,7 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.
     let typeSub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci :: [TypeVariableName]) [paramType]
-    Quantified _ t' <- deoverloadQuantType <$> getType (convertName name)
+    Quantified _ t' <- deoverloadQuantType =<< getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''
     writeLog $ "Constructor type: " <> synPrint conType
@@ -378,9 +379,9 @@ deoverloadType (HsQualType quals t) = makeSynFun (map deoverloadAsst quals) t
 deoverloadAsst :: HsAsst -> HsType
 deoverloadAsst (name, args) = foldl' HsTyApp (HsTyCon name) args
 
-deoverloadQuantType :: QuantifiedType -> QuantifiedSimpleType
-deoverloadQuantType (Quantified qs qt) = Quantified qs (deoverloadQualType qt)
-deoverloadQualType :: QualifiedType -> Type
+deoverloadQuantType :: MonadError Text m => QuantifiedType -> m QuantifiedSimpleType
+deoverloadQuantType (Quantified qs qt) = Quantified qs <$> deoverloadQualType qt
+deoverloadQualType :: MonadError Text m => QualifiedType -> m Type
 deoverloadQualType (Qualified quals t) = makeFun (map deoverloadTypePredicate $ toList quals) t
 deoverloadTypePredicate :: TypePredicate -> Type -- TODO(kc506): This should use `getKinds`
 deoverloadTypePredicate (IsInstance c t) = TypeApp base t KindStar
