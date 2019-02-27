@@ -1,0 +1,3 @@
+#!/bin/bash
+
+rlwrap jdb -classpath "out:runtime" -noverify Output
