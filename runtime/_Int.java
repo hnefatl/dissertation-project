@@ -1,4 +1,5 @@
-// This is a special primitive, as it subclasses Data instead of BoxedData
+import java.math.BigInteger;
+
 public class _Int extends Data {
     public int value;
     public static _Int _make_Int(int x) {
@@ -19,8 +20,20 @@ public class _Int extends Data {
     public static _Int div(_Int x, _Int y) {
         return _make_Int(x.value / y.value);
     }
+    public static _Int negate(_Int x) {
+        return _make_Int(-x.value);
+    }
+    public static _Int fromInteger(_Integer x) {
+        final BigInteger low = new BigInteger("-2147483648");
+        final BigInteger high = new BigInteger("2147483647");
+        // Clamp to the range of an int then convert
+        return _make_Int(x.value.max(low).min(high).intValue());
+    }
     public static boolean eq(_Int x, _Int y) {
         return x.value == y.value;
+    }
+    public static boolean lessj(_Int x, _Int y) {
+        return x.value < y.value;
     }
 
     @Override

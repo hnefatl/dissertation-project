@@ -139,7 +139,7 @@ addDynamicMethod m = do
     return $ fromIntegral $ Seq.length ms
 
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData, int :: IsString s => s
+heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
@@ -147,7 +147,8 @@ bifunction = "java/util/function/BiFunction"
 unboxedData = "Data"
 boxedData = "BoxedData"
 int = "_Int"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass :: FieldType
+integer = "_Integer"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass :: FieldType
 heapObjectClass = ObjectType heapObject
 functionClass = ObjectType function
 thunkClass = ObjectType thunk
@@ -155,6 +156,7 @@ bifunctionClass = ObjectType bifunction
 unboxedDataClass = ObjectType unboxedData
 boxedDataClass = ObjectType boxedData
 intClass = ObjectType int
+integerClass = ObjectType integer
 addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
@@ -173,6 +175,8 @@ toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
 makeInt :: NameType Method
 makeInt = NameType "_make_Int" $ MethodSignature [IntType] (Returns intClass)
+makeInteger :: NameType Method
+makeInteger = NameType "_make_Integer" $ MethodSignature [Java.Lang.stringClass] (Returns integerClass)
 boxedDataBranch :: NameType Field
 boxedDataBranch = NameType "branch" IntType
 boxedDataData :: NameType Field
@@ -233,8 +237,8 @@ pushArg (ArgVar v) = pushSymbol v
 
 pushLit :: Literal -> Converter ()
 pushLit (LiteralInt i)    = do
-    pushInt $ fromIntegral i
-    invokeStatic int makeInt
+    loadString $ unpack $ showt i
+    invokeStatic integer makeInteger
 pushLit (LiteralChar _)   = throwTextError "Need support for characters"
 pushLit (LiteralString _) = throwTextError "Need support for strings"
 pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"

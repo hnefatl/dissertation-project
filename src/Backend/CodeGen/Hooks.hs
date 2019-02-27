@@ -48,28 +48,22 @@ makeSimpleHook renamings symbol arity implementation =
 -- compiler-defined code like `error`, `undefined`, and dictionaries for builtin instances like `Num Int`.
 compilerGeneratedHooks :: M.Map VariableName VariableName -> M.Map (S.Set VariableName) (Text -> Converter ())
 compilerGeneratedHooks renamings = M.fromList
-    [ makeSimpleHook renamings "compilerError" 0 (throwRuntimeException "Compiler error :(")
-    , makeSimpleHook renamings "undefined" 0 (throwRuntimeException "undefined")
+    [ makeSimpleHook renamings "compilerError" 0 $ throwRuntimeException "Compiler error :("
+    , makeSimpleHook renamings "undefined" 0 $ throwRuntimeException "undefined"
     , makeSimpleHook renamings "primNumIntAdd" 2 $ invokeClassStaticMethod int "add" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntSub" 2 $ invokeClassStaticMethod int "sub" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntMult" 2 $ invokeClassStaticMethod int "mult" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns intClass)
-    , makeSimpleHook renamings "primEqIntEq" 2 $ do
-        -- Load and evaluate the arguments to Ints
-        aload_ I0
-        iconst_0
-        aaload
-        invokeVirtual heapObject enter
-        checkCast int
-        aload_ I0
-        iconst_1
-        aaload
-        invokeVirtual heapObject enter
-        checkCast int
-        invokeStatic int $ NameType "eq" $ MethodSignature [intClass, intClass] (Returns BoolType)
-        -- Convert the Java Boolean to a Haskell Bool
-        makeBoxedBool
-        i0 ARETURN
+    , makeSimpleHook renamings "primNumIntNegate" 1 $ invokeClassStaticMethod int "negate" [int] (Returns intClass)
+    , makeSimpleHook renamings "primNumIntFromInteger" 1 $ invokeClassStaticMethod int "fromInteger" [int] (Returns intClass)
+    , makeEq renamings "primEqIntEq" int
+    , makeSimpleHook renamings "primOrdIntLess" 2 $ invokeClassStaticMethod int "less" [int, int] (Returns BoolType)
+    , makeSimpleHook renamings "primNumIntegerAdd" 2 $ invokeClassStaticMethod integer "add" [integer, integer] (Returns integerClass)
+    , makeSimpleHook renamings "primNumIntegerSub" 2 $ invokeClassStaticMethod integer "sub" [integer, integer] (Returns integerClass)
+    , makeSimpleHook renamings "primNumIntegerMult" 2 $ invokeClassStaticMethod integer "mult" [integer, integer] (Returns integerClass)
+    , makeSimpleHook renamings "primNumIntegerDiv" 2 $ invokeClassStaticMethod integer "div" [integer, integer] (Returns integerClass)
+    , makeSimpleHook renamings "primNumIntegerNegate" 1 $ invokeClassStaticMethod integer "negate" [integer] (Returns integerClass)
+    , makeEq renamings "primEqIntegerEq" integer
     ]
 
 invokeClassStaticMethod :: ByteString -> ByteString -> [ByteString] -> ReturnSignature -> Converter ()
@@ -92,3 +86,19 @@ throwRuntimeException s = do
     loadString $ unpack s
     invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
     throw
+
+
+makeEq :: M.Map VariableName VariableName -> VariableName -> ByteString -> (S.Set VariableName, Text -> Converter ())
+makeEq renamings implName cls = makeSimpleHook renamings implName 2 $ do
+    -- Load and evaluate the arguments to Ints
+    forM_ [0, 1] $ \arg -> do
+        aload_ I0
+        pushInt arg
+        aaload
+        invokeVirtual heapObject enter
+        checkCast cls
+    let cls' = ObjectType $ unpack $ fromLazyByteString cls
+    invokeStatic cls $ NameType "eq" $ MethodSignature [cls', cls'] (Returns BoolType)
+    -- Convert the Java Boolean to a Haskell Bool
+    makeBoxedBool
+    i0 ARETURN
