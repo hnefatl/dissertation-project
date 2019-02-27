@@ -35,8 +35,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = True"
         ,
             [text|
-                data Bool = False | True
-                data (,) a = (,) a
                 _main = True
             |]
         ,
@@ -47,9 +45,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = id id False"
         ,
             [text|
-                data Bool = False | True
-                data (,) a = (,) a
-                id = \x -> x
                 _main = id id False
             |]
         ,
@@ -60,20 +55,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = foo [True, False]"
         ,
             [text|
-                data Bool = False | True
-                data [] a = [] | a : [a]
-                data (,) a = (,) a
-
-                (&&) = \x y -> case x of
-                    False -> False
-                    True -> case y of
-                        False -> False
-                        True -> True
-
-                all = \f xl -> case xl of
-                    [] -> True
-                    (x:xs) -> f x && all f xs
-
                 class Foo a where
                     foo :: a -> Bool
                 instance Foo Bool where
@@ -91,9 +72,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = (True, False, True)"
         ,
             [text|
-                data (,,) a b c = (,,) a b c
-                data Bool = False | True
-
                 _main = (True, False, True)
             |]
         ,
@@ -104,9 +82,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = (\\(Foo x) -> x) (Foo True)"
         ,
             [text|
-                data Bool = False | True
-                data (,) a = (,) a
-
                 data Foo a = Foo a
 
                 _main = (\(Foo x) -> x) (Foo True)
@@ -119,11 +94,7 @@ test = testGroup "Whole Program" $ map makeTest
             "[x, y] = [False, True]"
         ,
             [text|
-                data Bool = False | True
-                data [] a = [] | a : [a]
-
                 [x, y] = [False, True]
-
                 _main = x
             |]
         ,
@@ -134,18 +105,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = all not [False, True]"
         ,
             [text|
-                data Bool = False | True
-                data [] a = [] | a : [a]
-
-                True && True = True
-                _ && _ = False
-
-                all f [] = True
-                all f (x:xs) = f x && all f xs
-
-                not True = False
-                not False = True
-
                 _main = all not [False, False]
             |]
         ,
@@ -156,27 +115,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = sum [1,2,3,4,5,6,7,8,9,10]"
         ,
             [text|
-                data Int
-                data Bool = False | True
-                data [] a = [] | a : [a]
-                            
-                class Num a where
-                    (+) :: a -> a -> a
-                instance Num Int where
-                    (+) = primNumIntAdd
-                class Eq a where
-                    (==) :: a -> a -> Bool
-                instance Eq Int where
-                    (==) = primEqIntEq
-                
-                primNumIntAdd :: Int -> Int -> Int
-                primEqIntEq :: Int -> Int -> Bool
-
-                foldl _ a [] = a
-                foldl f a (x:xs) = foldl f (f a x) xs
-
-                sum = foldl (+) 0
-
                 _main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
             |]
         ,
@@ -187,28 +125,6 @@ test = testGroup "Whole Program" $ map makeTest
             "_main = factorial 10"
         ,
             [text|
-                data Int
-                data [] a = [] | a : [a]
-                data Bool = False | True
-
-                class Num a where
-                    (-) :: a -> a -> a
-                    (*) :: a -> a -> a
-                instance Num Int where
-                    (-) = primNumIntSub
-                    (*) = primNumIntMult
-                
-                primNumIntAdd :: Int -> Int -> Int
-                primNumIntSub :: Int -> Int -> Int
-                primNumIntMult :: Int -> Int -> Int
-                
-                class Eq a where
-                    (==) :: a -> a -> Bool
-                instance Eq Int where
-                    (==) = primEqIntEq
-                
-                primEqIntEq :: Int -> Int -> Bool
-                
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
                 
