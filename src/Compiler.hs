@@ -5,7 +5,8 @@
 module Compiler where
 
 import           BasicPrelude
-import           Control.Monad.Except    (Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Control.Monad.Except    (MonadError, Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Control.Exception       (try)
 import           Data.Default            (Default, def)
 import qualified Data.Map                as M
 import           Data.Text               (pack, unpack)
@@ -25,7 +26,7 @@ import qualified Backend.ILA             as ILA (datatypes, reverseRenamings, ru
 import qualified Backend.ILAANF          as ILAANF (ilaToAnf)
 import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
-import           Language.Haskell.Syntax (HsModule)
+import           Language.Haskell.Syntax (HsModule(..))
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
 import           Preprocessor.Info       (getModuleKinds)
 import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, inferModule)
@@ -55,10 +56,10 @@ instance Default Flags where
         }
 
 
-parse :: FilePath -> ExceptT Text IO HsModule
-parse f = do
-    s <- readFile f
-    case parseModule (unpack s) of
+parse :: (MonadIO m, MonadError Text m) => FilePath -> m HsModule
+parse f = liftIO (try $ readFile f) >>= \case
+    Left e -> throwError $ "Failed to read file " <> pack f <> ":\n" <> showt (e :: SomeException)
+    Right s -> case parseModule (unpack s) of
         ParseFailed loc err -> throwError $ "Parse failed at " <> showt loc <> " with error:\n" <> pack err
         ParseOk m           -> return m
 
@@ -74,7 +75,8 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
         exitFailure
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
-            m <- embedExceptIOIntoResult $ parse f
+            originalModule <- embedExceptIOIntoResult $ parse f
+            m <- mergePreludeModule originalModule
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
             ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds renamedModule <*> getClassEnvironment
@@ -109,6 +111,11 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags
+
+mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
+mergePreludeModule (HsModule a b c d decls) = do
+    HsModule _ _ _ _ decls' <- parse "StdLib.hs"
+    return $ HsModule a b c d (decls <> decls')
 
 makeJar :: Flags -> IO ()
 makeJar flags = do
