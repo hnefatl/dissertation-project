@@ -85,9 +85,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             let kinds = getModuleKinds renamedModule
                 -- TODO(kc506): Pass this into the typechecker and deoverloader rather than recomputing there
                 moduleClassInfo = getClassInfo renamedModule
-            ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds renamedModule <*> getClassEnvironment
+            ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
-            (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
+            (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
             deoverloadedModule <- liftEither $ runExcept deoverloadResult
             let types' = Deoverloader.types deoverloadState
                 kinds' = Deoverloader.kinds deoverloadState

@@ -143,12 +143,11 @@ quantifyType t = do
 
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
-deoverloadModule :: HsModule -> Deoverload HsModule
-deoverloadModule m@(HsModule a b c d decls) = do
+deoverloadModule :: M.Map HsQName ClassInfo -> HsModule -> Deoverload HsModule
+deoverloadModule ci m@(HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
-    let ci = getClassInfo m
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls

@@ -14,6 +14,8 @@ import           Test.Tasty.HUnit        (assertFailure, testCase)
 import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
+import           Names                   (convertName)
+import           Preprocessor.Info       (getClassInfo)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
 import qualified Backend.Deoverload      as Deoverload
 import           Backend.ILA
@@ -40,13 +42,15 @@ makeTest input expected = testCase (unpack $ deline input) $
             _ -> return ()
     where foo = do
             m <- parse input
+            let moduleClassInfo = getClassInfo m
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            (dResult, dState) <- lift $ runDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
+            (dResult, dState) <- lift $ runDeoverload (deoverloadModule moduleClassInfo m') ts builtinKinds builtinClasses
             m'' <- liftEither $ runExcept dResult
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             dets <- mapM deoverloadQuantType ts 
             -- Run the ILA conversion on the deoverloaded module+types
-            evalConverter (toIla m'') M.empty dets builtinKinds (Deoverload.dictionaries dState)
+            let dictNames = S.map convertName $ M.keysSet moduleClassInfo
+            evalConverter (toIla m'') M.empty dets builtinKinds (Deoverload.dictionaries dState) dictNames
 
 
 test :: TestTree

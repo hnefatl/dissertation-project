@@ -687,12 +687,11 @@ inferDeclGroup ds = do
         inferDecls group
     return $ concat declExps
 
-inferModule :: M.Map TypeVariableName Kind -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule ks m@(HsModule p1 p2 p3 p4 decls) = do
+inferModule :: M.Map TypeVariableName Kind -> M.Map HsQName ClassInfo -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
+inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
-    let ci = getClassInfo m
     modify $ \s -> s { classInfo = ci, kinds = ks }
     writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
@@ -743,7 +742,7 @@ inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.M
 inferModuleWithBuiltins m = do
     addClasses builtinClasses
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-    inferModule (M.union builtinKinds $ getModuleKinds m) m
+    inferModule (M.union builtinKinds $ getModuleKinds m) (getClassInfo m) m
 
 getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getAllVariableTypes = do
