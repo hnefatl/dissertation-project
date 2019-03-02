@@ -82,7 +82,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds renamedModule <*> getClassEnvironment
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadedModule, types', kinds') <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
-            writeLog $ unlines ["Deoverloaded module:", synPrint deoverloadedModule]
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             deoverloadedTypes <- mapM deoverloadQuantType types'
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds'

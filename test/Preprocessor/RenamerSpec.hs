@@ -122,4 +122,10 @@ test = testGroup "Renamer"
     , makeVanillaTest
         "data Maybe a = Nothing | Just a ; class Functor f where { fmap :: (a -> b) -> f a -> f b }"
         "data Maybe x0 = Nothing | Just x0 ; class Functor z0 where { z :: (z1 -> z2) -> z0 z1 -> z0 z2 }"
+    --, makeVanillaTest
+    --    "class Monoid m where { mempty :: m } ; instance Monoid Bool where { mempty = False }"
+    --    "class Monoid z0 where { mempty :: z0 } ; instance Monoid Bool where { mempty = x0 }"
+    --, makeVanillaTest
+    --    "class Monoid m where { mempty :: m } ; instance Monoid [a] where { mempty = [] }"
+    --    "class Monoid z0 where { mempty :: z0 } ; instance Monoid [z1] where { mempty = x0 }"
     ]

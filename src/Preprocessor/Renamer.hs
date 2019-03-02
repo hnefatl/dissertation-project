@@ -183,7 +183,9 @@ instance Renameable HsDecl where
     rename (HsDataDecl loc ctx name args decls derivings) =
         bindTypeVariableForScope (S.fromList $ map convertName args) $
             HsDataDecl loc ctx name <$> mapM renameTypeVariable args <*> renames decls <*> pure derivings
-    rename (HsInstDecl loc ctx cname ts ds) = HsInstDecl loc <$> renames ctx <*> pure cname <*> renames ts <*> renames ds
+    rename (HsInstDecl loc ctx cname ts ds) =
+        bindTypeVariableForScope (getFreeTypeVariables ts) $
+            HsInstDecl loc <$> renames ctx <*> pure cname <*> renames ts <*> renames ds
     rename d                             = throwError $ unlines ["Declaration not supported:", synPrint d]
 
 instance Renameable HsConDecl where

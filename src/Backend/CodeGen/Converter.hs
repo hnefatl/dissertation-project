@@ -238,6 +238,7 @@ pushArg (ArgVar v) = pushSymbol v
 pushLit :: Literal -> Converter ()
 pushLit (LiteralInt i)    = do
     loadString $ unpack $ showt i
+    writeLog $ "Pushed " <> showt i
     invokeStatic integer makeInteger
 pushLit (LiteralChar _)   = throwTextError "Need support for characters"
 pushLit (LiteralString _) = throwTextError "Need support for strings"

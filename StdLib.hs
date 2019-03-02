@@ -59,6 +59,16 @@ instance Eq Bool where
 primEqIntEq :: Int -> Int -> Bool
 primEqIntegerEq :: Integer -> Integer -> Bool
 
+class Monoid a where
+    mempty :: a
+    (<>) :: a -> a -> a
+--instance Monoid [a] where
+--    mempty = []
+--    (<>) = (++)
+
+[] ++ ys = ys
+(x:xs) ++ ys = x:(xs ++ ys)
+
 id x = x
 
 True && True = True
