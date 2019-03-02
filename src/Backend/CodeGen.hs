@@ -73,7 +73,6 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
             , localSymbols = M.empty
             , initialisers = map (\gen -> gen cname) $ M.elems hooks
             , dynamicMethods = Seq.empty
-            , dictionaries = S.empty
             , classname = toLazyByteString cname }
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
@@ -160,22 +159,6 @@ compileDatatypes ds classpath = do
             Right ((), out) -> do
                 let out' = out { superClass = boxedData }
                 return $ Just $ NamedClass dname (classDirect2File out')
-
--- TODO(kc506): Should be uneccessary: dictionaries should be created by `instance` decls in ILA conversion
-compileDictionaries :: Converter ()
-compileDictionaries = do
-    dicts <- gets dictionaries
-    cname <- gets classname
-    -- For each dictionary, create a new static field
-    -- TODO(kc506): Create the dictionary functions in this class
-    forM_ dicts $ \(Types.IsInstance c t) -> do
-        -- TODO(kc506): Verify the name's acceptable (like `NumInt`, not `Num[a]`)
-        let name = showt c <> showt t
-            datatype = ObjectType $ unpack name
-        makePublicStaticField ("d" <> name) datatype $ \field -> do
-            let method = ClassFile.NameType (toLazyByteString $ "_make" <> name) $ MethodSignature [] (Returns datatype)
-            invokeStatic (toLazyByteString name) method
-            putStaticField cname field
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.

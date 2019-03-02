@@ -63,8 +63,6 @@ data ConverterState = ConverterState
       initialisers    :: [Converter ()]
     , -- Which methods we're using an invokeDynamic instruction on, so we need to add bootstrap methods for
       dynamicMethods  :: Seq.Seq Text
-    , -- Class instances like `Num Int`. We want to compile any ground instances into static fields.
-      dictionaries    :: S.Set Types.TypePredicate
     , -- The name of the class we're compiling to
       classname       :: B.ByteString }
 

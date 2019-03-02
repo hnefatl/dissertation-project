@@ -34,6 +34,11 @@ parseFlags = Flags
        <> short 't'
        <> help "Perform the top-level deduplication optimisation"
        <> showDefault)
+    <*> switch
+        ( long "no-std-import"
+       <> short 'n'
+       <> help "Don't import the standard library"
+       <> showDefault)
     <*> strOption
         ( long "output-dir"
        <> short 'd'

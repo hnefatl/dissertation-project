@@ -55,7 +55,7 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntMult" 2 $ invokeClassStaticMethod int "mult" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns intClass)
     , makeSimpleHook renamings "primNumIntNegate" 1 $ invokeClassStaticMethod int "negate" [int] (Returns intClass)
-    , makeSimpleHook renamings "primNumIntFromInteger" 1 $ invokeClassStaticMethod int "fromInteger" [int] (Returns intClass)
+    , makeSimpleHook renamings "primNumIntFromInteger" 1 $ invokeClassStaticMethod int "fromInteger" [integer] (Returns intClass)
     , makeEq renamings "primEqIntEq" int
     , makeSimpleHook renamings "primOrdIntLess" 2 $ invokeClassStaticMethod int "less" [int, int] (Returns BoolType)
     , makeSimpleHook renamings "primNumIntegerAdd" 2 $ invokeClassStaticMethod integer "add" [integer, integer] (Returns integerClass)

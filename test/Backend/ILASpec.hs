@@ -3,7 +3,7 @@
 module Backend.ILASpec where
 
 import           BasicPrelude            hiding (head)
-import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError)
+import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError, liftEither)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
@@ -14,7 +14,8 @@ import           Test.Tasty.HUnit        (assertFailure, testCase)
 import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
-import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
+import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
+import qualified Backend.Deoverload      as Deoverload
 import           Backend.ILA
 import           ExtraDefs
 import           Logger                  (runLoggerT)
@@ -40,11 +41,12 @@ makeTest input expected = testCase (unpack $ deline input) $
     where foo = do
             m <- parse input
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            (m'', _, _) <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
+            (dResult, dState) <- lift $ runDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
+            m'' <- liftEither $ runExcept dResult
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
-            dets <- mapM deoverloadQuantType ts
+            dets <- mapM deoverloadQuantType ts 
             -- Run the ILA conversion on the deoverloaded module+types
-            evalConverter (toIla m'') M.empty dets builtinKinds
+            evalConverter (toIla m'') M.empty dets builtinKinds (Deoverload.dictionaries dState)
 
 
 test :: TestTree

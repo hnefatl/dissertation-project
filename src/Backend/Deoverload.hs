@@ -52,7 +52,7 @@ instance Default DeoverloadState where
         , classEnvironment = M.empty
         , classInfo = M.empty }
 
-runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind, DeoverloadState)
+runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
 runDeoverload action ts ks ce = do
     let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
                 flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
@@ -61,13 +61,13 @@ runDeoverload action ts ks ce = do
     let z = case x of
             Left err -> throwError $ unlines [err, pretty s]
             Right y  -> return y
-    return (z, types s, kinds s, s)
+    return (z, s)
 
-evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) (a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind)
+evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
 evalDeoverload action ts ks ce = do
-    (a, b, c, _) <- lift $ runDeoverload action ts ks ce
+    (a, _) <- lift $ runDeoverload action ts ks ce
     a' <- liftEither $ runExcept a
-    return (a', b, c)
+    return a'
 
 typePredToDictionaryName :: TypePredicate -> VariableName
 typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t

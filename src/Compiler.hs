@@ -5,10 +5,11 @@
 module Compiler where
 
 import           BasicPrelude
-import           Control.Monad.Except    (MonadError, Except, ExceptT, runExcept, runExceptT, throwError, withExceptT)
+import           Control.Monad.Except    (MonadError, Except, ExceptT, runExcept, runExceptT, throwError, withExceptT, liftEither)
 import           Control.Exception       (try)
 import           Data.Default            (Default, def)
 import qualified Data.Map                as M
+import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
 import           System.Exit             (exitFailure)
 import           System.FilePath.Glob    as Glob (compile, globDir1)
@@ -18,17 +19,18 @@ import           TextShow                (TextShow, showt)
 import           ExtraDefs               (inverseMap, pretty, synPrint)
 import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
-import           Names                   (VariableName)
+import           Names                   (VariableName, convertName)
 
 import qualified Backend.CodeGen         as CodeGen (convert, writeClass)
-import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
+import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
+import qualified Backend.Deoverload      as Deoverloader
 import qualified Backend.ILA             as ILA (datatypes, reverseRenamings, runConverter, toIla)
 import qualified Backend.ILAANF          as ILAANF (ilaToAnf)
 import qualified Backend.ILB             as ILB (anfToIlb)
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
 import           Language.Haskell.Syntax (HsModule(..))
 import           Preprocessor.Renamer    (evalRenamer, renameModule)
-import           Preprocessor.Info       (getModuleKinds)
+import           Preprocessor.Info       (getModuleKinds, getClassInfo)
 import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, inferModule)
 import Optimisations.LetLifting (performLetLift)
 import Optimisations.TopLevelDedupe (performTopLevelDedupe)
@@ -37,6 +39,7 @@ data Flags = Flags
     { verbose         :: Bool
     , letLift         :: Bool
     , topLevelDedupe  :: Bool
+    , noStdImport     :: Bool
     , outputDir       :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -48,6 +51,7 @@ instance Default Flags where
         { verbose = False
         , letLift = True
         , topLevelDedupe = True
+        , noStdImport = False
         , outputDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -76,16 +80,23 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
           x = do
             originalModule <- embedExceptIOIntoResult $ parse f
-            m <- mergePreludeModule originalModule
+            m <- if noStdImport flags then return originalModule else mergePreludeModule originalModule
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
+                -- TODO(kc506): Pass this into the typechecker and deoverloader rather than recomputing there
+                moduleClassInfo = getClassInfo renamedModule
             ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds renamedModule <*> getClassEnvironment
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
-            (deoverloadedModule, types', kinds') <- embedExceptLoggerNGIntoResult $ evalDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
+            (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule taggedModule) types kinds classEnvironment
+            deoverloadedModule <- liftEither $ runExcept deoverloadResult
+            let types' = Deoverloader.types deoverloadState
+                kinds' = Deoverloader.kinds deoverloadState
+                dicts  = Deoverloader.dictionaries deoverloadState
+                dictNames = S.map convertName $ M.keysSet moduleClassInfo
             writeLog $ unlines ["Deoverloaded module:", synPrint deoverloadedModule]
             when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             deoverloadedTypes <- mapM deoverloadQuantType types'
-            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds'
+            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             mainName <- case M.lookup "_main" (inverseMap reverseRenames) of
@@ -157,3 +168,9 @@ embedExceptLoggerNGIntoResult x = do
 
 embedExceptIntoResult :: Except e a -> ExceptT e (LoggerT (NameGeneratorT IO)) a
 embedExceptIntoResult = either throwError return . runExcept
+
+embedLoggerNGIntoResult :: LoggerT NameGenerator a -> ExceptT e (LoggerT (NameGeneratorT IO)) a
+embedLoggerNGIntoResult x = do
+    (y, logs) <- lift $ lift $ embedNG $ runLoggerT x
+    writeLogs logs
+    return y

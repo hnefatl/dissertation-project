@@ -8,7 +8,6 @@ public class _Integer extends Data {
         return i;
     }
     public static _Integer _make_Integer(String x) {
-        System.out.println("Making new integer: " + x);
         return _make_Integer(new BigInteger(x));
     }
 
