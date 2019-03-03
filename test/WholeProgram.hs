@@ -133,4 +133,17 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             "Int: 3628800\n"
         )
+    ,
+        (
+            "_main = factorial 50"
+        ,
+            [text|
+                factorial 0 = 1
+                factorial n = n * factorial (n - 1)
+                
+                _main = factorial 50 :: Integer
+            |]
+        ,
+            "Integer: 30414093201713378043612608166064768844377641568960512000000000000\n"
+        )
     ]
