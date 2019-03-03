@@ -1,22 +1,22 @@
+{-# LANGUAGE DataKinds        #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
-{-# LANGUAGE DataKinds        #-}
 
 module Backend.ILAANF where
 
+import           AlphaEq              (AlphaEq, alphaEq')
 import           Backend.ILA          (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILA          as ILA
 import           BasicPrelude
 import           Control.Monad.Except (MonadError, throwError)
 import qualified Data.Map.Strict      as M
 import           ExtraDefs            (secondM)
+import           Logger               (MonadLogger, writeLog)
 import           NameGenerator        (MonadNameGenerator, freshVarName)
 import           Names
 import           TextShow             (TextShow, showb, showt)
 import           Typechecker.Types    (Type)
 import qualified Typechecker.Types    as T
-import           Logger               (MonadLogger, writeLog)
-import           AlphaEq              (AlphaEq, alphaEq')
 
 -- These datatypes are inspired by the grammar in https://github.com/ghc/ghc/blob/6353efc7694ba8ec86c091918e02595662169ae2/compiler/coreSyn/CorePrep.hs#L144-L160
 -- |Trivial ANF expressions are "atoms": variables, literals, types.
@@ -158,8 +158,8 @@ instance AlphaEq AnfTrivial where
     alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (Con n1 t1) (Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (Lit l1 t1) (Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
-    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
+    alphaEq' (Type t1) (Type t2)     = alphaEq' t1 t2
+    alphaEq' e1 e2                   = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
 instance AlphaEq AnfApplication where
     alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
     alphaEq' (TrivApp e1) (TrivApp e2) = alphaEq' e1 e2
@@ -176,5 +176,5 @@ instance AlphaEq AnfComplex where
     alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]
 instance AlphaEq AnfRhs where
     alphaEq' (Lam v1 t1 e1) (Lam v2 t2 e2) = alphaEq' v1 v2 >> alphaEq' t1 t2 >> alphaEq' e1 e2
-    alphaEq' (Complex c1) (Complex c2) = alphaEq' c1 c2
-    alphaEq' e1 e2 = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]
+    alphaEq' (Complex c1) (Complex c2)     = alphaEq' c1 c2
+    alphaEq' e1 e2                         = throwError $ unlines [ "AnfRhs mismatch:", showt e1, "vs", showt e2 ]

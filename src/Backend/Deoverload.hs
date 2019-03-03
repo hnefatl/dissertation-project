@@ -22,8 +22,8 @@ import           ExtraDefs                   (pretty, synPrint, zipOverM)
 import           Logger
 import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
 import           Names                       (TypeVariableName(..), VariableName(..), convertName)
-import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
 import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
+import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
 import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
 import           Typechecker.Substitution    (Substitution(..), TypeSubstitution, applySub)
@@ -295,7 +295,7 @@ isTypeSig _           = False
 
 deoverloadRhsWithoutAddingDicts :: HsRhs -> Deoverload HsRhs
 deoverloadRhsWithoutAddingDicts (HsUnGuardedRhs expr) = HsUnGuardedRhs <$> deoverloadExp expr
-deoverloadRhsWithoutAddingDicts _ = throwError "Unsupported RHS in deoverloader"
+deoverloadRhsWithoutAddingDicts _                     = throwError "Unsupported RHS in deoverloader"
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of

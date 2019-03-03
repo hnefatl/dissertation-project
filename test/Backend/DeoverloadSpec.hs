@@ -1,26 +1,26 @@
 module Backend.DeoverloadSpec where
 
-import           Test.Tasty              (TestTree, testGroup)
-import           Test.Tasty.HUnit        (assertFailure, testCase)
+import Test.Tasty              (TestTree, testGroup)
+import Test.Tasty.HUnit        (assertFailure, testCase)
 
-import           Language.Haskell.Syntax
-import           Language.Haskell.Parser
+import Language.Haskell.Parser
+import Language.Haskell.Syntax
 
-import           BasicPrelude            hiding (intercalate)
-import           Control.Monad.Except    (runExcept)
-import           Data.Text               (intercalate, unpack)
-import           Data.Functor.Identity   (runIdentity)
-import           Data.Tuple.Extra        (both)
+import BasicPrelude            hiding (intercalate)
+import Control.Monad.Except    (runExcept)
+import Data.Functor.Identity   (runIdentity)
+import Data.Text               (intercalate, unpack)
+import Data.Tuple.Extra        (both)
 
-import           AlphaEq
-import           Preprocessor.Info       (getClassInfo)
-import           Backend.Deoverload
-import           ExtraDefs               (pretty, synPrint)
-import           Logger                  (runLoggerT)
-import           NameGenerator
-import           Typechecker.Hardcoded
-import           Typechecker.Typechecker
-import           SyntaxTraversals (expTraverse)
+import AlphaEq
+import Backend.Deoverload
+import ExtraDefs               (pretty, synPrint)
+import Logger                  (runLoggerT)
+import NameGenerator
+import Preprocessor.Info       (getClassInfo)
+import SyntaxTraversals        (expTraverse)
+import Typechecker.Hardcoded
+import Typechecker.Typechecker
 
 unpackEither :: Either e a -> (e -> Text) -> IO a
 unpackEither (Left err) f = assertFailure $ unpack (f err)
@@ -52,7 +52,7 @@ listCorrector :: HsModule -> HsModule
 listCorrector = runIdentity . expTraverse f
     where
         f (HsList []) = pure $ HsCon $ Special $ HsListCon
-        f e = pure e
+        f e           = pure e
 
 test :: TestTree
 test = testGroup "Deoverload"

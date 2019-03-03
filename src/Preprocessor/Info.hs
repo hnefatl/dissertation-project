@@ -3,9 +3,9 @@ module Preprocessor.Info where
 import           BasicPrelude
 import qualified Data.Map.Strict         as M
 import           Language.Haskell.Syntax
+import           Names                   (TypeVariableName, convertName)
 import           TextShow                (TextShow, showb)
 import           Typechecker.Types       (Kind(..))
-import           Names                   (TypeVariableName, convertName)
 
 data ClassInfo = ClassInfo
     { methods      :: M.Map HsName HsQualType
@@ -37,4 +37,4 @@ getDeclKinds :: HsDecl -> M.Map TypeVariableName Kind
 getDeclKinds (HsDataDecl _ _ name args _ _) = M.singleton (convertName name) typeKind
     where typeKind = foldr KindFun KindStar $ replicate (length args) KindStar
 getDeclKinds _ = M.empty
-    
+

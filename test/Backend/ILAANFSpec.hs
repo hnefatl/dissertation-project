@@ -3,7 +3,7 @@
 module Backend.ILAANFSpec where
 
 import           BasicPrelude            hiding (head)
-import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError, liftEither)
+import           Control.Monad.Except    (MonadError, liftEither, runExcept, runExceptT, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
@@ -14,8 +14,6 @@ import           Test.Tasty.HUnit        (assertFailure, testCase)
 import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
-import           Names                   (convertName)
-import           Preprocessor.Info       (getClassInfo)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
 import qualified Backend.Deoverload      as Deoverload
 import           Backend.ILA             hiding (Expr(..), makeError, makeList, makeTuple)
@@ -23,6 +21,8 @@ import           Backend.ILAANF
 import           ExtraDefs
 import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
+import           Names                   (convertName)
+import           Preprocessor.Info       (getClassInfo)
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFunUnsafe, makeList, makeTuple)

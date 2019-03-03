@@ -3,7 +3,7 @@
 module Backend.ILASpec where
 
 import           BasicPrelude            hiding (head)
-import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError, liftEither)
+import           Control.Monad.Except    (MonadError, liftEither, runExcept, runExceptT, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
@@ -14,15 +14,15 @@ import           Test.Tasty.HUnit        (assertFailure, testCase)
 import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
-import           Names                   (convertName)
-import           Preprocessor.Info       (getClassInfo)
 import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
 import qualified Backend.Deoverload      as Deoverload
 import           Backend.ILA
 import           ExtraDefs
 import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyVarName)
+import           Names                   (convertName)
 import           Names
+import           Preprocessor.Info       (getClassInfo)
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFunUnsafe, makeList, makeTuple)
@@ -47,7 +47,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             (dResult, dState) <- lift $ runDeoverload (deoverloadModule moduleClassInfo m') ts builtinKinds builtinClasses
             m'' <- liftEither $ runExcept dResult
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
-            dets <- mapM deoverloadQuantType ts 
+            dets <- mapM deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
             let dictNames = S.map convertName $ M.keysSet moduleClassInfo
             evalConverter (toIla m'') M.empty dets builtinKinds (Deoverload.dictionaries dState) dictNames

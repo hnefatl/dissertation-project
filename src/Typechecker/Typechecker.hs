@@ -24,10 +24,10 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Tuples                      (makeTupleName)
-import           Preprocessor.Info      (ClassInfo(..), getClassInfo, getModuleKinds)
 import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.Dependency
+import           Preprocessor.Info           (ClassInfo(..), getClassInfo, getModuleKinds)
+import           Tuples                      (makeTupleName)
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
 import           Typechecker.Substitution
@@ -617,13 +617,13 @@ checkInstanceDecls cname argSynTypes ds = do
         HsFunBind matches -> do
             funName <- case matches of
                 (HsMatch _ name _ _ _):_ -> return $ convertName name
-                _ -> throwError "No matches in HsFunBind"
+                _                        -> throwError "No matches in HsFunBind"
             funType <- case M.lookup funName methodTypes of
                 Just ft -> nameToType ft
                 Nothing -> throwError $ "No type for method " <> showt funName
             (matches', matchTypeVars) <- unzip <$> mapM inferMatch matches
             matchTypes <- mapM nameToType matchTypeVars
-            -- Infer the RHS type, match against 
+            -- Infer the RHS type, match against
             mapM_ (unifyLeft funType) matchTypes
             writeLog $ "Match types: " <> showt matchTypes
             return $ HsFunBind matches'

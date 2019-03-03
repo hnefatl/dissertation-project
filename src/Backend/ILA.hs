@@ -10,13 +10,13 @@
 module Backend.ILA where
 
 import           BasicPrelude                hiding (exp, head)
-import           Data.Functor                ((<&>))
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
+import           Data.Functor                ((<&>))
 import           Data.Hashable               (Hashable)
 import           Data.List.Extra             (foldl', groupOn, intersperse)
 import qualified Data.Map.Strict             as M
@@ -28,8 +28,9 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (allM, inverseMap, mapError, middleText, synPrint)
 import           AlphaEq                     (AlphaEq, alphaEq')
+import           Backend.Deoverload          (makeDictName)
+import           ExtraDefs                   (allM, inverseMap, mapError, middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
@@ -38,9 +39,8 @@ import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariable
 import           Typechecker.Substitution    (NameSubstitution, Substitutable, Substitution(..), applySub, subCompose,
                                               subEmpty, subSingle)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
-                                              TypePredicate(..), TypeConstant(..))
+                                              TypeConstant(..), TypePredicate(..))
 import qualified Typechecker.Types           as T
-import           Backend.Deoverload          (makeDictName)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -174,7 +174,7 @@ data ConverterReadableState = ConverterReadableState
       -- As we traverse the source we build up a mapping of available dictionaries within the current scope. This
       -- includes top-level definitions like `Num Int`, but also type-dependent ones like `Num t201`. This is needed for
       -- lowering int literals, where we need to call `fromInteger` and pass a dictionary.
-    , dictionaries :: M.Map TypePredicate VariableName }
+    , dictionaries    :: M.Map TypePredicate VariableName }
     deriving (Eq, Show)
 instance TextShow ConverterReadableState where
     showb = fromString . show
@@ -259,7 +259,7 @@ makeTuple ps = do
     resultType <- T.makeTuple ts
     funType <- T.makeFun ts resultType
     makeTuple' es funType
-   
+
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the function
 -- constructing the tuple
 makeTuple' :: [Expr] -> Type -> Converter Expr
@@ -410,7 +410,7 @@ expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- We need to keep track of any dictionaries being passed in, so lower functions can use them.
-    let convert (_, Nothing) = Nothing
+    let convert (_, Nothing)   = Nothing
         convert (n, Just pred) = Just (pred, n)
     dictionaryArgs <- M.fromList . catMaybes . map convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
@@ -664,8 +664,8 @@ instance Substitutable a b c => Substitutable a b (Alt c) where
 
 instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
     alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (Rec m1) (Rec m2) = alphaEq' m1 m2
-    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+    alphaEq' (Rec m1) (Rec m2)             = alphaEq' m1 m2
+    alphaEq' b1 b2                         = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
 instance AlphaEq a => AlphaEq (Alt a) where
     alphaEq' (Alt ac1 e1) (Alt ac2 e2) = alphaEq' ac1 ac2 >> alphaEq' e1 e2
 instance AlphaEq Literal where
