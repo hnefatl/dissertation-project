@@ -227,3 +227,5 @@ Made some changes to the intermediate language translations and codegen that wer
 translation/code generation stage (added special cases for thunks etc so that we don't wastefully allocate thunks on the
 heap).
 
+Should still do peephole pass: just remove things like `astore ; aload` and `goto 1`. Offsets are relative so after
+making changes need to scan backwards through bytecode and update offsets...
