@@ -11,7 +11,6 @@ import           Data.Functor               (void)
 import           Data.Text                  (unpack)
 import qualified Data.Map.Strict            as M
 import qualified Data.Sequence              as Seq
-import qualified Data.Set                   as S
 import           Data.Word                  (Word16)
 import           TextShow                   (TextShow, showb, showt)
 
@@ -28,7 +27,6 @@ import           ExtraDefs                  (toLazyByteString)
 import           Logger                     (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                      (TypeVariableName, VariableName(..), convertName)
-import qualified Typechecker.Types          as Types
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 
 type Class = ClassFile.Class ClassFile.Direct
@@ -80,9 +78,9 @@ liftErrorText x = case runExcept x of
 liftExc :: ExceptT Text (LoggerT (NameGeneratorT IO)) a -> Converter a
 liftExc = Converter . lift . lift
 
-setLocalVarCounter :: Word16 -> Converter ()
+setLocalVarCounter :: LocalVar -> Converter ()
 setLocalVarCounter x = modify (\s -> s { localVarCounter = x })
-getFreshLocalVar :: Converter Word16
+getFreshLocalVar :: Converter LocalVar
 getFreshLocalVar = do
     x <- gets localVarCounter
     when (x == maxBound) $ throwTextError "Maximum number of local variables met"
@@ -137,7 +135,7 @@ addDynamicMethod m = do
     return $ fromIntegral $ Seq.length ms
 
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char :: IsString s => s
+heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char, list :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
@@ -147,7 +145,8 @@ boxedData = "BoxedData"
 int = "_Int"
 integer = "_Integer"
 char = "_Char"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass :: FieldType
+list = fromString $ jvmSanitise "[]"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, listClass :: FieldType
 heapObjectClass = ObjectType heapObject
 functionClass = ObjectType function
 thunkClass = ObjectType thunk
@@ -157,6 +156,7 @@ boxedDataClass = ObjectType boxedData
 intClass = ObjectType int
 integerClass = ObjectType integer
 charClass = ObjectType char
+listClass = ObjectType list
 addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
@@ -269,20 +269,48 @@ storeLocal v = do
 
 storeSpecificLocal :: VariableName -> LocalVar -> Converter ()
 storeSpecificLocal v i = do
-    case i of
-        0 -> astore_ I0
-        1 -> astore_ I1
-        2 -> astore_ I2
-        3 -> astore_ I3
-        _ -> if i < 256 then astore $ fromIntegral i else astorew $ fromIntegral i
+    storeSpecificUnnamedLocal i
     addLocalVariable v i
 
-loadLocal :: MonadGenerator m => Word16 -> m ()
-loadLocal 0 = aload_ I0
-loadLocal 1 = aload_ I1
-loadLocal 2 = aload_ I2
-loadLocal 3 = aload_ I3
-loadLocal i = if i < 256 then aload $ fromIntegral i else aloadw $ fromIntegral i
+storeUnnamedLocal :: Converter LocalVar
+storeUnnamedLocal = do
+    localVar <- getFreshLocalVar
+    storeSpecificUnnamedLocal localVar
+    return localVar
+
+storeUnnamedLocalInt :: Converter LocalVar
+storeUnnamedLocalInt = do
+    localVar <- getFreshLocalVar
+    storeSpecificUnnamedLocalInt localVar
+    return localVar
+
+storeSpecificUnnamedLocal :: MonadGenerator m => LocalVar -> m ()
+storeSpecificUnnamedLocal = storeSpecificUnnamedLocal' astore_ astore astorew
+
+storeSpecificUnnamedLocalInt :: MonadGenerator m => LocalVar -> m ()
+storeSpecificUnnamedLocalInt = storeSpecificUnnamedLocal' istore_ istore istorew
+
+storeSpecificUnnamedLocal' :: MonadGenerator m => (IMM -> m ()) -> (Word8 -> m ()) -> (Word16 -> m ()) -> LocalVar -> m ()
+storeSpecificUnnamedLocal' storeImm store storew i = case i of
+    0 -> storeImm I0
+    1 -> storeImm I1
+    2 -> storeImm I2
+    3 -> storeImm I3
+    _ -> if i < 256 then store $ fromIntegral i else storew $ fromIntegral i
+
+loadLocal :: MonadGenerator m => LocalVar -> m ()
+loadLocal = loadLocal' aload_ aload aloadw
+
+loadLocalInt :: MonadGenerator m => LocalVar -> m ()
+loadLocalInt = loadLocal' iload_ iload iloadw
+
+loadLocal' :: MonadGenerator m => (IMM -> m ()) -> (Word8 -> m ()) -> (Word16 -> m ()) -> LocalVar -> m ()
+loadLocal' loadImm load loadw i = case i of
+    0 -> loadImm I0
+    1 -> loadImm I1
+    2 -> loadImm I2
+    3 -> loadImm I3
+    _ -> if i < 256 then load $ fromIntegral i else loadw $ fromIntegral i
 
 -- |Given a java-land Boolean on the top of the stack, convert it to a haskell-land True/False BoxedData value
 makeBoxedBool :: Converter ()
@@ -302,6 +330,53 @@ makeBoxedBool = do
             goto (jumpBytes + invokeStaticBytes)
             -- If the value is 0, make false
             invokeStatic "_Bool" $ NameType makeFalse $ MethodSignature [] (Returns $ ObjectType "_Bool")
+
+-- |Given a Java-land string on the top of the stack, convert it to a Haskell-land list of haskell-land chars.
+makeBoxedString :: Converter ()
+makeBoxedString = do
+    makeNil <- getMakeMethod "[]" $ MethodSignature [] (Returns listClass)
+    makeCons <- getMakeMethod ":" $ MethodSignature [heapObjectClass, heapObjectClass] (Returns listClass)
+    let charAt = NameType "charAt" $ MethodSignature [IntType] (Returns CharByte)
+
+    -- Store the given string as a local variable
+    stringVar <- storeUnnamedLocal
+    -- Create an empty list to store the haskell-land string
+    invokeStatic list makeNil
+    listVar <- storeUnnamedLocal
+    -- Loop over the string, building up a Haskell list of it
+    -- Create the index, starting at the length of the string and looping backwards over it
+    loadLocal stringVar
+    invokeVirtual Java.Lang.string $ NameType "length" $ MethodSignature [] (Returns IntType)
+    index <- storeUnnamedLocalInt
+    -- Loop condition: if the index is == 0, jump out of the loop
+    let body = do
+            loadLocal stringVar
+            loadLocalInt index
+            iconst_1
+            isub
+            dup
+            storeSpecificUnnamedLocalInt index
+            invokeVirtual Java.Lang.string charAt
+            invokeStatic char makeChar
+            loadLocal listVar
+            invokeStatic list makeCons
+            storeSpecificUnnamedLocal listVar
+            -- There should be a goto here but we skip it as we can't compute the offset yet
+    loopEscape32 <- Converter (lift $ getGenLength 0 [body]) >>= \case
+        [l] -> return l
+        x -> throwTextError $ "Illegal result from getGenlength: " <> showt x
+    let loopEscape = fromIntegral loopEscape32 + 3 -- Jump past the goto taking us back to the top of the loop
+    loadLocalInt index
+    i0 $ IF C_EQ (loopEscape + 3)
+    Converter $ lift body
+    goto $ -(loopEscape + 2) -- Jump to loading the index before the IFEQ
+    -- After loop: load the resulting haskell-land string onto the stack
+    loadLocal listVar
+
+getMakeMethod :: VariableName -> MethodSignature -> Converter (NameType Method)
+getMakeMethod v sig = gets (M.lookup v . topLevelRenames) >>= \case
+    Nothing -> throwTextError $ "Missing renaming for " <> showt v <> " in CodeGen"
+    Just renamed -> return $ NameType (toLazyByteString $ convertName $ "_make" <> jvmSanitise renamed) sig
 
 
 printTopOfStack :: MonadGenerator m => m ()

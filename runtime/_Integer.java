@@ -30,8 +30,7 @@ public class _Integer extends Data {
         return x.value.equals(y.value);
     }
 
-    @Override
-    public String toString() {
-        return "Integer: " + value;
+    public static String show(_Integer x) {
+        return x.toString();
     }
 }

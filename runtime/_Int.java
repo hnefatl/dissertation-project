@@ -36,8 +36,7 @@ public class _Int extends Data {
         return x.value < y.value;
     }
 
-    @Override
-    public String toString() {
-        return "Int: " + value;
+    public static String show(_Int x) {
+        return String.valueOf(x.value);
     }
 }

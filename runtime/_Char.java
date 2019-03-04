@@ -9,9 +9,4 @@ public class _Char extends Data {
     public static boolean eq(_Char x, _Char y) {
         return x.value == y.value;
     }
-
-    @Override
-    public String toString() {
-        return "Char: " + value;
-    }
 }

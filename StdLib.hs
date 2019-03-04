@@ -64,6 +64,21 @@ primEqIntEq :: Int -> Int -> Bool
 primEqIntegerEq :: Integer -> Integer -> Bool
 primEqCharEq :: Char -> Char -> Bool
 
+class Show a where
+    show :: a -> [Char]
+instance Show Char where
+    show c = [c]
+instance Show Int where
+    show = primShowIntShow
+instance Show Integer where
+    show = primShowIntegerShow
+instance Show Bool where
+    show True = "True"
+    show False = "False"
+
+primShowIntShow :: Int -> [Char]
+primShowIntegerShow :: Integer -> [Char]
+
 id x = x
 
 True && True = True

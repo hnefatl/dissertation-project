@@ -28,7 +28,9 @@ makeSimpleHook renamings symbol arity implementation =
     ,
         \cname -> do
             -- Create an "Impl" function that perform the action
-            void $ newMethod [ACC_PUBLIC, ACC_STATIC] (renameBs $ symbol <> "Impl") args ret implementation
+            void $ newMethod [ACC_PUBLIC, ACC_STATIC] (renameBs $ symbol <> "Impl") args ret $ do
+                setLocalVarCounter 2 -- Account for the two local arrays
+                implementation
             -- Make a function to create a Function object of the implementation function
             makeImpl <- compileMakerFunction (rename $ "make" <> symbol) arity 0 (rename $ symbol <> "Impl")
             -- Create a field we can treat as a variable in the program to call the crasher
@@ -65,6 +67,8 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntegerNegate" 1 $ invokeClassStaticMethod integer "negate" [integer] (Returns integerClass)
     , makeEq renamings "primEqIntegerEq" integer
     , makeEq renamings "primEqCharEq" char
+    , makeShow renamings "primShowIntShow" int
+    , makeShow renamings "primShowIntegerShow" integer
     ]
 
 invokeClassStaticMethod :: ByteString -> ByteString -> [ByteString] -> ReturnSignature -> Converter ()
@@ -93,7 +97,7 @@ makeEq :: M.Map VariableName VariableName -> VariableName -> ByteString -> (S.Se
 makeEq renamings implName cls = makeSimpleHook renamings implName 2 $ do
     -- Load and evaluate the arguments to Ints
     forM_ [0, 1] $ \arg -> do
-        aload_ I0
+        loadLocal 0
         pushInt arg
         aaload
         invokeVirtual heapObject enter
@@ -102,4 +106,15 @@ makeEq renamings implName cls = makeSimpleHook renamings implName 2 $ do
     invokeStatic cls $ NameType "eq" $ MethodSignature [cls', cls'] (Returns BoolType)
     -- Convert the Java Boolean to a Haskell Bool
     makeBoxedBool
+    i0 ARETURN
+
+makeShow :: M.Map VariableName VariableName -> VariableName -> ByteString -> (S.Set VariableName, Text -> Converter ())
+makeShow renamings implName cls = makeSimpleHook renamings implName 1 $ do
+    -- Load the argument and call `show` on it.
+    loadLocal 0
+    pushInt 0
+    aaload
+    let cls' = ObjectType $ unpack $ fromLazyByteString cls
+    invokeStatic cls $ NameType "show" $ MethodSignature [cls'] (Returns Java.Lang.stringClass)
+    makeBoxedString
     i0 ARETURN
