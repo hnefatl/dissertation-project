@@ -246,8 +246,6 @@ pushLit (LiteralChar c)   = do
     pushInt (fromEnum c)
     i2c
     invokeStatic char makeChar
-pushLit (LiteralString _) = throwTextError "Need support for strings"
-pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"
 
 pushInt :: MonadGenerator m => Int -> m ()
 pushInt (-1) = iconst_m1

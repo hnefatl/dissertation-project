@@ -71,16 +71,12 @@ instance TextShow Typeclass where
 
 -- |A literal value
 data Literal = LiteralInt Integer
-             | LiteralFrac Rational
              | LiteralChar Char
-             | LiteralString String
     deriving (Eq, Ord, Show, Generic)
 instance Hashable Literal
 instance TextShow Literal where
     showb (LiteralInt i)    = showb i
-    showb (LiteralFrac r)   = showb r
     showb (LiteralChar c)   = showb c
-    showb (LiteralString s) = showb s
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
@@ -459,28 +455,34 @@ guardedAltsToIla :: HsGuardedAlts -> Converter Expr
 guardedAltsToIla (HsUnGuardedAlt e) = expToIla e
 guardedAltsToIla HsGuardedAlts{}    = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
 
--- |Convert a HsLiteral to an equivalent ILA literal
--- TODO(kc506): Remove some of these. We can replace eg. frac with an application of the appropriate constructor, and
--- strings with their list of chars.
+-- TODO(kc506): Remove once we've changed altToIla to use patToIla, as this is unused
 litToIla :: HsLiteral -> Converter Literal
 litToIla (HsChar c)   = return $ LiteralChar c
-litToIla (HsString s) = return $ LiteralString s
 litToIla (HsInt i)    = return $ LiteralInt i
-litToIla (HsFrac r)   = return $ LiteralFrac r
 litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
 
+-- |Convert a HsLiteral to an equivalent ILA literal
 litToIlaExpr :: HsLiteral -> Type -> Converter Expr
-litToIlaExpr l t = litToIla l >>= \case
-    l'@LiteralInt{} -> asks (M.lookup "fromInteger" . topLevelRenames) >>= \case
-        Just funFromInteger -> asks (M.lookup (IsInstance "Num" t) . dictionaries) >>= \case
-            Just dictName -> do
-                let integerType = TypeCon $ TypeConstant "Integer" KindStar
-                    dictType = TypeApp (TypeCon $ TypeConstant "Num" $ KindFun KindStar KindStar) t KindStar
-                funFromIntegerType <- T.makeFun [dictType, integerType] t
-                return $ App (App (Var funFromInteger funFromIntegerType) (Var dictName dictType)) (Lit l' integerType)
-            Nothing -> throwError $ "No dictionary found for " <> showt (IsInstance "Num" t)
-        Nothing -> throwError "No renaming for fromInteger."
-    l' -> return $ Lit l' t
+litToIlaExpr (HsChar c) t = return $ Lit (LiteralChar c) t
+litToIlaExpr (HsString s) t = case T.unmakeApp t of
+    (conType, [elemType])
+        | conType /= T.typeList -> throwError $ "Expected list type, got: " <> showt t
+        | otherwise -> do
+            -- Convert each char to a literal, make an ILA list of the results
+            ls <- mapM (flip litToIlaExpr elemType . HsChar) s
+            makeList' ls elemType
+    _ -> throwError $ "Expected list type, got: " <> showt t
+litToIlaExpr HsFrac{} _ = throwError "Rationals not supported in ILA"
+litToIlaExpr (HsInt i) t = asks (M.lookup "fromInteger" . topLevelRenames) >>= \case
+    Just funFromInteger -> asks (M.lookup (IsInstance "Num" t) . dictionaries) >>= \case
+        Just dictName -> do
+            let integerType = TypeCon $ TypeConstant "Integer" KindStar
+                dictType = TypeApp (TypeCon $ TypeConstant "Num" $ KindFun KindStar KindStar) t KindStar
+            funFromIntegerType <- T.makeFun [dictType, integerType] t
+            return $ App (App (Var funFromInteger funFromIntegerType) (Var dictName dictType)) (Lit (LiteralInt i) integerType)
+        Nothing -> throwError $ "No dictionary found for " <> showt (IsInstance "Num" t)
+    Nothing -> throwError "No renaming for fromInteger."
+litToIlaExpr l _ = throwError $ "Unboxed primitives not supported: " <> synPrint l
 
 
 -- |Wrapper around patToBindings' that ensures we don't generate two bindings for simple variable bindings.
@@ -671,12 +673,8 @@ instance AlphaEq a => AlphaEq (Alt a) where
 instance AlphaEq Literal where
     alphaEq' (LiteralInt i1) (LiteralInt i2) =
         unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
-    alphaEq' (LiteralFrac f1) (LiteralFrac f2) =
-        unless (f1 == f2) $ throwError $ "Rational literal mismatch:" <> showt f1 <> " vs " <> showt f2
     alphaEq' (LiteralChar c1) (LiteralChar c2) =
         unless (c1 == c2) $ throwError $ "Character literal mismatch:" <> showt c1 <> " vs " <> showt c2
-    alphaEq' (LiteralString s1) (LiteralString s2) =
-        unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
 instance AlphaEq AltConstructor where
     alphaEq' (DataCon con1 vs1) (DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
