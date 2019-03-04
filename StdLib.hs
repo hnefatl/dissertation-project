@@ -1,5 +1,6 @@
 data Int
 data Integer
+data Char
 data [] a = [] | a : [a]
 data (,) a b = (,) a b
 data (,,) a b c = (,,) a b c
@@ -50,6 +51,9 @@ instance Eq Int where
 instance Eq Integer where
     (==) = primEqIntegerEq
     x /= y = not (x == y)
+instance Eq Char where
+    (==) = primEqCharEq
+    x /= y = not (x == y)
 instance Eq Bool where
     True == True = True
     False == False = True
@@ -58,6 +62,7 @@ instance Eq Bool where
 
 primEqIntEq :: Int -> Int -> Bool
 primEqIntegerEq :: Integer -> Integer -> Bool
+primEqCharEq :: Char -> Char -> Bool
 
 id x = x
 

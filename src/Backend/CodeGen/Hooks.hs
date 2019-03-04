@@ -19,7 +19,7 @@ import           JVM.ClassFile             hiding (Class, Field, Method, toStrin
 -- |Primitive (nonboxed) datatypes. These are partially defined in the syntax (eg. `data Int`) but shouldn't be compiled
 -- like other datatypes when it comes to code generation: we should rely on the runtime classes.
 primitiveTypes :: S.Set TypeVariableName
-primitiveTypes = S.fromList [ "_Int", "_Integer" ]
+primitiveTypes = S.fromList [ "_Int", "_Integer", "_Char" ]
 
 makeSimpleHook :: M.Map VariableName VariableName -> VariableName -> Int -> Converter () -> (S.Set VariableName, Text -> Converter ())
 makeSimpleHook renamings symbol arity implementation = 
@@ -64,6 +64,7 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntegerDiv" 2 $ invokeClassStaticMethod integer "div" [integer, integer] (Returns integerClass)
     , makeSimpleHook renamings "primNumIntegerNegate" 1 $ invokeClassStaticMethod integer "negate" [integer] (Returns integerClass)
     , makeEq renamings "primEqIntegerEq" integer
+    , makeEq renamings "primEqCharEq" char
     ]
 
 invokeClassStaticMethod :: ByteString -> ByteString -> [ByteString] -> ReturnSignature -> Converter ()

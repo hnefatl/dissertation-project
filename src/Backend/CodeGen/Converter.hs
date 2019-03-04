@@ -137,7 +137,7 @@ addDynamicMethod m = do
     return $ fromIntegral $ Seq.length ms
 
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer :: IsString s => s
+heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char :: IsString s => s
 heapObject = "HeapObject"
 function = "Function"
 thunk = "Thunk"
@@ -146,7 +146,8 @@ unboxedData = "Data"
 boxedData = "BoxedData"
 int = "_Int"
 integer = "_Integer"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass :: FieldType
+char = "_Char"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass :: FieldType
 heapObjectClass = ObjectType heapObject
 functionClass = ObjectType function
 thunkClass = ObjectType thunk
@@ -155,6 +156,7 @@ unboxedDataClass = ObjectType unboxedData
 boxedDataClass = ObjectType boxedData
 intClass = ObjectType int
 integerClass = ObjectType integer
+charClass = ObjectType char
 addArgument :: NameType Method
 addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
 enter :: NameType Method
@@ -175,6 +177,8 @@ makeInt :: NameType Method
 makeInt = NameType "_make_Int" $ MethodSignature [IntType] (Returns intClass)
 makeInteger :: NameType Method
 makeInteger = NameType "_make_Integer" $ MethodSignature [Java.Lang.stringClass] (Returns integerClass)
+makeChar :: NameType Method
+makeChar = NameType "_make_Char" $ MethodSignature [CharByte] (Returns charClass)
 boxedDataBranch :: NameType Field
 boxedDataBranch = NameType "branch" IntType
 boxedDataData :: NameType Field
@@ -237,7 +241,11 @@ pushLit :: Literal -> Converter ()
 pushLit (LiteralInt i)    = do
     loadString $ unpack $ showt i
     invokeStatic integer makeInteger
-pushLit (LiteralChar _)   = throwTextError "Need support for characters"
+pushLit (LiteralChar c)   = do
+    -- Push the integer equivalent char then JVM cast to char
+    pushInt (fromEnum c)
+    i2c
+    invokeStatic char makeChar
 pushLit (LiteralString _) = throwTextError "Need support for strings"
 pushLit (LiteralFrac _)   = throwTextError "Need support for rationals"
 
