@@ -42,7 +42,7 @@ instance TextShow NamedClass where
     showb = fromString . show
 
 data ConverterState = ConverterState
-    { -- The variable name that the entry point "_main" has been renamed to
+    { -- The variable name that the entry point "main" has been renamed to
       mainName        :: VariableName
     ,  -- Which JVM local variable we're up to
       localVarCounter :: LocalVar

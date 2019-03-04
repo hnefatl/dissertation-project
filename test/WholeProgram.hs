@@ -32,27 +32,27 @@ test :: TestTree
 test = testGroup "Whole Program" $ map makeTest
     [
         (
-            "_main = True"
+            "main = True"
         ,
             [text|
-                _main = True
+                main = True
             |]
         ,
             "Data: { branch: 1, data: { } }\n"
         )
     ,
         (
-            "_main = id id False"
+            "main = id id False"
         ,
             [text|
-                _main = id id False
+                main = id id False
             |]
         ,
             "Data: { branch: 0, data: { } }\n"
         )
     ,
         (
-            "_main = foo [True, False]"
+            "main = foo [True, False]"
         ,
             [text|
                 class Foo a where
@@ -62,29 +62,29 @@ test = testGroup "Whole Program" $ map makeTest
                 instance Foo [Bool] where
                     foo = all foo
 
-                _main = foo [True, False]
+                main = foo [True, False]
             |]
         ,
             "Data: { branch: 0, data: { } }\n"
         )
     ,
         (
-            "_main = (True, False, True)"
+            "main = (True, False, True)"
         ,
             [text|
-                _main = (True, False, True)
+                main = (True, False, True)
             |]
         ,
             "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }\n"
         )
     ,
         (
-            "_main = (\\(Foo x) -> x) (Foo True)"
+            "main = (\\(Foo x) -> x) (Foo True)"
         ,
             [text|
                 data Foo a = Foo a
 
-                _main = (\(Foo x) -> x) (Foo True)
+                main = (\(Foo x) -> x) (Foo True)
             |]
         ,
             "Data: { branch: 1, data: { } }\n"
@@ -95,53 +95,53 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             [text|
                 [x, y] = [False, True]
-                _main = x
+                main = x
             |]
         ,
             "Data: { branch: 0, data: { } }\n"
         )
     ,
         (
-            "_main = all not [False, True]"
+            "main = all not [False, True]"
         ,
             [text|
-                _main = all not [False, False]
+                main = all not [False, False]
             |]
         ,
             "Data: { branch: 1, data: { } }\n"
         )
     ,
         (
-            "_main = sum [1,2,3,4,5,6,7,8,9,10]"
+            "main = sum [1,2,3,4,5,6,7,8,9,10]"
         ,
             [text|
-                _main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
+                main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
             |]
         ,
             "Int: 55\n"
         )
     ,
         (
-            "_main = factorial 10"
+            "main = factorial 10"
         ,
             [text|
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
                 
-                _main = factorial 10 :: Int
+                main = factorial 10 :: Int
             |]
         ,
             "Int: 3628800\n"
         )
     ,
         (
-            "_main = factorial 50"
+            "main = factorial 50"
         ,
             [text|
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
                 
-                _main = factorial 50 :: Integer
+                main = factorial 50 :: Integer
             |]
         ,
             "Integer: 30414093201713378043612608166064768844377641568960512000000000000\n"
