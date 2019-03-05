@@ -114,6 +114,8 @@ makeShow renamings implName cls = makeSimpleHook renamings implName 1 $ do
     loadLocal 0
     pushInt 0
     aaload
+    invokeVirtual heapObject enter
+    checkCast cls
     let cls' = ObjectType $ unpack $ fromLazyByteString cls
     invokeStatic cls $ NameType "show" $ MethodSignature [cls'] (Returns Java.Lang.stringClass)
     makeBoxedString

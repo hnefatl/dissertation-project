@@ -3,7 +3,7 @@
 
 module Backend.CodeGen.Converter where
 
-import           BasicPrelude               hiding (encodeUtf8, head, init, inits)
+import           BasicPrelude               hiding (encodeUtf8, head, init, inits, swap)
 import           Control.Monad.Except       (Except, ExceptT, runExcept, throwError)
 import           Control.Monad.State.Strict (MonadState, StateT, get, gets, modify)
 import qualified Data.ByteString.Lazy       as B
@@ -23,7 +23,7 @@ import qualified JVM.ClassFile              as ClassFile
 
 import           Backend.ILA                (Datatype(..), Literal(..))
 import           Backend.ILB
-import           ExtraDefs                  (toLazyByteString)
+import           ExtraDefs                  (toLazyByteString, fromLazyByteString)
 import           Logger                     (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                      (TypeVariableName, VariableName(..), convertName)
@@ -362,16 +362,67 @@ makeBoxedString = do
             invokeStatic list makeCons
             storeSpecificUnnamedLocal listVar
             -- There should be a goto here but we skip it as we can't compute the offset yet
-    loopEscape32 <- Converter (lift $ getGenLength 0 [body]) >>= \case
+    bodyLength' <- Converter (lift $ getGenLength 0 [body]) >>= \case
         [l] -> return l
         x -> throwTextError $ "Illegal result from getGenlength: " <> showt x
-    let loopEscape = fromIntegral loopEscape32 + 3 -- Jump past the goto taking us back to the top of the loop
+    let bodyLength = fromIntegral bodyLength' + 3 -- Jump past the goto taking us back to the top of the loop
     loadLocalInt index
-    i0 $ IF C_EQ (loopEscape + 3)
+    i0 $ IF C_EQ (bodyLength + 3)
     Converter $ lift body
-    goto $ -(loopEscape + 2) -- Jump to loading the index before the IFEQ
+    goto $ -(bodyLength + 2) -- Jump to loading the index before the IFEQ
     -- After loop: load the resulting haskell-land string onto the stack
     loadLocal listVar
+
+makeUnboxedString :: Converter ()
+makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.lookup "[]" . datatypes) >>= \case
+    (Nothing, _) -> throwTextError "Can't find []"
+    (_, Nothing) -> throwTextError "No datatype []"
+    (Just nilName, Just d) -> case M.lookupIndex (jvmSanitise nilName) $ branches d of
+        Nothing -> throwTextError $ "No branch " <> showt (jvmSanitise nilName)
+        Just nilIndex -> do
+            let stringBuilder = "java/lang/StringBuilder"
+                sbAppend = NameType "append" $ MethodSignature [CharByte] (Returns $ ObjectType $ unpack $ fromLazyByteString stringBuilder)
+            -- Store the top-of-stack haskell-land string
+            checkCast list
+            listVar <- storeUnnamedLocal
+            -- Create a new stringbuilder, store it
+            new stringBuilder
+            dup
+            invokeSpecial stringBuilder Java.Lang.objectInit
+            builderVar <- storeUnnamedLocal
+            let body = do
+                    loadLocal builderVar
+                    loadLocal listVar
+                    getField list boxedDataData
+                    dup
+                    -- Load the rest of the list, overwrite our reference
+                    iconst_1
+                    aaload
+                    checkCast list
+                    storeSpecificUnnamedLocal listVar
+                    -- Load the head char, append to the builder, pop the returned reference
+                    iconst_0
+                    aaload
+                    checkCast char
+                    getField char $ NameType "value" CharByte
+                    invokeVirtual stringBuilder sbAppend
+                    pop
+                    -- Should be a jump back to the top of the loop here, we insert it after
+            bodyLength' <- Converter (lift $ getGenLength 0 [body]) >>= \case
+                [l] -> return l
+                x -> throwTextError $ "Illegal result from getGenlength: " <> showt x
+            let bodyLength = fromIntegral bodyLength' + 3 -- Adding goto offset
+            -- Head of the loop
+            loadLocal listVar
+            getField list boxedDataBranch
+            pushInt nilIndex
+            i0 $ IF_ICMP C_EQ (bodyLength + 3) -- We're at the end of the list, jump past the body
+            Converter $ lift body
+            goto $ -(bodyLength + 5) -- Jump to the head
+            -- Out of the loop, load the stringbuilder and get our final string
+            loadLocal builderVar
+            invokeVirtual stringBuilder toString
+
 
 getMakeMethod :: VariableName -> MethodSignature -> Converter (NameType Method)
 getMakeMethod v sig = gets (M.lookup v . topLevelRenames) >>= \case

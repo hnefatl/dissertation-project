@@ -58,19 +58,4 @@ public class Function extends HeapObject {
         f.arguments = new ArrayList<>(arguments);
         return f;
     }
-
-    @Override
-    public String toString() {
-        String res = "Function: { arity: " + arity + ", args: {";
-        for (HeapObject a : arguments) {
-            res += " " + String.valueOf(a);
-        }
-        res += " }, freeVars: {";
-        for (HeapObject a : freeVariables) {
-            res += " " + String.valueOf(a);
-        }
-        res += " } }";
-
-        return res;
-    }
 }

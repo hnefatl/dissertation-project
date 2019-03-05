@@ -31,6 +31,6 @@ public class _Integer extends Data {
     }
 
     public static String show(_Integer x) {
-        return x.toString();
+        return x.value.toString();
     }
 }

@@ -104,7 +104,7 @@ addMainMethod = do
         main <- jvmSanitise <$> gets mainName
         pushGlobalSymbol main heapObjectClass
         invokeVirtual heapObject force
-        invokeVirtual heapObject toString
+        makeUnboxedString -- Convert the result haskell string into a java string
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
 
