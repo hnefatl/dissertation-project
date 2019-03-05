@@ -8,7 +8,7 @@ import Test.Tasty.HUnit
 import BasicPrelude
 import Compiler          (Flags(outputJar))
 import Data.Default      (def)
-import Data.Text         (unpack)
+import Data.Text         (unpack, pack, strip)
 import NeatInterpolation
 import System.Exit       (ExitCode(ExitSuccess))
 import System.IO.Temp
@@ -26,7 +26,7 @@ makeTest (title, source, expected) = testCase title $ do
         unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
         (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
         unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
-        assertEqual buildOutput expected runOutput
+        assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
 
 test :: TestTree
 test = testGroup "Whole Program" $ map makeTest
@@ -38,7 +38,7 @@ test = testGroup "Whole Program" $ map makeTest
                 main = True
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
@@ -48,7 +48,7 @@ test = testGroup "Whole Program" $ map makeTest
                 main = id id False
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
@@ -65,7 +65,7 @@ test = testGroup "Whole Program" $ map makeTest
                 main = foo [True, False]
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
@@ -75,7 +75,7 @@ test = testGroup "Whole Program" $ map makeTest
                 main = (True, False, True)
             |]
         ,
-            "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }\n"
+            "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }"
         )
     ,
         (
@@ -84,10 +84,10 @@ test = testGroup "Whole Program" $ map makeTest
             [text|
                 data Foo a = Foo a
 
-                main = (\(Foo x) -> x) (Foo True)
+                main = show (\(Foo x) -> x) (Foo True)
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
@@ -95,30 +95,30 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             [text|
                 [x, y] = [False, True]
-                main = x
+                main = show x
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
             "main = all not [False, True]"
         ,
             [text|
-                main = all not [False, False]
+                main = show (all not [False, False])
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
             "main = sum [1,2,3,4,5,6,7,8,9,10]"
         ,
             [text|
-                main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
+                main = show (sum [1,2,3,4,5,6,7,8,9,10] :: Int)
             |]
         ,
-            "Int: 55\n"
+            "55"
         )
     ,
         (
@@ -128,10 +128,10 @@ test = testGroup "Whole Program" $ map makeTest
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
                 
-                main = factorial 10 :: Int
+                main = show (factorial 10 :: Int)
             |]
         ,
-            "Int: 3628800\n"
+            "3628800"
         )
     ,
         (
@@ -141,9 +141,9 @@ test = testGroup "Whole Program" $ map makeTest
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
                 
-                main = factorial 50 :: Integer
+                main = show (factorial 50 :: Integer)
             |]
         ,
-            "Integer: 30414093201713378043612608166064768844377641568960512000000000000\n"
+            "30414093201713378043612608166064768844377641568960512000000000000"
         )
     ]
