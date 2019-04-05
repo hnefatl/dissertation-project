@@ -229,3 +229,22 @@ heap).
 
 Should still do peephole pass: just remove things like `astore ; aload` and `goto 1`. Offsets are relative so after
 making changes need to scan backwards through bytecode and update offsets...
+
+## Known Bugs
+
+No ambiguity check.
+
+Means that programs like:
+
+```haskell
+foo :: (Num a, Eq b) => (a, b)
+foo = undefined
+
+(x, y) = foo
+
+main = print x
+```
+
+are allowed then generate a runtime compiler error, rather than being rejected. Issue here is that use sites of `x` and
+`y` should only need to provide either a `Num a` or an `Eq a`, but to compute either you actually need both. Ambiguity
+check in GHC catches this and rejects.
