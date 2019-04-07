@@ -15,6 +15,7 @@ import           Data.Foldable               (foldlM, null, toList)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
+import qualified Data.Text                   as T
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
@@ -126,13 +127,9 @@ getDictionaryExp p = do
     VariableName name <- getDictionary p
     return $ HsVar $ UnQual $ HsIdent $ unpack name
 
-makeDictName :: MonadNameGenerator m => TypePredicate -> m VariableName
-makeDictName (IsInstance (TypeVariableName cl) t) = do
-    TypeVariableName suffix <- case t of
-        TypeVar (TypeVariable tvn _) -> return tvn
-        TypeCon (TypeConstant tcn _) -> return tcn
-        TypeApp{}                    -> freshTypeVarName
-    return $ VariableName $ "d" <> cl <> suffix
+makeDictName :: TypePredicate -> VariableName
+makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> suffix
+    where suffix = T.filter (/= ' ') $ showt t
 
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do
@@ -144,7 +141,7 @@ quantifyType t = do
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
 deoverloadModule :: M.Map HsQName ClassInfo -> HsModule -> Deoverload HsModule
-deoverloadModule ci m@(HsModule a b c d decls) = do
+deoverloadModule ci (HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
@@ -281,8 +278,8 @@ deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)
         constraints = S.toAscList quals'
-    args <- mapM makeDictName constraints
-    let dictArgs = M.fromList $ zip constraints args
+        args = map makeDictName constraints
+        dictArgs = M.fromList $ zip constraints args
         funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
     writeLog $ "Processing match " <> showt name <> " " <> showt pats
     (wheres', rhs') <- addScopedDictionaries dictArgs $ (,) <$> deoverloadDecls wheres <*> deoverloadRhsWithoutAddingDicts rhs
@@ -304,8 +301,8 @@ deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint
         ks                <- getKinds
         Qualified quals _ <- synToQualType ks t
         let constraints = S.toAscList quals
-        args <- mapM makeDictName constraints
-        let funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
+            args = map makeDictName constraints
+            funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
             dictArgs = M.fromList $ zip constraints args
         e' <- addScopedDictionaries dictArgs (deoverloadRhsWithoutAddingDicts rhs) >>= \case
             HsUnGuardedRhs e' -> return e'

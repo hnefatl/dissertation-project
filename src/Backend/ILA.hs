@@ -423,7 +423,7 @@ expToIla (HsIf cond e1 e2) = do
     e2Exp   <- expToIla e2
     let alts = [ Alt (DataCon "True" []) e1Exp , Alt (DataCon "False" []) e2Exp ]
     return $ Case condExp [] alts
-expToIla (HsExpTypeSig _ (HsCase (HsExpTypeSig _ scrut scrutType) alts) caseType) = do
+expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseType) = do
     -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
     scrutBinder <- freshVarName
     scrutType' <- getSimpleFromSynType scrutType
@@ -435,11 +435,11 @@ expToIla HsTuple{} = throwError "HsTuple should've been removed in renamer"
 expToIla HsList{} = throwError "HsList should've been removed in renamer"
 expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
-expToIla e = throwError $ "Unsupported expression: " <> showt e
+expToIla e = throwError $ "Unsupported expression in ILA: " <> showt e
 
 -- Used to convert a HsAlt into the representation of an alt expected by patToIla
 altToPatList :: HsAlt -> Type -> ([HsPat], HsRhs, Type, NameSubstitution)
-altToPatList (HsAlt _ pat a wheres) rhsType = ([pat], guardedAltsToRhs a, rhsType, subEmpty)
+altToPatList (HsAlt _ pat a _) rhsType = ([pat], guardedAltsToRhs a, rhsType, subEmpty)
 
 guardedAltsToRhs :: HsGuardedAlts -> HsRhs
 guardedAltsToRhs (HsUnGuardedAlt e) = HsUnGuardedRhs e
@@ -547,7 +547,7 @@ patToIla ((v, t):vs) cs def = do
         -- To check literals we create a right-leaning tree of case statements, like:
         -- > case x == 0 of { True -> E1 ; False -> case x == 1 of { ... } }
         rs <- asks topLevelRenames
-        eqDictPlainName <- makeDictName $ IsInstance "Eq" t -- Might need to be renamed with a substitution below
+        let eqDictPlainName = makeDictName $ IsInstance "Eq" t -- Might need to be renamed with a substitution below
         eqDictType <- T.makeApp (T.TypeCon $ T.TypeConstant "Eq" (KindFun KindStar KindStar)) [t]
         case (M.lookup "True" rs, M.lookup "False" rs, M.lookup "==" rs) of
             (Nothing, _, _) -> throwError "True constructor not found in ILA lowering"
