@@ -93,13 +93,12 @@ getConstructorVariables :: AltConstructor -> [VariableName]
 getConstructorVariables (DataCon _ vs) = vs
 getConstructorVariables _              = []
 -- |A constructor that can be used in an alternative statement
-data AltConstructor = DataCon VariableName [VariableName] | LitCon Literal | Default
+data AltConstructor = DataCon VariableName [VariableName] | Default
     deriving (Eq, Ord, Show, Generic)
 instance Hashable AltConstructor
 instance TextShow AltConstructor where
     showb (DataCon n vs) = showb n <> (if null vs then "" else " " <> args)
         where args = mconcat $ intersperse " " $ map showb vs
-    showb (LitCon l)  = showb l
     showb Default     = "default"
 isDefaultAlt :: Alt a -> Bool
 isDefaultAlt (Alt Default _) = True
@@ -107,9 +106,6 @@ isDefaultAlt _               = False
 isDataAlt :: Alt a -> Bool
 isDataAlt (Alt DataCon{} _) = True
 isDataAlt _                 = False
-isLiteralAlt :: Alt a -> Bool
-isLiteralAlt (Alt (LitCon _) _) = True
-isLiteralAlt _                  = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
@@ -391,7 +387,7 @@ expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
-expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
+expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     argNames <- replicateM (length pats) freshVarName
     expType <- getSimpleFromSynType t
     (argTypes, _) <- T.unmakeFun expType
@@ -403,8 +399,8 @@ expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- We need to keep track of any dictionaries being passed in, so lower functions can use them.
     let convert (_, Nothing)   = Nothing
-        convert (n, Just pred) = Just (pred, n)
-    dictionaryArgs <- M.fromList . catMaybes . map convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
+        convert (n, Just predicate) = Just (predicate, n)
+    dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addTypes patVariableTypes . addDictionaries dictionaryArgs) $ addRenamings renames $
         patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
@@ -540,7 +536,7 @@ patToIla ((v, t):vs) cs def = do
         -- Keep track of dictionary arguments being passed in
         dictionaryArgs <- dictionaryArgToTypePred t <&> \case
             Nothing -> M.empty
-            Just pred -> M.singleton pred v
+            Just predicate -> M.singleton predicate v
         local (addTypes newTypes . addDictionaries dictionaryArgs) $
             patToIla vs pats' def
     else if allLiteral then do
@@ -627,13 +623,11 @@ instance HasFreeVariables a => HasFreeVariables (Alt a) where
     getFreeVariables (Alt c e) = S.difference <$> getFreeVariables e <*> getFreeVariables c
 instance HasFreeVariables AltConstructor where
     getFreeVariables Default        = return S.empty
-    getFreeVariables LitCon{}       = return S.empty
     getFreeVariables (DataCon _ vs) = return $ S.fromList vs
 instance HasBoundVariables (Alt a) where
     getBoundVariablesAndConflicts (Alt c _) = getBoundVariablesAndConflicts c
 instance HasBoundVariables AltConstructor where
     getBoundVariablesAndConflicts Default          = return M.empty
-    getBoundVariablesAndConflicts LitCon{}         = return M.empty
     getBoundVariablesAndConflicts (DataCon con vs) = return $ M.fromList $ zip (con:vs) (repeat $ S.singleton SymDef)
 instance HasBoundVariables (Binding a) where
     getBoundVariablesAndConflicts (NonRec v _) = return $ M.singleton v (S.singleton SymDef)
@@ -668,7 +662,6 @@ instance AlphaEq Literal where
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
 instance AlphaEq AltConstructor where
     alphaEq' (DataCon con1 vs1) (DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
-    alphaEq' (LitCon l1) (LitCon l2) = alphaEq' l1 l2
     alphaEq' Default Default = return ()
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
 instance AlphaEq Expr where

@@ -50,7 +50,6 @@ instance JVMSanitisable a => JVMSanitisable (Alt a) where
     jvmSanitise (Alt c e) = Alt (jvmSanitise c) (jvmSanitise e)
 instance JVMSanitisable AltConstructor where
     jvmSanitise (DataCon v vs) = DataCon (jvmSanitise v) (jvmSanitises vs)
-    jvmSanitise l@LitCon{}     = l
     jvmSanitise Default        = Default
 instance JVMSanitisable a => JVMSanitisable (Binding a) where
     jvmSanitise (NonRec v e) = NonRec (jvmSanitise v) (jvmSanitise e)

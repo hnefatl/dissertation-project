@@ -36,7 +36,7 @@ import           Backend.CodeGen.Hooks          (compilerGeneratedHooks, primiti
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise, jvmSanitises)
 import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
                                                  getBindingVariables, getBranchNames, getConstructorVariables,
-                                                 isDataAlt, isDefaultAlt, isLiteralAlt)
+                                                 isDataAlt, isDefaultAlt)
 import           Backend.ILB
 import           ExtraDefs                      (toLazyByteString, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
@@ -383,9 +383,6 @@ sortAlts alts@(Alt (DataCon con _) _:_) = do
                 getDataCon _                     = error "Compiler error: can only have datacons here"
                 okay = all ((`S.member` bs) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
-            let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` S.toAscList bs, a)) alts
+            let alts' = map (\a -> (fromIntegral $ fromJust $ getDataCon a `elemIndex` S.toAscList bs, a)) alts
             return $ sortOn fst alts'
-sortAlts alts@(Alt (LitCon _) _:_) = do
-    unless (all isLiteralAlt alts) $ throwTextError $ unlines ["Alt mismatch: expected all literal alts", showt alts]
-    throwTextError $ unlines ["Need to refactor literals to only be int/char before doing this", showt alts]
 sortAlts alts@(Alt Default _:_) = throwTextError $ unlines ["Can't have Default constructor", showt alts]

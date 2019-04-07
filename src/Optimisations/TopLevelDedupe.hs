@@ -62,7 +62,6 @@ renameAlt ren (Alt c e) = Alt (renameAltConstructor ren c) (renameExp ren e)
 
 renameAltConstructor :: M.Map VariableName VariableName -> AltConstructor -> AltConstructor
 renameAltConstructor ren (DataCon c vs) = DataCon c (map (renameVar ren) vs)
-renameAltConstructor _ l@LitCon{}       = l
 renameAltConstructor _ Default          = Default
 
 renameBinding :: M.Map VariableName VariableName -> Binding Rhs -> Binding Rhs

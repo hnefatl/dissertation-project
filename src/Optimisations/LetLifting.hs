@@ -44,7 +44,6 @@ reorderLets bound e = do
 reorderAltLets :: LetLifter m => S.Set VariableName -> Alt Exp -> m (Alt Exp, [Node])
 reorderAltLets bound (Alt c e) = first (Alt c) <$> reorderLets (S.union (getBound c) bound) e
     where getBound Default        = S.empty
-          getBound LitCon{}       = S.empty
           getBound (DataCon _ vs) = S.fromList vs
 reorderRhsLets :: LetLifter m => S.Set VariableName -> Rhs -> m (Rhs, [Node])
 reorderRhsLets bound (RhsClosure vs e) = do
