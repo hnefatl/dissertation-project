@@ -20,7 +20,7 @@ import           Data.Text.Lazy                 (fromStrict)
 import           Data.Text.Lazy.Encoding        (encodeUtf8)
 import           Data.Word                      (Word16)
 import           System.FilePath                ((<.>), (</>))
-import           TextShow                       (showt)
+import           TextShow                       (TextShow, showt)
 
 import           Java.ClassPath
 import qualified Java.IO
@@ -370,7 +370,7 @@ bindDataVariables headType vs = do
 
 
 -- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
-sortAlts :: [Alt a] -> Converter [(Word32, Alt a)]
+sortAlts :: TextShow a => [Alt a] -> Converter [(Word32, Alt a)]
 sortAlts [] = return []
 sortAlts alts@(Alt (DataCon con _) _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
@@ -386,6 +386,6 @@ sortAlts alts@(Alt (DataCon con _) _:_) = do
             let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` S.toAscList bs, a)) alts
             return $ sortOn fst alts'
 sortAlts alts@(Alt (LitCon _) _:_) = do
-    unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"
-    throwTextError "Need to refactor literals to only be int/char before doing this"
-sortAlts (Alt Default _:_) = throwTextError "Can't have Default constructor"
+    unless (all isLiteralAlt alts) $ throwTextError $ unlines ["Alt mismatch: expected all literal alts", showt alts]
+    throwTextError $ unlines ["Need to refactor literals to only be int/char before doing this", showt alts]
+sortAlts alts@(Alt Default _:_) = throwTextError $ unlines ["Can't have Default constructor", showt alts]

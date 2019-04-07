@@ -375,10 +375,6 @@ conDeclToBranch (HsConDecl _ name ts) = do
     return (convertName name, ts')
 conDeclToBranch d@HsRecDecl{} = throwError $ "Record datatypes not supported:\n" <> showt d
 
-rhsType :: HsRhs -> Converter Type
-rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = getSimpleFromSynType t
-rhsType (HsUnGuardedRhs _)                    = throwError "Missing explicit type sig on top-level expression in RHS"
-rhsType (HsGuardedRhss _)                     = throwError "Guarded RHS not supported"
 rhsToIla :: HsRhs -> Converter Expr
 rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
@@ -427,36 +423,30 @@ expToIla (HsIf cond e1 e2) = do
     e2Exp   <- expToIla e2
     let alts = [ Alt (DataCon "True" []) e1Exp , Alt (DataCon "False" []) e2Exp ]
     return $ Case condExp [] alts
-expToIla (HsCase scrut alts) = do
+expToIla (HsExpTypeSig _ (HsCase (HsExpTypeSig _ scrut scrutType) alts) caseType) = do
+    -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
+    scrutBinder <- freshVarName
+    scrutType' <- getSimpleFromSynType scrutType
+    caseType' <- getSimpleFromSynType caseType
     scrut' <- expToIla scrut
-    alts' <- mapM altToIla alts
-    return $ Case scrut' [] alts'
+    body <- patToIla [(scrutBinder, scrutType')] [ altToPatList a caseType' | a <- alts ] (makeError caseType')
+    return $ Let scrutBinder scrutType' scrut' body
 expToIla HsTuple{} = throwError "HsTuple should've been removed in renamer"
 expToIla HsList{} = throwError "HsList should've been removed in renamer"
 expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
 expToIla e = throwError $ "Unsupported expression: " <> showt e
 
--- Big TODO(kc506): Need to handle any pattern, not just this subset. So need to find a way to reuse patToIla to
--- construct alts.... Handle anything other than these types by using patToIla and using altToIla in the body?
-altToIla :: HsAlt -> Converter (Alt Expr)
-altToIla (HsAlt _ pat alts wheres) = helper pat
-    where helper p = case p of
-            HsPApp con vs -> Alt (DataCon (convertName con) (map patToVar vs)) <$> guardedAltsToIla alts
-            HsPInfixApp p1 con p2 -> Alt (DataCon (convertName con) [patToVar p1, patToVar p2]) <$> guardedAltsToIla alts
-            HsPLit l      -> Alt <$> (LitCon <$> litToIla l) <*> guardedAltsToIla alts
-            HsPWildCard   -> Alt Default <$> guardedAltsToIla alts
-            HsPParen p'   -> helper p'
-            _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
-          patToVar (HsPVar v) = convertName v
-          patToVar _          = error "Non-variable in ILA, need to rework case alt patterns"
+-- Used to convert a HsAlt into the representation of an alt expected by patToIla
+altToPatList :: HsAlt -> Type -> ([HsPat], HsRhs, Type, NameSubstitution)
+altToPatList (HsAlt _ pat a wheres) rhsType = ([pat], guardedAltsToRhs a, rhsType, subEmpty)
 
-guardedAltsToIla :: HsGuardedAlts -> Converter Expr
-guardedAltsToIla (HsUnGuardedAlt e) = expToIla e
-guardedAltsToIla HsGuardedAlts{}    = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
+guardedAltsToRhs :: HsGuardedAlts -> HsRhs
+guardedAltsToRhs (HsUnGuardedAlt e) = HsUnGuardedRhs e
+guardedAltsToRhs (HsGuardedAlts as) = HsGuardedRhss [ HsGuardedRhs l cond e | HsGuardedAlt l cond e <- as ]
 
 -- TODO(kc506): Remove once we've changed altToIla to use patToIla, as this is unused
-litToIla :: HsLiteral -> Converter Literal
+litToIla :: MonadError Text m => HsLiteral -> m Literal
 litToIla (HsChar c)   = return $ LiteralChar c
 litToIla (HsInt i)    = return $ LiteralInt i
 litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l

@@ -15,6 +15,8 @@ public class Function extends HeapObject {
         arguments = new ArrayList<>();
     }
 
+    // Use a "entered" variable to either return the old value or compute the new one?
+    // We *want* to mutate this function so that multiple references to the same value don't recompute.
     @Override
     public HeapObject enter() {
         if (arguments.size() < arity) {

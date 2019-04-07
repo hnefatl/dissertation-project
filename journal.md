@@ -232,19 +232,22 @@ making changes need to scan backwards through bytecode and update offsets...
 
 ## Known Bugs
 
-No ambiguity check.
+- No ambiguity check.
 
-Means that programs like:
+  Means that programs like:
 
-```haskell
-foo :: (Num a, Eq b) => (a, b)
-foo = undefined
+  ```haskell
+  foo :: (Num a, Eq b) => (a, b)
+  foo = undefined
+  
+  (x, y) = foo
+  
+  main = print x
+  ```
 
-(x, y) = foo
+  are allowed then generate a runtime compiler error, rather than being rejected. Issue here is that use sites of `x` and
+  `y` should only need to provide either a `Num a` or an `Eq a`, but to compute either you actually need both. Ambiguity
+  check in GHC catches this and rejects.
 
-main = print x
-```
-
-are allowed then generate a runtime compiler error, rather than being rejected. Issue here is that use sites of `x` and
-`y` should only need to provide either a `Num a` or an `Eq a`, but to compute either you actually need both. Ambiguity
-check in GHC catches this and rejects.
+- `case` expressions for literals need to get translated to equality checks. Already happens for pattern matching, **but
+   not case statements in general**.
