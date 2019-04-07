@@ -32,27 +32,27 @@ test :: TestTree
 test = testGroup "Whole Program" $ map makeTest
     [
         (
-            "main = True"
+            "main = show True"
         ,
             [text|
-                main = True
+                main = show True
             |]
         ,
             "True"
         )
     ,
         (
-            "main = id id False"
+            "main = show (id id False)"
         ,
             [text|
-                main = id id False
+                main = show (id id False)
             |]
         ,
             "False"
         )
     ,
         (
-            "main = foo [True, False]"
+            "main = show (foo [True, False])"
         ,
             [text|
                 class Foo a where
@@ -62,29 +62,31 @@ test = testGroup "Whole Program" $ map makeTest
                 instance Foo [Bool] where
                     foo = all foo
 
-                main = foo [True, False]
+                main = show (foo [True, False])
             |]
         ,
             "False"
         )
     ,
         (
-            "main = (True, False, True)"
+            "main = show (snd (True, 0 :: Int))"
         ,
             [text|
-                main = (True, False, True)
+                snd (_, y) = y
+
+                main = show (snd (True, 0 :: Int))
             |]
         ,
-            "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }"
+            "0"
         )
     ,
         (
-            "main = (\\(Foo x) -> x) (Foo True)"
+            "main = show ((\\(Foo x) -> x) (Foo True))"
         ,
             [text|
                 data Foo a = Foo a
 
-                main = show (\(Foo x) -> x) (Foo True)
+                main = show ((\(Foo x) -> x) (Foo True))
             |]
         ,
             "True"
