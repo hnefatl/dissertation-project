@@ -5,7 +5,9 @@ module WholeProgram where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import BasicPrelude
+import BasicPrelude hiding (unwords)
+import Data.List (unwords)
+import qualified Data.Set as S
 import Compiler          (Flags(outputJar))
 import Data.Default      (def)
 import Data.Text         (unpack, pack, strip)
@@ -15,21 +17,29 @@ import System.IO.Temp
 import System.Process    (readProcessWithExitCode)
 
 
-makeTest :: (String, Text, String) -> TestTree
-makeTest (title, source, expected) = testCase title $ do
-    tempDir <- getCanonicalTemporaryDirectory
-    withTempDirectory tempDir "compiler-test" $ \dir -> do
-        sourceFile <- writeTempFile dir "compiler-test" (unpack source)
-        let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, dir </> sourceFile]
-            runArgs = ["-noverify", "-jar", dir </> outputJar def]
-        (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
-        unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
-        (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
-        unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
-        assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
+makeTest :: (String, Text, String) -> [TestTree]
+makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimisations)
+    where optimisations = S.fromList ["-l", "-t"]
+          makeTest' opts = do
+            let optList = S.toList opts
+            testCase (makeTitle title optList) $ do
+                tempDir <- getCanonicalTemporaryDirectory
+                withTempDirectory tempDir "compiler-test" $ \dir -> do
+                    sourceFile <- writeTempFile dir "compiler-test" (unpack source)
+                    let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, dir </> sourceFile] <> optList
+                        runArgs = ["-noverify", "-jar", dir </> outputJar def]
+                    (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
+                    unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
+                    (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
+                    unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
+                    assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
+
+makeTitle :: String -> [String] -> String
+makeTitle title [] = title
+makeTitle title opts = unwords $ title:"with":opts
 
 test :: TestTree
-test = testGroup "Whole Program" $ map makeTest
+test = testGroup "Whole Program" $ concatMap makeTest
     [
         (
             "main = show True"

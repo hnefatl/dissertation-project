@@ -33,7 +33,7 @@ import           Preprocessor.Renamer    (evalRenamer, renameModule)
 import           Preprocessor.Info       (getModuleKinds, getClassInfo)
 import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, inferModule)
 import Optimisations.LetLifting (performLetLift)
-import Optimisations.TopLevelDedupe (performTopLevelDedupe)
+import Optimisations.BindingDedupe (dedupe)
 
 data Flags = Flags
     { verbose         :: Bool
@@ -83,7 +83,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             m <- if noStdImport flags then return originalModule else mergePreludeModule originalModule
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
-                -- TODO(kc506): Pass this into the typechecker and deoverloader rather than recomputing there
                 moduleClassInfo = getClassInfo renamedModule
             ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
@@ -94,7 +93,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 dicts  = Deoverloader.dictionaries deoverloadState
                 dictNames = S.map convertName $ M.keysSet moduleClassInfo
             writeLog $ unlines ["Deoverloaded module:", synPrint deoverloadedModule]
-            when (verbose flags) $ writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
+            writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             deoverloadedTypes <- mapM deoverloadQuantType types'
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
@@ -102,23 +101,21 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             mainName <- case M.lookup "main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n
-            when (verbose flags) $ writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
+            writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
             ilaanf <- catchAddText (unlines $ map showt ila) $ ILAANF.ilaToAnf ila
-            when (verbose flags) $ writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
+            writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
             ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
-            when (verbose flags) $ writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
-            ilb' <- case letLift flags of
-                True -> do
-                    ilb' <- performLetLift ilb
-                    when (verbose flags) $ writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
-                    return ilb'
-                False -> return ilb
-            ilb'' <- case topLevelDedupe flags of
-                True -> do
-                    ilb'' <- performTopLevelDedupe ilb'
-                    when (verbose flags) $ writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
-                    return ilb''
-                False -> return ilb'
+            writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
+            ilb' <- if letLift flags then do
+                        ilb' <- performLetLift ilb
+                        writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
+                        return ilb'
+                    else return ilb
+            ilb'' <- if topLevelDedupe flags then do
+                        ilb'' <- dedupe ilb'
+                        writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
+                        return ilb''
+                    else return ilb'
             compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags

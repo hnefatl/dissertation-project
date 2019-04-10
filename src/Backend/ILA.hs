@@ -75,8 +75,8 @@ data Literal = LiteralInt Integer
     deriving (Eq, Ord, Show, Generic)
 instance Hashable Literal
 instance TextShow Literal where
-    showb (LiteralInt i)    = showb i
-    showb (LiteralChar c)   = showb c
+    showb (LiteralInt i)  = showb i
+    showb (LiteralChar c) = showb c
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
@@ -398,7 +398,7 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
     -- We need to keep track of any dictionaries being passed in, so lower functions can use them.
-    let convert (_, Nothing)   = Nothing
+    let convert (_, Nothing)        = Nothing
         convert (n, Just predicate) = Just (predicate, n)
     dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
@@ -443,9 +443,9 @@ guardedAltsToRhs (HsGuardedAlts as) = HsGuardedRhss [ HsGuardedRhs l cond e | Hs
 
 -- TODO(kc506): Remove once we've changed altToIla to use patToIla, as this is unused
 litToIla :: MonadError Text m => HsLiteral -> m Literal
-litToIla (HsChar c)   = return $ LiteralChar c
-litToIla (HsInt i)    = return $ LiteralInt i
-litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
+litToIla (HsChar c) = return $ LiteralChar c
+litToIla (HsInt i)  = return $ LiteralInt i
+litToIla l          = throwError $ "Unboxed primitives not supported: " <> showt l
 
 -- |Convert a HsLiteral to an equivalent ILA literal
 litToIlaExpr :: HsLiteral -> Type -> Converter Expr
