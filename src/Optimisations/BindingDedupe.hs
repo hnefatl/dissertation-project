@@ -55,17 +55,6 @@ performDedupe v rhs = performDedupes [(v, rhs)] >>= \case
     [] -> return Nothing
     [(_, rhs')] -> return (Just rhs')
     _ -> throwError "Weird result from performDedupes"
---performDedupe :: DedupeMonad m => VariableName -> Rhs -> m (Maybe Rhs)
---performDedupe v rhs = asks (HM.lookup rhs . rhss) >>= \case
---    Nothing -> do
---        -- We now have a name for this rhs
---        mofify (\s -> s { rhss = HM.insert rhs v (rhss s) })
---        Just <$> dedupeRhs rhs
---    Just v' -> do
---        -- There's already a name for this rhs, record that we should rename this variable name to that name
---        modify (\s -> s { renamings = M.insert v v' (renamings s) })
---        -- We've already seen an identical RHS, we can just eliminate this one
---        return Nothing
 
 getHashedBindings :: MonadError Text m => [Binding Rhs] -> m (HM.HashMap Rhs (S.Set VariableName))
 getHashedBindings = fmap (foldl' (HM.unionWith S.union) HM.empty) . mapM getHashedBinding
