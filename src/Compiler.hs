@@ -5,35 +5,36 @@
 module Compiler where
 
 import           BasicPrelude
-import           Control.Monad.Except    (MonadError, Except, ExceptT, runExcept, runExceptT, throwError, withExceptT, liftEither)
-import           Control.Exception       (try)
-import           Data.Default            (Default, def)
-import qualified Data.Map                as M
-import qualified Data.Set                as S
-import           Data.Text               (pack, unpack)
-import           System.Exit             (exitFailure)
-import           System.FilePath.Glob    as Glob (compile, globDir1)
-import           System.Process          (callProcess)
-import           TextShow                (TextShow, showt)
+import           Control.Exception           (try)
+import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
+                                              throwError, withExceptT)
+import           Data.Default                (Default, def)
+import qualified Data.Map                    as M
+import qualified Data.Set                    as S
+import           Data.Text                   (pack, unpack)
+import           System.Exit                 (exitFailure)
+import           System.FilePath.Glob        as Glob (compile, globDir1)
+import           System.Process              (callProcess)
+import           TextShow                    (TextShow, showt)
 
-import           ExtraDefs               (inverseMap, pretty, synPrint)
-import           Logger                  (LoggerT, runLoggerT, writeLog, writeLogs)
-import           NameGenerator           (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
-import           Names                   (VariableName, convertName)
+import           ExtraDefs                   (inverseMap, pretty, synPrint)
+import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
+import           NameGenerator               (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
+import           Names                       (VariableName, convertName)
 
-import qualified Backend.CodeGen         as CodeGen (convert, writeClass)
-import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
-import qualified Backend.Deoverload      as Deoverloader
-import qualified Backend.ILA             as ILA (datatypes, reverseRenamings, runConverter, toIla)
-import qualified Backend.ILAANF          as ILAANF (ilaToAnf)
-import qualified Backend.ILB             as ILB (anfToIlb)
-import           Language.Haskell.Parser (ParseResult(..), parseModule)
-import           Language.Haskell.Syntax (HsModule(..))
-import           Preprocessor.Renamer    (evalRenamer, renameModule)
-import           Preprocessor.Info       (getModuleKinds, getClassInfo)
-import           Typechecker.Typechecker (evalTypeInferrer, getClassEnvironment, inferModule)
-import Optimisations.LetLifting (performLetLift)
-import Optimisations.BindingDedupe (dedupe)
+import qualified Backend.CodeGen             as CodeGen (convert, writeClass)
+import           Backend.Deoverload          (deoverloadModule, deoverloadQuantType, runDeoverload)
+import qualified Backend.Deoverload          as Deoverloader
+import qualified Backend.ILA                 as ILA (datatypes, reverseRenamings, runConverter, toIla)
+import qualified Backend.ILAANF              as ILAANF (ilaToAnf)
+import qualified Backend.ILB                 as ILB (anfToIlb)
+import           Language.Haskell.Parser     (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax     (HsModule(..))
+import           Optimisations.BindingDedupe (dedupe)
+import           Optimisations.LetLifting    (performLetLift)
+import           Preprocessor.Info           (getClassInfo, getModuleKinds)
+import           Preprocessor.Renamer        (evalRenamer, renameModule)
+import           Typechecker.Typechecker     (evalTypeInferrer, getClassEnvironment, inferModule)
 
 data Flags = Flags
     { verbose         :: Bool

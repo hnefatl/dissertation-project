@@ -3,31 +3,31 @@
 
 module Backend.CodeGen.Converter where
 
-import           BasicPrelude               hiding (encodeUtf8, head, init, inits, swap)
-import           Control.Monad.Except       (Except, ExceptT, runExcept, throwError)
-import           Control.Monad.State.Strict (MonadState, StateT, get, gets, modify)
-import qualified Data.ByteString.Lazy       as B
-import           Data.Functor               (void)
-import           Data.Text                  (unpack)
-import qualified Data.Map.Strict            as M
-import qualified Data.Sequence              as Seq
-import           Data.Word                  (Word16)
-import           TextShow                   (TextShow, showb, showt)
+import           BasicPrelude                   hiding (encodeUtf8, head, init, inits, swap)
+import           Control.Monad.Except           (Except, ExceptT, runExcept, throwError)
+import           Control.Monad.State.Strict     (MonadState, StateT, get, gets, modify)
+import qualified Data.ByteString.Lazy           as B
+import           Data.Functor                   (void)
+import qualified Data.Map.Strict                as M
+import qualified Data.Sequence                  as Seq
+import           Data.Text                      (unpack)
+import           Data.Word                      (Word16)
+import           TextShow                       (TextShow, showb, showt)
 
-import qualified Java.Lang
 import qualified Java.IO
+import qualified Java.Lang
 import           JVM.Assembler
-import           JVM.Builder                hiding (locals)
-import           JVM.ClassFile              hiding (Class, Field, Method, toString)
-import qualified JVM.ClassFile              as ClassFile
+import           JVM.Builder                    hiding (locals)
+import           JVM.ClassFile                  hiding (Class, Field, Method, toString)
+import qualified JVM.ClassFile                  as ClassFile
 
-import           Backend.ILA                (Datatype(..), Literal(..))
-import           Backend.ILB
-import           ExtraDefs                  (toLazyByteString, fromLazyByteString)
-import           Logger                     (LoggerT, MonadLogger, writeLog)
-import           NameGenerator
-import           Names                      (TypeVariableName, VariableName(..), convertName)
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
+import           Backend.ILA                    (Datatype(..), Literal(..))
+import           Backend.ILB
+import           ExtraDefs                      (fromLazyByteString, toLazyByteString)
+import           Logger                         (LoggerT, MonadLogger, writeLog)
+import           NameGenerator
+import           Names                          (TypeVariableName, VariableName(..), convertName)
 
 type Class = ClassFile.Class ClassFile.Direct
 type OutputClass = ClassFile.Class ClassFile.File

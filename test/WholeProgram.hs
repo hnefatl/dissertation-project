@@ -2,19 +2,19 @@
 
 module WholeProgram where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import           Test.Tasty
+import           Test.Tasty.HUnit
 
-import BasicPrelude hiding (unwords)
-import Data.List (unwords)
-import qualified Data.Set as S
-import Compiler          (Flags(outputJar))
-import Data.Default      (def)
-import Data.Text         (unpack, pack, strip)
-import NeatInterpolation
-import System.Exit       (ExitCode(ExitSuccess))
-import System.IO.Temp
-import System.Process    (readProcessWithExitCode)
+import           BasicPrelude      hiding (unwords)
+import           Compiler          (Flags(outputJar))
+import           Data.Default      (def)
+import           Data.List         (unwords)
+import qualified Data.Set          as S
+import           Data.Text         (pack, strip, unpack)
+import           NeatInterpolation
+import           System.Exit       (ExitCode(ExitSuccess))
+import           System.IO.Temp
+import           System.Process    (readProcessWithExitCode)
 
 
 makeTest :: (String, Text, String) -> [TestTree]
@@ -35,7 +35,7 @@ makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimi
                     assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
 
 makeTitle :: String -> [String] -> String
-makeTitle title [] = title
+makeTitle title []   = title
 makeTitle title opts = unwords $ title:"with":opts
 
 test :: TestTree
@@ -139,7 +139,7 @@ test = testGroup "Whole Program" $ concatMap makeTest
             [text|
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
-                
+
                 main = show (factorial 10 :: Int)
             |]
         ,
@@ -152,7 +152,7 @@ test = testGroup "Whole Program" $ concatMap makeTest
             [text|
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
-                
+
                 main = show (factorial 50 :: Integer)
             |]
         ,

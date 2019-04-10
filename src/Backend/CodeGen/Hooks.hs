@@ -2,18 +2,18 @@ module Backend.CodeGen.Hooks where
 
 import           Backend.CodeGen.Converter
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
-import           BasicPrelude              hiding (ByteString)
-import           Data.Text                 (unpack)
-import           Data.ByteString.Lazy      (ByteString)
-import qualified Data.Map.Strict           as M
-import qualified Data.Set                  as S
-import           ExtraDefs                 (toLazyByteString, fromLazyByteString)
-import           Names                     (VariableName(..), TypeVariableName, convertName)
+import           BasicPrelude                   hiding (ByteString)
+import           Data.ByteString.Lazy           (ByteString)
+import qualified Data.Map.Strict                as M
+import qualified Data.Set                       as S
+import           Data.Text                      (unpack)
+import           ExtraDefs                      (fromLazyByteString, toLazyByteString)
+import           Names                          (TypeVariableName, VariableName(..), convertName)
 
-import           Java.Lang                 (runtimeException, stringClass)
-import           JVM.Builder               hiding (locals)
+import           Java.Lang                      (runtimeException, stringClass)
 import           JVM.Assembler
-import           JVM.ClassFile             hiding (Class, Field, Method, toString)
+import           JVM.Builder                    hiding (locals)
+import           JVM.ClassFile                  hiding (Class, Field, Method, toString)
 
 
 -- |Primitive (nonboxed) datatypes. These are partially defined in the syntax (eg. `data Int`) but shouldn't be compiled
@@ -22,7 +22,7 @@ primitiveTypes :: S.Set TypeVariableName
 primitiveTypes = S.fromList [ "_Int", "_Integer", "_Char" ]
 
 makeSimpleHook :: M.Map VariableName VariableName -> VariableName -> Int -> Converter () -> (S.Set VariableName, Text -> Converter ())
-makeSimpleHook renamings symbol arity implementation = 
+makeSimpleHook renamings symbol arity implementation =
     (
         S.fromList [renameVar $ symbol <> "Impl", renameVar $ "make" <> symbol, renameVar symbol]
     ,

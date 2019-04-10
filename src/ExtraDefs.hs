@@ -2,7 +2,7 @@
 
 module ExtraDefs where
 
-import           BasicPrelude            hiding (encodeUtf8, decodeUtf8, intercalate)
+import           BasicPrelude            hiding (decodeUtf8, encodeUtf8, intercalate)
 import           Control.Monad.Except    (MonadError, catchError, throwError)
 import qualified Data.ByteString.Lazy    as B
 import           Data.Foldable           (foldl', foldlM, length)
@@ -10,7 +10,7 @@ import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (intercalate, lines, pack, unpack)
 import           Data.Text.Lazy          (fromStrict, toStrict)
-import           Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
+import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Tuple              (swap)
 import           Language.Haskell.Pretty (Pretty, prettyPrint)
 import           Text.Pretty.Simple      (pString)

@@ -1,11 +1,11 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE LambdaCase #-}
 
 module SyntaxTraversals where
 
 import BasicPrelude
-import Data.Foldable (fold)
+import Data.Foldable           (fold)
 import Language.Haskell.Syntax
 
 class SyntaxTraversable a where
@@ -46,16 +46,16 @@ instance SyntaxTraversable HsDecl where
         HsPatBind _ pat rhs decls -> mconcat <$> sequence [f pat, f rhs, f decls]
         HsFunBind matches         -> f matches
         HsClassDecl _ _ _ _ decls -> f decls
-        HsInstDecl _ _ _ _ decls -> f decls
-        _ -> pure mempty
+        HsInstDecl _ _ _ _ decls  -> f decls
+        _                         -> pure mempty
         where f = synMap fd fe fp
 instance SyntaxTraversable HsRhs where
     synTraverse fd fe fp x = case x of
-        HsUnGuardedRhs e -> HsUnGuardedRhs <$> f e
+        HsUnGuardedRhs e   -> HsUnGuardedRhs <$> f e
         HsGuardedRhss rhss -> HsGuardedRhss <$> f rhss
         where f = synTraverse fd fe fp
     synMap fd fe fp x = case x of
-        HsUnGuardedRhs e -> f e
+        HsUnGuardedRhs e   -> f e
         HsGuardedRhss rhss -> f rhss
         where f = synMap fd fe fp
 instance SyntaxTraversable HsGuardedRhs where
@@ -78,17 +78,17 @@ instance SyntaxTraversable HsExp where
         e                   -> pure e
         where f = synTraverse fd fe fp
     synMap fd fe fp x = ((<>) <$> fe x <*>) $ case x of
-        HsParen e           -> f e
-        HsApp e1 e2         -> f [e1, e2]
+        HsParen e          -> f e
+        HsApp e1 e2        -> f [e1, e2]
         HsInfixApp e1 _ e2 -> f [e1, e2]
-        HsNegApp e          -> f e
-        HsLambda _ ps e     -> (<>) <$> f ps <*> f e
-        HsIf c e1 e2        -> f [c, e1, e2]
-        HsLet ds e          -> (<>) <$> f ds <*> f e
-        HsTuple es          -> f es
-        HsList es           -> f es
-        HsExpTypeSig _ e _  -> f e
-        _                   -> pure mempty
+        HsNegApp e         -> f e
+        HsLambda _ ps e    -> (<>) <$> f ps <*> f e
+        HsIf c e1 e2       -> f [c, e1, e2]
+        HsLet ds e         -> (<>) <$> f ds <*> f e
+        HsTuple es         -> f es
+        HsList es          -> f es
+        HsExpTypeSig _ e _ -> f e
+        _                  -> pure mempty
         where f = synMap fd fe fp
 instance SyntaxTraversable HsPat where
     synTraverse fd fe fp x = fp x >>= \case
@@ -103,15 +103,15 @@ instance SyntaxTraversable HsPat where
         p                    -> pure p
         where f = synTraverse fd fe fp
     synMap fd fe fp x = ((<>) <$> fp x <*>) $ case x of
-        HsPParen p           -> f p
-        HsPNeg p             -> f p
-        HsPInfixApp p1 _ p2  -> f [p1, p2]
-        HsPApp _ ps        -> f ps
-        HsPTuple ps          -> f ps
-        HsPList ps           -> f ps
-        HsPAsPat _ p         -> f p
-        HsPIrrPat p          -> f p
-        _                    -> pure mempty
+        HsPParen p          -> f p
+        HsPNeg p            -> f p
+        HsPInfixApp p1 _ p2 -> f [p1, p2]
+        HsPApp _ ps         -> f ps
+        HsPTuple ps         -> f ps
+        HsPList ps          -> f ps
+        HsPAsPat _ p        -> f p
+        HsPIrrPat p         -> f p
+        _                   -> pure mempty
         where f = synMap fd fe fp
 instance SyntaxTraversable HsMatch where
     synTraverse fd fe fp (HsMatch loc name ps rhs wheres) = HsMatch loc name <$> f ps <*> f rhs <*> f wheres
