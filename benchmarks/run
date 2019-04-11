@@ -1,0 +1,6 @@
+#!/bin/bash
+
+classpath="jmh-core-1.21.jar:jmh-generator-annprocess-1.21.jar:programs/fibonacci/out/a.jar:."
+
+javac -cp "$classpath" Main.java
+java -cp "$classpath" Main

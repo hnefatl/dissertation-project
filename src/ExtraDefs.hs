@@ -28,6 +28,9 @@ fromLazyByteString = toStrict . decodeUtf8
 endsWith :: Text -> Text -> Bool
 endsWith s1 s2 = takeEnd (T.length s2) s1 == s2
 
+liftJoin2 :: Monad m => (a -> b -> m c) -> m a -> m b -> m c
+liftJoin2 f x y = join (liftM2 f x y)
+
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
 anyM f = foldlM (\x y -> (x ||) <$> f y) False
