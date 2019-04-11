@@ -1,0 +1,17 @@
+#!/bin/bash
+
+if [[ $# -ne 2 ]] ; then
+    echo "Usage: repackage <jar path> <package prefix>"
+    exit -1
+fi
+
+path="$1"
+package="$2"
+
+cat << EOF > rules
+rule * ${package}.@1
+EOF
+
+java -jar jarjar-1.4.jar process rules "$path" "$path.out"
+
+rm rules

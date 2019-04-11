@@ -1,12 +1,13 @@
-package benchmarks;
+package benchmark;
 
-import java.util.Map;
+import java.util.ArrayList;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.openjdk.jmh.results.RunResult;
 
 public class Main {
     public static void main(String[] args) {
@@ -15,15 +16,17 @@ public class Main {
             .forks(1)
             .build();
 
-        new Runner(opt).run();
-        //Map<BenchmarkRecord, RunResult> records = new Runner(opt).run();
-        //for (Map.Entry<BenchmarkRecord, RunResult> result : records.entrySet()) {
-        //    Result r = result.getValue().getPrimaryResult();
-        //    System.out.println("Benchmark score: "
-        //      + r.getScore() + " "
-        //      + r.getScoreUnit() + " over "
-        //      + r.getStatistics().getN() + " iterations");
-        //}
+        try {
+            ArrayList<RunResult> results = new ArrayList<>(new Runner(opt).run());
+
+            System.out.println(results.size());
+            for (RunResult result : results) {
+                System.out.println(result.toString());
+            }
+        }
+        catch (RunnerException e) {
+            e.printStackTrace();
+        }
     }
 
     @Benchmark
