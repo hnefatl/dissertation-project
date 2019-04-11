@@ -3,11 +3,11 @@
 
 module Backend.CodeGen.Converter where
 
-import           BasicPrelude                   hiding (encodeUtf8, head, init, inits, swap)
+import           BasicPrelude                   hiding (encodeUtf8, head, init, inits, swap, bool)
 import           Control.Monad.Except           (Except, ExceptT, runExcept, throwError)
 import           Control.Monad.State.Strict     (MonadState, StateT, get, gets, modify)
 import qualified Data.ByteString.Lazy           as B
-import           Data.Functor                   (void)
+import           Data.Functor                   (void, (<&>))
 import qualified Data.Map.Strict                as M
 import qualified Data.Sequence                  as Seq
 import           Data.Text                      (unpack)
@@ -24,7 +24,7 @@ import qualified JVM.ClassFile                  as ClassFile
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 import           Backend.ILA                    (Datatype(..), Literal(..))
 import           Backend.ILB
-import           ExtraDefs                      (fromLazyByteString, toLazyByteString)
+import           ExtraDefs                      (fromLazyByteString, toLazyByteString, liftJoin2)
 import           Logger                         (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
@@ -44,6 +44,8 @@ instance TextShow NamedClass where
 data ConverterState = ConverterState
     { -- The variable name that the entry point "main" has been renamed to
       mainName        :: VariableName
+    ,  -- The Java package to place the class files in
+      packageName     :: String
     ,  -- Which JVM local variable we're up to
       localVarCounter :: LocalVar
     , datatypes       :: M.Map TypeVariableName Datatype
@@ -63,6 +65,9 @@ data ConverterState = ConverterState
       dynamicMethods  :: Seq.Seq Text
     , -- The name of the class we're compiling to
       classname       :: B.ByteString }
+
+getPackageName :: IsString s => Converter s
+getPackageName = gets (fromString . packageName)
 
 -- A `Converter Method` action represents a computation that compiles a method: the ConverterState should be reset
 -- inbetween method compilations
@@ -134,55 +139,62 @@ addDynamicMethod m = do
     modify (\s -> s { dynamicMethods = dynamicMethods s Seq.|> m })
     return $ fromIntegral $ Seq.length ms
 
+makeClass :: IsString s => String -> Converter s
+makeClass s = fromString . (<> ("." <> s)) <$> getPackageName
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char, list :: IsString s => s
-heapObject = "HeapObject"
-function = "Function"
-thunk = "Thunk"
-bifunction = "java/util/function/BiFunction"
-unboxedData = "Data"
-boxedData = "BoxedData"
-int = "_Int"
-integer = "_Integer"
-char = "_Char"
-list = fromString $ jvmSanitise "[]"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, listClass :: FieldType
-heapObjectClass = ObjectType heapObject
-functionClass = ObjectType function
-thunkClass = ObjectType thunk
-bifunctionClass = ObjectType bifunction
-unboxedDataClass = ObjectType unboxedData
-boxedDataClass = ObjectType boxedData
-intClass = ObjectType int
-integerClass = ObjectType integer
-charClass = ObjectType char
-listClass = ObjectType list
-addArgument :: NameType Method
-addArgument = ClassFile.NameType "addArgument" $ MethodSignature [heapObjectClass] ReturnsVoid
-enter :: NameType Method
-enter = NameType "enter" $ MethodSignature [] (Returns heapObjectClass)
-force :: NameType Method
-force = NameType "force" $ MethodSignature [] (Returns heapObjectClass)
-functionInit :: NameType Method
-functionInit = NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf heapObjectClass] ReturnsVoid
-thunkInit :: NameType Method
-thunkInit = NameType "<init>" $ MethodSignature [heapObjectClass] ReturnsVoid
-bifunctionApply :: NameType Method
-bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
+heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char, bool, list :: IsString s => Converter s
+heapObject = makeClass "HeapObject"
+function = makeClass "Function"
+thunk = makeClass "Thunk"
+bifunction = makeClass "java/util/function/BiFunction"
+unboxedData = makeClass "Data"
+boxedData = makeClass "BoxedData"
+int = makeClass "_Int"
+integer = makeClass "_Integer"
+char = makeClass "_Char"
+bool = makeClass "_Bool"
+list = makeClass $ jvmSanitise "[]"
+heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, boolClass, listClass :: Converter FieldType
+heapObjectClass = ObjectType <$> heapObject
+functionClass = ObjectType <$> function
+thunkClass = ObjectType <$> thunk
+bifunctionClass = ObjectType <$> bifunction
+unboxedDataClass = ObjectType <$> unboxedData
+boxedDataClass = ObjectType <$> boxedData
+intClass = ObjectType <$> int
+integerClass = ObjectType <$> integer
+charClass = ObjectType <$> char
+boolClass = ObjectType <$> bool
+listClass = ObjectType <$> list
+addArgument :: Converter (NameType Method)
+addArgument = heapObjectClass <&> \cls -> ClassFile.NameType "addArgument" $ MethodSignature [cls] ReturnsVoid
+enter :: Converter (NameType Method)
+enter = heapObjectClass <&> \cls -> NameType "enter" $ MethodSignature [] (Returns cls)
+force :: Converter (NameType Method)
+force = heapObjectClass <&> \cls -> NameType "force" $ MethodSignature [] (Returns cls)
+functionInit :: Converter (NameType Method)
+functionInit = do
+    bifunCls <- bifunctionClass
+    hoCls <- heapObjectClass 
+    return $ NameType "<init>" $ MethodSignature [bifunCls, IntType, arrayOf hoCls] ReturnsVoid
+thunkInit :: Converter (NameType Method)
+thunkInit = heapObjectClass <&> \cls -> NameType "<init>" $ MethodSignature [cls] ReturnsVoid
+bifunctionApply :: Converter (NameType Method)
+bifunctionApply = bifunctionClass <&> \cls -> NameType "apply" $ MethodSignature [] (Returns cls)
 clone :: NameType Method
 clone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
 toString :: NameType Method
 toString = NameType "toString" $ MethodSignature [] (Returns Java.Lang.stringClass)
-makeInt :: NameType Method
-makeInt = NameType "_make_Int" $ MethodSignature [IntType] (Returns intClass)
-makeInteger :: NameType Method
-makeInteger = NameType "_make_Integer" $ MethodSignature [Java.Lang.stringClass] (Returns integerClass)
-makeChar :: NameType Method
-makeChar = NameType "_make_Char" $ MethodSignature [CharByte] (Returns charClass)
+makeInt :: Converter (NameType Method)
+makeInt = intClass <&> \cls -> NameType "_make_Int" $ MethodSignature [IntType] (Returns cls)
+makeInteger :: Converter (NameType Method)
+makeInteger = integerClass <&> \cls -> NameType "_make_Integer" $ MethodSignature [Java.Lang.stringClass] (Returns cls)
+makeChar :: Converter (NameType Method)
+makeChar = charClass <&> \cls -> NameType "_make_Char" $ MethodSignature [CharByte] (Returns cls)
 boxedDataBranch :: NameType Field
 boxedDataBranch = NameType "branch" IntType
-boxedDataData :: NameType Field
-boxedDataData = NameType "data" $ arrayOf heapObjectClass
+boxedDataData :: Converter (NameType Field)
+boxedDataData = heapObjectClass <&> \cls -> NameType "data" $ arrayOf cls
 
 -- |Create a new public static field in this class with the given name and type.
 -- The given action will be run at the start of `main`, and should be used to initialise the field
@@ -198,21 +210,22 @@ makePublicStaticField name fieldType init = do
 compileMakerFunction :: Text -> Int -> Int -> Text -> Converter (ClassFile.NameType Method)
 compileMakerFunction name arity numFreeVars implName = do
     let accs = [ACC_PUBLIC, ACC_STATIC]
-        wrapperArgs = replicate numFreeVars heapObjectClass
-    inScope $ newMethod accs (toLazyByteString name) wrapperArgs (Returns functionClass) $ do
+    wrapperArgs <- replicateM numFreeVars heapObjectClass
+    funClass <- functionClass
+    inScope $ newMethod accs (toLazyByteString name) wrapperArgs (Returns funClass) $ do
         setLocalVarCounter (fromIntegral numFreeVars) -- Local variables [0..numFreeVars) are used for arguments
         -- Record that we're using a dynamic function invocation, remember the implementation function's name
         methodIndex <- addDynamicMethod implName
         -- This is the function we're going to return at the end
-        new function
+        new =<< function
         dup
         -- Invoke the bootstrap method for this dynamic call site to create our BiFunction instance
-        invokeDynamic methodIndex bifunctionApply
+        invokeDynamic methodIndex =<< bifunctionApply
         -- Push the arity of the function
         pushInt arity
         -- Create an array of HeapObjects holding the free variables we were given as arguments
         pushInt numFreeVars
-        allocNewArray heapObject
+        allocNewArray =<< heapObject
         forM_ [0..numFreeVars - 1] $ \fv -> do
             -- For each free variable argument, push it into the same index in the array
             dup
@@ -220,7 +233,7 @@ compileMakerFunction name arity numFreeVars implName = do
             loadLocal (fromIntegral fv)
             aastore
         -- Call the Function constructor with the bifunction, the arity, and the free variable array
-        invokeSpecial function functionInit
+        liftJoin2 invokeSpecial function functionInit
         i0 ARETURN
 
 -- |Consume initialisers from the state list until there are none left. We iterate them one at a time in case an
@@ -240,12 +253,12 @@ pushArg (ArgVar v) = pushSymbol v
 pushLit :: Literal -> Converter ()
 pushLit (LiteralInt i)    = do
     loadString $ unpack $ showt i
-    invokeStatic integer makeInteger
+    liftJoin2 invokeStatic integer makeInteger
 pushLit (LiteralChar c)   = do
     -- Push the integer equivalent char then JVM cast to char
     pushInt (fromEnum c)
     i2c
-    invokeStatic char makeChar
+    liftJoin2 invokeStatic char makeChar
 
 pushInt :: MonadGenerator m => Int -> m ()
 pushInt (-1) = iconst_m1
@@ -315,33 +328,28 @@ loadLocal' loadImm load loadw i = case i of
 -- |Given a java-land Boolean on the top of the stack, convert it to a haskell-land True/False BoxedData value
 makeBoxedBool :: Converter ()
 makeBoxedBool = do
-    rs <- gets topLevelRenames
-    case (M.lookup "True" rs, M.lookup "False" rs) of
-        (Nothing, _) -> throwTextError "Missing renaming for True in CodeGen"
-        (_, Nothing) -> throwTextError "Missing renaming for False in CodeGen"
-        (Just trueName, Just falseName) -> do
-            let makeTrue = toLazyByteString $ convertName $ "_make" <> jvmSanitise trueName
-                makeFalse = toLazyByteString $ convertName $ "_make" <> jvmSanitise falseName
-                invokeStaticBytes = 3
-                jumpBytes = 3
-            i0 (IF C_EQ $ jumpBytes + invokeStaticBytes + jumpBytes)
-            -- If the value is 1, make true and jump past the other case
-            invokeStatic "_Bool" $ NameType makeTrue $ MethodSignature [] (Returns $ ObjectType "_Bool")
-            goto (jumpBytes + invokeStaticBytes)
-            -- If the value is 0, make false
-            invokeStatic "_Bool" $ NameType makeFalse $ MethodSignature [] (Returns $ ObjectType "_Bool")
+    makeTrue <- getMakeMethod "True" [] (Returns <$> boolClass)
+    makeFalse <- getMakeMethod "False" [] (Returns <$> boolClass)
+    let invokeStaticBytes = 3
+        jumpBytes = 3
+    i0 (IF C_EQ $ jumpBytes + invokeStaticBytes + jumpBytes)
+    -- If the value is 1, make true and jump past the other case
+    liftJoin2 invokeStatic bool (pure makeTrue)
+    goto (jumpBytes + invokeStaticBytes)
+    -- If the value is 0, make false
+    liftJoin2 invokeStatic bool (pure makeFalse)
 
 -- |Given a Java-land string on the top of the stack, convert it to a Haskell-land list of haskell-land chars.
 makeBoxedString :: Converter ()
 makeBoxedString = do
-    makeNil <- getMakeMethod "[]" $ MethodSignature [] (Returns listClass)
-    makeCons <- getMakeMethod ":" $ MethodSignature [heapObjectClass, heapObjectClass] (Returns listClass)
+    makeNil <- getMakeMethod "[]" [] (Returns <$> listClass)
+    makeCons <- getMakeMethod ":" [heapObjectClass, heapObjectClass] (Returns <$> listClass)
     let charAt = NameType "charAt" $ MethodSignature [IntType] (Returns CharByte)
 
     -- Store the given string as a local variable
     stringVar <- storeUnnamedLocal
     -- Create an empty list to store the haskell-land string
-    invokeStatic list makeNil
+    liftJoin2 invokeStatic list (pure makeNil)
     listVar <- storeUnnamedLocal
     -- Loop over the string, building up a Haskell list of it
     -- Create the index, starting at the length of the string and looping backwards over it
@@ -349,6 +357,9 @@ makeBoxedString = do
     invokeVirtual Java.Lang.string $ NameType "length" $ MethodSignature [] (Returns IntType)
     index <- storeUnnamedLocalInt
     -- Loop condition: if the index is == 0, jump out of the loop
+    charCls <- char
+    makeCharFun <- makeChar
+    listCls <- list
     let body = do
             loadLocal stringVar
             loadLocalInt index
@@ -357,9 +368,9 @@ makeBoxedString = do
             dup
             storeSpecificUnnamedLocalInt index
             invokeVirtual Java.Lang.string charAt
-            invokeStatic char makeChar
+            invokeStatic charCls makeCharFun
             loadLocal listVar
-            invokeStatic list makeCons
+            invokeStatic listCls makeCons
             storeSpecificUnnamedLocal listVar
             -- There should be a goto here but we skip it as we can't compute the offset yet
     bodyLength' <- Converter (lift $ getGenLength 0 [body]) >>= \case
@@ -383,28 +394,31 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             let stringBuilder = "java/lang/StringBuilder"
                 sbAppend = NameType "append" $ MethodSignature [CharByte] (Returns $ ObjectType $ unpack $ fromLazyByteString stringBuilder)
             -- Store the top-of-stack haskell-land string
-            checkCast list
+            checkCast =<< list
             listVar <- storeUnnamedLocal
             -- Create a new stringbuilder, store it
             new stringBuilder
             dup
             invokeSpecial stringBuilder Java.Lang.objectInit
             builderVar <- storeUnnamedLocal
+            listCls <- list
+            charCls <- char
+            boxedDataDataField <- boxedDataData
             let body = do
                     loadLocal builderVar
                     loadLocal listVar
-                    getField list boxedDataData
+                    getField listCls boxedDataDataField
                     dup
                     -- Load the rest of the list, overwrite our reference
                     iconst_1
                     aaload
-                    checkCast list
+                    checkCast listCls
                     storeSpecificUnnamedLocal listVar
                     -- Load the head char, append to the builder, pop the returned reference
                     iconst_0
                     aaload
-                    checkCast char
-                    getField char $ NameType "value" CharByte
+                    checkCast charCls
+                    getField charCls $ NameType "value" CharByte
                     invokeVirtual stringBuilder sbAppend
                     pop
                     -- Should be a jump back to the top of the loop here, we insert it after
@@ -414,7 +428,7 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             let bodyLength = fromIntegral bodyLength' + 3 -- Adding goto offset
             -- Head of the loop
             loadLocal listVar
-            getField list boxedDataBranch
+            getField listCls boxedDataBranch
             pushInt nilIndex
             i0 $ IF_ICMP C_EQ (bodyLength + 3) -- We're at the end of the list, jump past the body
             Converter $ lift body
@@ -424,10 +438,12 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             invokeVirtual stringBuilder toString
 
 
-getMakeMethod :: VariableName -> MethodSignature -> Converter (NameType Method)
-getMakeMethod v sig = gets (M.lookup v . topLevelRenames) >>= \case
+getMakeMethod :: VariableName -> [Converter FieldType] -> Converter ReturnSignature -> Converter (NameType Method)
+getMakeMethod v args ret = gets (M.lookup v . topLevelRenames) >>= \case
     Nothing -> throwTextError $ "Missing renaming for " <> showt v <> " in CodeGen"
-    Just renamed -> return $ NameType (toLazyByteString $ convertName $ "_make" <> jvmSanitise renamed) sig
+    Just renamed -> do
+        sig <- MethodSignature <$> sequence args <*> ret
+        return $ NameType (toLazyByteString $ convertName $ "_make" <> jvmSanitise renamed) sig
 
 
 printTopOfStack :: MonadGenerator m => m ()
