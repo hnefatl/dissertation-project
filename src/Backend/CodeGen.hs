@@ -160,7 +160,7 @@ compileDatatypes ds classpath package = do
         -- Don't codegen this datatype if it's provided by the runtime classes
         if S.member (typeName datatype) primitiveTypes then
             return Nothing
-        else case runExcept $ generate classpath (toLazyByteString package <> "." <> dclass) compileDatatype of
+        else case runExcept $ generate classpath (toLazyByteString package <> "/" <> dclass) compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
                 let out' = out { superClass = fromString boxedDataCls }
@@ -170,7 +170,7 @@ compileDatatypes ds classpath package = do
 -- bootstrap method for each function we create.
 -- This should be called at the end of the generation of a class file
 addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Text -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
-addBootstrapMethods s cp package x = runExceptT (generateT cp (toLazyByteString package <> "." <> classname s) $ addBootstrapPoolItems x s) >>= \case
+addBootstrapMethods s cp package x = runExceptT (generateT cp (toLazyByteString package <> "/" <> classname s) $ addBootstrapPoolItems x s) >>= \case
     Left err -> throwError $ pack $ show err
     Right ((bootstrapMethodStringIndex, metafactoryIndex, arg1, arg2s, arg3), classDirect) -> do
         let classFile = classDirect2File classDirect -- Convert the "direct" in-memory class into a class file structure
