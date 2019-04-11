@@ -39,6 +39,7 @@ dependencies:
 - process
 - Glob
 - filepath
+- file-embed
 
 custom-setup:
   dependencies:

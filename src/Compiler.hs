@@ -21,6 +21,7 @@ import           ExtraDefs                   (inverseMap, pretty, synPrint)
 import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator               (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                       (VariableName, convertName)
+import           StdLibEmbed                 (stdLibContents)
 
 import qualified Backend.CodeGen             as CodeGen (convert, writeClass)
 import           Backend.Deoverload          (deoverloadModule, deoverloadQuantType, runDeoverload)
@@ -123,7 +124,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do
-    HsModule _ _ _ _ decls' <- parse "StdLib.hs"
+    HsModule _ _ _ _ decls' <- parse stdLibContents
     return $ HsModule a b c d (decls <> decls')
 
 makeJar :: Flags -> IO ()
