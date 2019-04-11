@@ -40,15 +40,15 @@ parseFlags = Flags
        <> help "Don't import the standard library"
        <> showDefault)
     <*> strOption
-        ( long "output-dir"
+        ( long "build-dir"
        <> short 'd'
-       <> help "Output directory for build files"
-       <> value (outputDir def)
+       <> help "Directory to store build files"
+       <> value (buildDir def)
        <> showDefault)
     <*> strOption
         ( long "output-jar"
        <> short 'o'
-       <> help "Output jar name"
+       <> help "Output jar path"
        <> value (outputJar def)
        <> showDefault)
     <*> strOption
@@ -61,5 +61,11 @@ parseFlags = Flags
         ( long "runtime-file-dir"
        <> help "Directory containing the compiler's runtime class files."
        <> value (runtimeFileDir def)
+       <> showDefault)
+    <*> strOption
+        ( long "package"
+       <> short 'p'
+       <> help "Java package used for the output java files"
+       <> value (package def)
        <> showDefault)
     <*> some (argument str (metavar "input-files" <> help "Haskell source files to compile"))
