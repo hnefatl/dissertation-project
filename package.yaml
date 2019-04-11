@@ -38,6 +38,7 @@ dependencies:
 - binary
 - process
 - Glob
+- directory
 - filepath
 - file-embed
 
