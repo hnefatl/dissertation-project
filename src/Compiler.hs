@@ -65,9 +65,12 @@ instance Default Flags where
 parse :: (MonadIO m, MonadError Text m) => FilePath -> m HsModule
 parse f = liftIO (try $ readFile f) >>= \case
     Left e -> throwError $ "Failed to read file " <> pack f <> ":\n" <> showt (e :: SomeException)
-    Right s -> case parseModule (unpack s) of
-        ParseFailed loc err -> throwError $ "Parse failed at " <> showt loc <> " with error:\n" <> pack err
-        ParseOk m           -> return m
+    Right s -> parseContents (unpack s)
+
+parseContents :: MonadError Text m => String -> m HsModule
+parseContents contents = case parseModule contents of
+    ParseFailed loc err -> throwError $ "Parse failed at " <> showt loc <> " with error:\n" <> pack err
+    ParseOk m           -> return m
 
 printLogsIfVerbose :: Flags -> [Text] -> IO ()
 printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
@@ -124,7 +127,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do
-    HsModule _ _ _ _ decls' <- parse stdLibContents
+    HsModule _ _ _ _ decls' <- parseContents stdLibContents
     return $ HsModule a b c d (decls <> decls')
 
 makeJar :: Flags -> IO ()
