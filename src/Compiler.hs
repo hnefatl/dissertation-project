@@ -14,6 +14,7 @@ import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
 import           System.Exit                 (exitFailure)
 import           System.FilePath.Glob        as Glob (compile, globDir1)
+import           System.Directory            (createDirectoryIfMissing)
 import           System.Process              (callProcess)
 import           TextShow                    (TextShow, showt)
 
@@ -122,6 +123,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                         return ilb''
                     else return ilb'
             compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            lift $ lift $ lift $ createDirectoryIfMissing True (outputDir flags)
             lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
             lift $ lift $ lift $ makeJar flags
 
