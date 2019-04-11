@@ -8,7 +8,8 @@ import qualified Data.ByteString.Lazy    as B
 import           Data.Foldable           (foldl', foldlM, length)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
-import           Data.Text               (intercalate, lines, pack, unpack)
+import           Data.Text               (intercalate, lines, pack, unpack, takeEnd)
+import qualified Data.Text               as T
 import           Data.Text.Lazy          (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Tuple              (swap)
@@ -23,6 +24,9 @@ toLazyByteString :: Text -> B.ByteString
 toLazyByteString = encodeUtf8 . fromStrict
 fromLazyByteString :: B.ByteString -> Text
 fromLazyByteString = toStrict . decodeUtf8
+
+endsWith :: Text -> Text -> Bool
+endsWith s1 s2 = takeEnd (T.length s2) s1 == s2
 
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True

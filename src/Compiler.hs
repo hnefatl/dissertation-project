@@ -13,11 +13,11 @@ import qualified Data.Map                    as M
 import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
 import           System.Exit                 (exitFailure)
-import           System.FilePath.Glob        as Glob (compile, globDir1)
+import           System.Directory            (createDirectoryIfMissing, listDirectory, copyFile)
 import           System.Process              (callProcess)
 import           TextShow                    (TextShow, showt)
 
-import           ExtraDefs                   (inverseMap, pretty, synPrint)
+import           ExtraDefs                   (inverseMap, pretty, synPrint, endsWith)
 import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator               (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                       (VariableName, convertName)
@@ -42,10 +42,11 @@ data Flags = Flags
     , letLift         :: Bool
     , topLevelDedupe  :: Bool
     , noStdImport     :: Bool
-    , outputDir       :: FilePath
+    , buildDir        :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
     , runtimeFileDir  :: FilePath
+    , package         :: FilePath
     , inputFiles      :: [FilePath] }
     deriving (Eq, Show)
 instance Default Flags where
@@ -54,13 +55,13 @@ instance Default Flags where
         , letLift = True
         , topLevelDedupe = True
         , noStdImport = False
-        , outputDir = "out"
+        , buildDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
         , runtimeFileDir = "runtime"
+        , package = "hsjava"
         , inputFiles = []
         }
-
 
 parse :: (MonadIO m, MonadError Text m) => FilePath -> m HsModule
 parse f = liftIO (try $ readFile f) >>= \case
@@ -121,8 +122,11 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                         writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
                         return ilb''
                     else return ilb'
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
-            lift $ lift $ lift $ mapM_ (CodeGen.writeClass $ outputDir flags) compiled
+            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
+            let classDir = buildDir flags </> package flags
+            lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
+            lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
             lift $ lift $ lift $ makeJar flags
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
@@ -132,13 +136,13 @@ mergePreludeModule (HsModule a b c d decls) = do
 
 makeJar :: Flags -> IO ()
 makeJar flags = do
-    let getClassFilePaths dir = do
-            paths <- globDir1 (Glob.compile "*.class") dir
-            -- Drop the leading directory from each path
-            return $ concatMap (\f -> ["-C", dir, drop (1 + length dir) f]) paths
-    outputFiles <- getClassFilePaths (outputDir flags)
-    runtimeFiles <- getClassFilePaths (runtimeFileDir flags)
-    let args = ["cfe", outputDir flags </> outputJar flags, outputClassName flags] <> outputFiles <> runtimeFiles
+    -- Copy runtime files to the same directory as the compiled files
+    let classDir = buildDir flags </> package flags
+    runtimeFiles <- filter (\f -> pack f `endsWith` ".class") <$> listDirectory (runtimeFileDir flags)
+    forM_ runtimeFiles $ \file -> copyFile (runtimeFileDir flags </> file) (classDir </> file)
+    -- Call `jar` to construct the executable jar file
+    let mainClassName = package flags <> "." <> outputClassName flags
+        args = ["cfe", outputJar flags, mainClassName, "-C", buildDir flags, "."]
     callProcess "jar" args
 
 -- |"Extend" one map with another: given mappings x->y and y->z, create a mapping (x+y)->(y+z).

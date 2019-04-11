@@ -55,9 +55,9 @@ freeVariables name args x = do
     return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls])
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
--- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs main revRenames topRenames ds = do
+-- the top-level symbols and produces class files
+convert :: Text -> Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname packageName primitiveClassDir bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let ds' = jvmSanitises ds
         bindings = jvmSanitises bs
@@ -75,7 +75,7 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
             , dynamicMethods = Seq.empty
             , classname = toLazyByteString cname }
         action = do
-            compiled <- addBootstrapMethods initialState classpath $ do
+            compiled <- addBootstrapMethods initialState classpath packageName $ do
                 mapM_ processBinding bindings
                 addMainMethod
             return $ NamedClass cname compiled
@@ -86,7 +86,7 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
     writeLog "-----------"
     writeLog "Renames"
     forM_ (M.toList revRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
-    dataClasses <- compileDatatypes (M.elems ds') classpath
+    dataClasses <- compileDatatypes (M.elems ds') classpath packageName
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
 
@@ -109,8 +109,8 @@ addMainMethod = do
         i0 RETURN
 
 -- |Create a new class for each datatype
-compileDatatypes :: [Datatype] -> [Tree CPEntry] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-compileDatatypes ds classpath = do
+compileDatatypes :: [Datatype] -> [Tree CPEntry] -> Text -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+compileDatatypes ds classpath packageName = do
     writeLog $ "Compiling datatypes: " <> showt ds
     fmap catMaybes $ forM ds $ \datatype -> do
         let dname = convertName (typeName datatype)
@@ -154,7 +154,7 @@ compileDatatypes ds classpath = do
         -- Don't codegen this datatype if it's provided by the runtime classes
         if S.member (typeName datatype) primitiveTypes then
             return Nothing
-        else case runExcept $ generate classpath dclass compileDatatype of
+        else case runExcept $ generate classpath (toLazyByteString packageName <> "." <> dclass) compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
                 let out' = out { superClass = boxedData }
@@ -163,8 +163,8 @@ compileDatatypes ds classpath = do
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
 -- This should be called at the end of the generation of a class file
-addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
-addBootstrapMethods s cp x = runExceptT (generateT cp (classname s) $ addBootstrapPoolItems x s) >>= \case
+addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Text -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
+addBootstrapMethods s cp packageName x = runExceptT (generateT cp (toLazyByteString packageName <> "." <> classname s) $ addBootstrapPoolItems x s) >>= \case
     Left err -> throwError $ pack $ show err
     Right ((bootstrapMethodStringIndex, metafactoryIndex, arg1, arg2s, arg3), classDirect) -> do
         let classFile = classDirect2File classDirect -- Convert the "direct" in-memory class into a class file structure

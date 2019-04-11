@@ -37,7 +37,7 @@ dependencies:
 - hs-java # Also provided from custom repo
 - binary
 - process
-- Glob
+- directory
 - filepath
 - file-embed
 
