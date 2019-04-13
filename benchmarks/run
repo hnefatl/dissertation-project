@@ -6,4 +6,4 @@ javac -cp "$classpath" benchmark/Main.java || exit 1
 mkdir -p META-INF
 mv BenchmarkList META-INF/
 mv CompilerHints META-INF/
-java -noverify -cp "$classpath" benchmark.Main || exit 2
+java -noverify -cp "$classpath" benchmark.Main > java_results || exit 2

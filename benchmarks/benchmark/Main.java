@@ -2,6 +2,7 @@
 
 package benchmark;
 
+import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
 
 import org.openjdk.jmh.annotations.Benchmark;
