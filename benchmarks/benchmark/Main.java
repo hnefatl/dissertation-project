@@ -1,6 +1,5 @@
 package benchmark;
 
-import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
 import org.openjdk.jmh.annotations.Benchmark;
@@ -13,9 +12,12 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.results.RunResult;
 
-import fib.Fib;
+import fibonacci.Fibonacci;
+import factorial.Factorial;
 
 public class Main {
+    private static String[] args = new String[]{};
+
     public static void main(String[] args) {
         Options opt = new OptionsBuilder()
             .include(Main.class.getSimpleName())
@@ -23,22 +25,23 @@ public class Main {
             .build();
 
         try {
-            ArrayList<RunResult> results = new ArrayList<>(new Runner(opt).run());
-
-            System.out.println(results.size());
-            for (RunResult result : results) {
-                System.out.println(result.toString());
-            }
+            new Runner(opt).run();
         }
         catch (RunnerException e) {
             e.printStackTrace();
         }
     }
-
+        
     @Benchmark
     @BenchmarkMode(Mode.SampleTime)
     @OutputTimeUnit(TimeUnit.MILLISECONDS)
     public void fibonacci() {
-        fib.Fib.main(new String[]{});
+        fibonacci.Fibonacci.main(args);
+    }
+    @Benchmark
+    @BenchmarkMode(Mode.SampleTime)
+    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+    public void factorial() {
+        factorial.Factorial.main(args);
     }
 }
