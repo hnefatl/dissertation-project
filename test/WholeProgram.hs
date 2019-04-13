@@ -6,14 +6,12 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 
 import           BasicPrelude      hiding (unwords)
-import           Compiler          (Flags(outputJar))
-import           Data.Default      (def)
 import           Data.List         (unwords)
 import qualified Data.Set          as S
 import           Data.Text         (pack, strip, unpack)
 import           NeatInterpolation
 import           System.Exit       (ExitCode(ExitSuccess))
-import           System.IO.Temp
+import           System.IO.Temp    (withSystemTempDirectory)
 import           System.Process    (readProcessWithExitCode)
 
 
@@ -23,11 +21,12 @@ makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimi
           makeTest' opts = do
             let optList = S.toList opts
             testCase (makeTitle title optList) $ do
-                tempDir <- getCanonicalTemporaryDirectory
-                withTempDirectory tempDir "compiler-test" $ \dir -> do
-                    sourceFile <- writeTempFile dir "compiler-test" (unpack source)
-                    let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, dir </> sourceFile] <> optList
-                        runArgs = ["-noverify", "-jar", dir </> outputJar def]
+                withSystemTempDirectory "compiler-test" $ \dir -> do
+                    let sourceFile = dir </> "testsrc.hs"
+                        outputJar = dir </> "a.jar"
+                    writeFile sourceFile source
+                    let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, "-o", outputJar, sourceFile] <> optList
+                        runArgs = ["-noverify", "-jar", outputJar]
                     (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
                     unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
                     (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
