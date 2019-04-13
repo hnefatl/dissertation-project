@@ -1,1 +1,0 @@
-mvn install:install-file -Dfile=${jarpath} -DgeneratePom=true -DgroupId=benchmarks -DartifactId=${benchmark name} -Dversion=1.0 -Dpackaging=jar

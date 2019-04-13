@@ -1,7 +1,0 @@
-#!/bin/bash
-
-cd programs
-
-cd fibonacci
-compiler-exe --runtime-file-dir ../../../runtime fib.hs
-cd ..

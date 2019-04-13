@@ -3,11 +3,15 @@ package benchmark;
 import java.util.ArrayList;
 
 import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.openjdk.jmh.results.RunResult;
+
+import fib.Fib;
 
 public class Main {
     public static void main(String[] args) {
@@ -30,7 +34,8 @@ public class Main {
     }
 
     @Benchmark
+    @BenchmarkMode(Mode.SampleTime)
     public void fibonacci() {
-        Output.main(new String[]{});
+        fib.Fib.main(new String[]{});
     }
 }

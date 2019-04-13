@@ -3,5 +3,5 @@
 cd programs
 
 cd fibonacci
-compiler-exe --runtime-file-dir ../../../runtime fib.hs
+compiler-exe --output-class="Fib" --runtime-file-dir="../../../runtime" fib.hs
 cd ..

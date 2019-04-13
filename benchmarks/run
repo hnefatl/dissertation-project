@@ -1,6 +1,9 @@
 #!/bin/bash
 
-classpath="jmh-core-1.21.jar:jmh-generator-annprocess-1.21.jar:programs/fibonacci/out/a.jar:."
+classpath=".:jmh-core-1.21.jar:jmh-generator-annprocess-1.21.jar:commons-math3-3.6.1.jar:programs/fibonacci/a.jar"
 
-javac -cp "$classpath" Main.java
-java -cp "$classpath" Main
+javac -cp "$classpath" benchmark/Main.java || exit 1
+mkdir -p META-INF
+mv BenchmarkList META-INF/
+mv CompilerHints META-INF/
+java -noverify -cp "$classpath" benchmark.Main || exit 2
