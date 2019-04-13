@@ -4,6 +4,6 @@
 hs_err_pid*.log
 compiler.cabal
 *~
-runtime/*.class
+**/*.class
 hoogle.log
 out/
