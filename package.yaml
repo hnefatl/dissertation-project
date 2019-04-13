@@ -40,6 +40,9 @@ dependencies:
 - directory
 - filepath
 - file-embed
+- template
+- temporary
+- exceptions
 
 custom-setup:
   dependencies:

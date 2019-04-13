@@ -12,9 +12,12 @@ import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
+import           Data.Text.Lazy              (toStrict)
+import           Data.Text.Template          (substitute)
 import           System.Exit                 (exitFailure)
 import           System.Directory            (createDirectoryIfMissing, listDirectory, copyFile)
-import           System.Process              (callProcess)
+import           System.Process              (callProcess, readCreateProcess, shell)
+import           System.IO.Temp              (withSystemTempDirectory)
 import           TextShow                    (TextShow, showt)
 
 import           ExtraDefs                   (inverseMap, pretty, synPrint, endsWith)
@@ -59,7 +62,7 @@ instance Default Flags where
         , outputJar = "a.jar"
         , outputClassName = "Output"
         , runtimeFileDir = "runtime"
-        , package = "hsjava"
+        , package = ""
         , inputFiles = []
         }
 
@@ -127,6 +130,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             let classDir = buildDir flags </> package flags
             lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
             lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
+            lift $ compileRuntimeFiles flags
             lift $ lift $ lift $ makeJar flags
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
@@ -134,12 +138,30 @@ mergePreludeModule (HsModule a b c d decls) = do
     HsModule _ _ _ _ decls' <- parseContents stdLibContents
     return $ HsModule a b c d (decls <> decls')
 
+compileRuntimeFiles :: Flags -> LoggerT (NameGeneratorT IO) ()
+compileRuntimeFiles flags = do
+    -- Find all the runtime source files
+    runtimeSrcFiles <- liftIO $ filter (\f -> pack f `endsWith` ".java") <$> listDirectory (runtimeFileDir flags)
+    let variableReplacement "package" = pack (package flags)
+        variableReplacement v = error $ "Unknown variable " <> unpack v <> " in runtime source file"
+    buildOutput <- liftIO $ withSystemTempDirectory "compiler-runtime" $ \tmpDir -> do
+        -- Read the runtime source files, replace the package name, write them to the temporary directory
+        forM_ runtimeSrcFiles $ \runtimeFile -> do
+            contents <- readFile $ runtimeFileDir flags </> runtimeFile
+            let newContents = substitute contents variableReplacement
+            writeFile (tmpDir </> runtimeFile) (toStrict newContents)
+        -- Compile the runtime source within the temporary directory
+        buildOutput <- readCreateProcess (shell $ "javac -Xlint:all " <> (tmpDir </> "*.java")) ""
+        -- Copy compiled files to the build directory
+        let classDir = buildDir flags </> package flags
+        runtimeBinFiles <- filter (\f -> pack f `endsWith` ".class") <$> listDirectory tmpDir
+        forM_ runtimeBinFiles $ \file -> liftIO $ copyFile (tmpDir </> file) (classDir </> file)
+        return buildOutput
+    writeLog "Output from building runtime files:"
+    writeLog $ pack buildOutput
+
 makeJar :: Flags -> IO ()
 makeJar flags = do
-    -- Copy runtime files to the same directory as the compiled files
-    let classDir = buildDir flags </> package flags
-    runtimeFiles <- filter (\f -> pack f `endsWith` ".class") <$> listDirectory (runtimeFileDir flags)
-    forM_ runtimeFiles $ \file -> copyFile (runtimeFileDir flags </> file) (classDir </> file)
     -- Call `jar` to construct the executable jar file
     let mainClassName = package flags <> "." <> outputClassName flags
         args = ["cfe", outputJar flags, mainClassName, "-C", buildDir flags, "."]

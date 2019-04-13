@@ -2,6 +2,7 @@ module Main where
 
 import BasicPrelude
 import Data.Default        (def)
+import System.FilePath     (takeBaseName)
 import Options.Applicative
 
 import Compiler            (Flags(..), compile)
@@ -14,8 +15,12 @@ main = do
         _   -> putStrLn "Currently only supports a single input file"
 
 parseCommandLine :: IO Flags
-parseCommandLine = execParser $
-    info (helper <*> parseFlags) (fullDesc <> progDesc "A Compiler from Haskell to Java Bytecode")
+parseCommandLine = do
+    flags <- execParser $ info (helper <*> parseFlags) (fullDesc <> progDesc "A Compiler from Haskell to Java Bytecode")
+    return $ case package flags of
+        -- Default value for package is the filename of the first input file
+        "" -> flags { package = takeBaseName $ head $ inputFiles flags }
+        _ -> flags
 
 parseFlags :: Parser Flags
 parseFlags = Flags
@@ -66,6 +71,5 @@ parseFlags = Flags
         ( long "package"
        <> short 'p'
        <> help "Java package used for the output java files"
-       <> value (package def)
-       <> showDefault)
+       <> value "")
     <*> some (argument str (metavar "input-files" <> help "Haskell source files to compile"))

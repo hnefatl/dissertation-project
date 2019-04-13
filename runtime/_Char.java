@@ -1,3 +1,5 @@
+package ${package};
+
 public class _Char extends Data {
     public char value;
     public static _Char _make_Char(char x) {

@@ -1,3 +1,5 @@
+package ${package};
+
 // Wrapper around another object, basically memoises it.
 // Consider a thunk wrapped around a function: we call enter on the thunk to evaluate it, which evaluates the function
 // and updates the thunk to point to the results of the function call. Next time we evaluate the thunk, we just get the

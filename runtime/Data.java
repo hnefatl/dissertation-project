@@ -1,3 +1,5 @@
+package ${package};
+
 // Direct non-abstract subclasses of Data are builtin primitives like integers.
 public abstract class Data extends HeapObject {
     @Override

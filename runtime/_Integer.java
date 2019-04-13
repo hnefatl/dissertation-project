@@ -1,3 +1,5 @@
+package ${package};
+
 import java.math.BigInteger;
 
 public class _Integer extends Data {

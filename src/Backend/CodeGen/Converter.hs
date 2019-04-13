@@ -140,13 +140,12 @@ addDynamicMethod m = do
     return $ fromIntegral $ Seq.length ms
 
 makeClass :: IsString s => String -> Converter s
-makeClass s = fromString . (<> ("." <> s)) <$> getPackageName
+makeClass s = fromString . (<> ("/" <> s)) <$> getPackageName
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, bifunction, unboxedData, boxedData, int, integer, char, bool, list :: IsString s => Converter s
+heapObject, function, thunk, unboxedData, boxedData, int, integer, char, bool, list :: IsString s => Converter s
 heapObject = makeClass "HeapObject"
 function = makeClass "Function"
 thunk = makeClass "Thunk"
-bifunction = makeClass "java/util/function/BiFunction"
 unboxedData = makeClass "Data"
 boxedData = makeClass "BoxedData"
 int = makeClass "_Int"
@@ -154,11 +153,12 @@ integer = makeClass "_Integer"
 char = makeClass "_Char"
 bool = makeClass "_Bool"
 list = makeClass $ jvmSanitise "[]"
-heapObjectClass, functionClass, thunkClass, bifunctionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, boolClass, listClass :: Converter FieldType
+bifunction :: IsString s => s
+bifunction = "java/util/function/BiFunction"
+heapObjectClass, functionClass, thunkClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, boolClass, listClass :: Converter FieldType
 heapObjectClass = ObjectType <$> heapObject
 functionClass = ObjectType <$> function
 thunkClass = ObjectType <$> thunk
-bifunctionClass = ObjectType <$> bifunction
 unboxedDataClass = ObjectType <$> unboxedData
 boxedDataClass = ObjectType <$> boxedData
 intClass = ObjectType <$> int
@@ -166,6 +166,8 @@ integerClass = ObjectType <$> integer
 charClass = ObjectType <$> char
 boolClass = ObjectType <$> bool
 listClass = ObjectType <$> list
+bifunctionClass :: FieldType
+bifunctionClass = ObjectType bifunction
 addArgument :: Converter (NameType Method)
 addArgument = heapObjectClass <&> \cls -> ClassFile.NameType "addArgument" $ MethodSignature [cls] ReturnsVoid
 enter :: Converter (NameType Method)
@@ -174,13 +176,12 @@ force :: Converter (NameType Method)
 force = heapObjectClass <&> \cls -> NameType "force" $ MethodSignature [] (Returns cls)
 functionInit :: Converter (NameType Method)
 functionInit = do
-    bifunCls <- bifunctionClass
     hoCls <- heapObjectClass 
-    return $ NameType "<init>" $ MethodSignature [bifunCls, IntType, arrayOf hoCls] ReturnsVoid
+    return $ NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf hoCls] ReturnsVoid
 thunkInit :: Converter (NameType Method)
 thunkInit = heapObjectClass <&> \cls -> NameType "<init>" $ MethodSignature [cls] ReturnsVoid
-bifunctionApply :: Converter (NameType Method)
-bifunctionApply = bifunctionClass <&> \cls -> NameType "apply" $ MethodSignature [] (Returns cls)
+bifunctionApply :: NameType Method
+bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
 clone :: NameType Method
 clone = NameType "clone" $ MethodSignature [] (Returns Java.Lang.objectClass)
 toString :: NameType Method
@@ -220,7 +221,7 @@ compileMakerFunction name arity numFreeVars implName = do
         new =<< function
         dup
         -- Invoke the bootstrap method for this dynamic call site to create our BiFunction instance
-        invokeDynamic methodIndex =<< bifunctionApply
+        invokeDynamic methodIndex bifunctionApply
         -- Push the arity of the function
         pushInt arity
         -- Create an array of HeapObjects holding the free variables we were given as arguments

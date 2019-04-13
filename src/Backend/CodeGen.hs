@@ -15,7 +15,7 @@ import qualified Data.Map.Strict                as M
 import           Data.Maybe                     (fromJust)
 import qualified Data.Sequence                  as Seq
 import qualified Data.Set                       as S
-import           Data.Text                      (pack, unpack)
+import           Data.Text                      (pack, unpack, replace)
 import           Data.Text.Lazy                 (fromStrict)
 import           Data.Text.Lazy.Encoding        (encodeUtf8)
 import           Data.Word                      (Word16)
@@ -59,25 +59,26 @@ freeVariables name args x = do
 convert :: Text -> Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
 convert cname package primitiveClassDir bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
-    let heapObjectCls = ObjectType $ unpack package <> ".HeapObject"
+    let heapObjectCls = ObjectType $ unpack package <> "/HeapObject"
+        cname' = package <> "/" <> cname
         ds' = jvmSanitises ds
         bindings = jvmSanitises bs
         hooks = compilerGeneratedHooks topRenames
         topSymbols = M.fromSet (const heapObjectCls) $ S.unions $ M.keys hooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
         initialState = ConverterState
             { mainName = main
-            , packageName = unpack package
+            , packageName = unpack $ replace "." "/" package
             , localVarCounter = 0
             , datatypes = ds'
             , topLevelSymbols = topSymbols
             , topLevelRenames = topRenames
             , reverseRenames = revRenames
             , localSymbols = M.empty
-            , initialisers = map (\gen -> gen cname) $ M.elems hooks
+            , initialisers = map (\gen -> gen cname') $ M.elems hooks
             , dynamicMethods = Seq.empty
-            , classname = toLazyByteString cname }
+            , classname = toLazyByteString cname' }
         action = do
-            compiled <- addBootstrapMethods initialState classpath package $ do
+            compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
                 addMainMethod
             return $ NamedClass cname compiled
@@ -115,12 +116,12 @@ compileDatatypes :: [Datatype] -> [Tree CPEntry] -> Text -> ExceptT Text (Logger
 compileDatatypes ds classpath package = do
     writeLog $ "Compiling datatypes: " <> showt ds
     fmap catMaybes $ forM ds $ \datatype -> do
-        let boxedDataCls = unpack package <> ".BoxedData"
-            boxedDataField = ObjectType boxedDataCls
-            heapObjectCls = unpack package <> ".HeapObject"
+        let boxedDataCls = unpack package <> "/BoxedData"
+            heapObjectCls = unpack package <> "/HeapObject"
             heapObjectField = ObjectType heapObjectCls
             dname = convertName (typeName datatype)
-            dclass = toLazyByteString dname
+            dname' = package <> "/" <> dname
+            dclass = toLazyByteString dname'
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
             compileDatatype = do
                 -- Create a boring constructor
@@ -134,7 +135,7 @@ compileDatatypes ds classpath package = do
                     let numArgs = length args
                         methName = toLazyByteString $ "_make" <> convertName branchName
                         methArgs = replicate numArgs heapObjectField
-                        methRet = Returns $ ObjectType $ unpack dname
+                        methRet = Returns $ ObjectType $ unpack dname'
                     newMethod methFlags methName methArgs methRet $ do
                         -- Create a new instance of the class representing this datatype
                         new dclass
@@ -154,13 +155,13 @@ compileDatatypes ds classpath package = do
                             loadLocal (fromIntegral i)
                             aastore
                         -- Assign it to the datatype's data field
-                        putField dclass (NameType "data" $ arrayOf boxedDataField)
+                        putField dclass (NameType "data" $ arrayOf heapObjectField)
                         -- Return the instance of our class, fully initialised
                         i0 ARETURN
         -- Don't codegen this datatype if it's provided by the runtime classes
         if S.member (typeName datatype) primitiveTypes then
             return Nothing
-        else case runExcept $ generate classpath (toLazyByteString package <> "/" <> dclass) compileDatatype of
+        else case runExcept $ generate classpath dclass compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
                 let out' = out { superClass = fromString boxedDataCls }
@@ -169,8 +170,8 @@ compileDatatypes ds classpath package = do
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
 -- This should be called at the end of the generation of a class file
-addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Text -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
-addBootstrapMethods s cp package x = runExceptT (generateT cp (toLazyByteString package <> "/" <> classname s) $ addBootstrapPoolItems x s) >>= \case
+addBootstrapMethods :: ConverterState -> [Tree CPEntry] -> Converter () -> ExceptT Text (LoggerT (NameGeneratorT IO)) OutputClass
+addBootstrapMethods s cp x = runExceptT (generateT cp (classname s) $ addBootstrapPoolItems x s) >>= \case
     Left err -> throwError $ pack $ show err
     Right ((bootstrapMethodStringIndex, metafactoryIndex, arg1, arg2s, arg3), classDirect) -> do
         let classFile = classDirect2File classDirect -- Convert the "direct" in-memory class into a class file structure
@@ -196,10 +197,11 @@ addBootstrapPoolItems (Converter x) s = do
             , methodAttributes = AR M.empty }
     mfIndex <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
     -- Add some constants to the pool that we'll need later, when we're creating the bootstrap method attribute
+    let heapObjectPath = toLazyByteString (pack $ packageName s) <> "/HeapObject"
     arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
-    arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
+    arg3 <- addToPool (CMethodType $ "([L" <> heapObjectPath <> ";[L" <> heapObjectPath <> ";)L" <> heapObjectPath <> ";")
     let ms = dynamicMethods converterState
-        heapObjectCls = ObjectType $ packageName s <> ".HeapObject"
+        heapObjectCls = ObjectType $ packageName s <> "/HeapObject"
     arg2s <- forM (toList ms) $ \name -> do
         let sig = MethodSignature [arrayOf heapObjectCls, arrayOf heapObjectCls] (Returns heapObjectCls)
             method = ClassFile.Method
@@ -305,17 +307,22 @@ compileExp (ExpConApp con args) = do
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
         Just d  -> return d
     heapObjectCls <- heapObjectClass
-    let cname = convertName (typeName datatype)
+    package <- getPackageName
+    let cname = package <> "/" <> convertName (typeName datatype)
         methodname = "_make" <> convertName con
-        methodSig = MethodSignature (replicate numArgs heapObjectCls) (Returns $ ObjectType $ unpack cname)
+        methodRet = Returns $ ObjectType $ unpack cname
+        methodArgs = replicate numArgs heapObjectCls
+        methodSig = MethodSignature methodArgs methodRet
         numArgs = length args
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
     invokeStatic (toLazyByteString cname) $ NameType (toLazyByteString methodname) methodSig
 compileExp (ExpCase head t vs alts) = do
+    package <- getPackageName
     headType <- case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
-            Types.TypeCon (Types.TypeConstant n _)    -> return $ encodeUtf8 $ fromStrict $ convertName $ jvmSanitise n
+            Types.TypeCon (Types.TypeConstant n _)    ->
+                return $ encodeUtf8 $ fromStrict $ package <> "/" <> (convertName $ jvmSanitise n)
             _                                         -> boxedData -- If it's not a datatype, pretend it's boxed data
     writeLog $ showt $ Types.unmakeApp t
     compileExp head

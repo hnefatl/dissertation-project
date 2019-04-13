@@ -1,3 +1,5 @@
+package ${package};
+
 public abstract class HeapObject implements Cloneable {
     public abstract HeapObject enter();
 
