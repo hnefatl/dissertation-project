@@ -17,7 +17,7 @@ import           System.Process    (readProcessWithExitCode)
 
 makeTest :: (String, Text, String) -> [TestTree]
 makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimisations)
-    where optimisations = S.fromList ["-l", "-t"]
+    where optimisations = S.fromList ["-l", "-t", "-u"]
           makeTest' opts = do
             let optList = S.toList opts
             testCase (makeTitle title optList) $ do
@@ -32,6 +32,7 @@ makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimi
                     (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
                     unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
                     assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
+
 
 makeTitle :: String -> [String] -> String
 makeTitle title []   = title

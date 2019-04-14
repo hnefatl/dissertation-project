@@ -35,9 +35,14 @@ parseFlags = Flags
        <> help "Perform the let-lifting optimisation"
        <> showDefault)
     <*> switch
-        ( long "top-level-dedupe"
+        ( long "dedupe"
        <> short 't'
-       <> help "Perform the top-level deduplication optimisation"
+       <> help "Perform the binding deduplication optimisation"
+       <> showDefault)
+    <*> switch
+        ( long "unreachable-code-elimination"
+       <> short 'u'
+       <> help "Perform the unreachable code elimination optimisation"
        <> showDefault)
     <*> switch
         ( long "no-std-import"

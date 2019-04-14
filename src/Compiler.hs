@@ -4,46 +4,49 @@
 
 module Compiler where
 
-import           BasicPrelude
-import           Control.Exception           (try)
-import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
-                                              throwError)
-import           Data.Default                (Default, def)
-import qualified Data.Map                    as M
-import qualified Data.Set                    as S
-import           Data.Text                   (pack, unpack)
-import           Data.Text.Lazy              (toStrict)
-import           Data.Text.Template          (substitute)
-import           System.Directory            (copyFile, createDirectoryIfMissing, listDirectory)
-import           System.Exit                 (exitFailure)
-import           System.IO.Temp              (withSystemTempDirectory)
-import           System.Process              (callProcess, readCreateProcess, shell)
-import           TextShow                    (showt)
+import           BasicPrelude                      hiding (pred)
+import           Control.Exception                 (try)
+import           Control.Monad.Except              (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
+                                                    throwError)
+import           Data.Default                      (Default, def)
+import qualified Data.Map                          as M
+import qualified Data.Set                          as S
+import           Data.Text                         (pack, unpack)
+import           Data.Text.Lazy                    (toStrict)
+import           Data.Text.Template                (substitute)
+import           System.Directory                  (copyFile, createDirectoryIfMissing, listDirectory)
+import           System.Exit                       (exitFailure)
+import           System.IO.Temp                    (withSystemTempDirectory)
+import           System.Process                    (callProcess, readCreateProcess, shell)
+import           TextShow                          (showt)
 
-import           ExtraDefs                   (endsWith, inverseMap, pretty, synPrint)
-import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
-import           NameGenerator               (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
-import           Names                       (VariableName, convertName)
-import           StdLibEmbed                 (stdLibContents)
+import           ExtraDefs                         (endsWith, inverseMap, pretty, synPrint)
+import           Logger                            (LoggerT, MonadLogger, runLoggerT, writeLog, writeLogs)
+import           NameGenerator                     (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
+import           Names                             (VariableName, convertName)
+import           StdLibEmbed                       (stdLibContents)
 
-import qualified Backend.CodeGen             as CodeGen (convert, writeClass)
-import           Backend.Deoverload          (deoverloadModule, deoverloadQuantType, runDeoverload)
-import qualified Backend.Deoverload          as Deoverloader
-import qualified Backend.ILA                 as ILA (datatypes, reverseRenamings, runConverter, toIla)
-import qualified Backend.ILAANF              as ILAANF (ilaToAnf)
-import qualified Backend.ILB                 as ILB (anfToIlb)
-import           Language.Haskell.Parser     (ParseResult(..), parseModule)
-import           Language.Haskell.Syntax     (HsModule(..))
-import           Optimisations.BindingDedupe (dedupe)
-import           Optimisations.LetLifting    (performLetLift)
-import           Preprocessor.Info           (getClassInfo, getModuleKinds)
-import           Preprocessor.Renamer        (evalRenamer, renameModule)
-import           Typechecker.Typechecker     (evalTypeInferrer, getClassEnvironment, inferModule)
+import qualified Backend.CodeGen                   as CodeGen (convert, writeClass)
+import           Backend.Deoverload                (deoverloadModule, deoverloadQuantType, runDeoverload)
+import qualified Backend.Deoverload                as Deoverloader
+import           Backend.ILA                       (Binding(..))
+import qualified Backend.ILA                       as ILA (datatypes, reverseRenamings, runConverter, toIla)
+import qualified Backend.ILAANF                    as ILAANF (ilaToAnf)
+import qualified Backend.ILB                       as ILB (Rhs(..), anfToIlb)
+import           Language.Haskell.Parser           (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax           (HsModule(..))
+import           Optimisations.BindingDedupe       (doDedupe)
+import           Optimisations.LetLifting          (performLetLift)
+import           Optimisations.UnreachableCodeElim (elimUnreachableCode)
+import           Preprocessor.Info                 (getClassInfo, getModuleKinds)
+import           Preprocessor.Renamer              (evalRenamer, renameModule)
+import           Typechecker.Typechecker           (evalTypeInferrer, getClassEnvironment, inferModule)
 
 data Flags = Flags
     { verbose         :: Bool
     , letLift         :: Bool
-    , topLevelDedupe  :: Bool
+    , dedupe          :: Bool
+    , unreachableElim :: Bool
     , noStdImport     :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
@@ -56,7 +59,8 @@ instance Default Flags where
     def = Flags
         { verbose = False
         , letLift = True
-        , topLevelDedupe = True
+        , dedupe = True
+        , unreachableElim = True
         , noStdImport = False
         , buildDir = "out"
         , outputJar = "a.jar"
@@ -79,6 +83,14 @@ parseContents contents = case parseModule contents of
 printLogsIfVerbose :: Flags -> [Text] -> IO ()
 printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
 
+makeOptimisation :: MonadLogger m => (Flags -> Bool) -> Text -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs]) -> Flags -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs])
+makeOptimisation pred name opt flags prog
+    | not (pred flags) = return prog -- Optimisation not enabled
+    | otherwise = do
+        prog' <- opt prog
+        writeLog $ unlines [name, pretty prog', unlines $ map showt prog', ""]
+        return prog'
+
 compile :: Flags -> FilePath -> IO ()
 compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     (Right (), logs) -> printLogsIfVerbose flags logs
@@ -86,8 +98,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
         putStrLn $ unlines ["Error", err]
         printLogsIfVerbose flags logs
         exitFailure
-    where x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
-          x = do
+    where
+        x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
+        x = do
             originalModule <- embedExceptIOIntoResult $ parse f
             m <- if noStdImport flags then return originalModule else mergePreludeModule originalModule
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
@@ -115,23 +128,19 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
             ilb <- embedExceptIntoResult $ ILB.anfToIlb ilaanf
             writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
-            ilb' <- if letLift flags then do
-                        ilb' <- performLetLift ilb
-                        writeLog $ unlines ["Let-lifting", pretty ilb', unlines $ map showt ilb', ""]
-                        return ilb'
-                    else return ilb
-            ilb'' <- if topLevelDedupe flags then do
-                        ilb'' <- dedupe ilb'
-                        writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
-                        return ilb''
-                    else return ilb'
-            compiled <- CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            -- Optimisations
+            let letLiftOpt = makeOptimisation letLift "Let-lifting" performLetLift flags
+                dedupeOpt = makeOptimisation dedupe "Dedupe" doDedupe flags
+                unreachOpt = makeOptimisation unreachableElim "Unreachable Code" (pure . elimUnreachableCode mainName) flags
+            ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
+            compiled <- CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
             let classDir = buildDir flags </> package flags
             lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
             lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
             lift $ compileRuntimeFiles flags
             lift $ lift $ lift $ makeJar flags
+
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do

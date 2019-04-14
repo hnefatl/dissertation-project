@@ -95,4 +95,4 @@ test = testGroup "ILA-ANF"
         tupleCon = DataCon "(,)"
         consCon = DataCon ":"
         nilCon = DataCon "[]"
-        errAlt t = Alt Default (Trivial $ makeError t)
+        errAlt t = Alt Default (Trivial $ Var "_compilerError" t)

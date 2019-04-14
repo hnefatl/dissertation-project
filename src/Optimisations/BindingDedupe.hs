@@ -32,8 +32,8 @@ instance Default DedupeState where
 withRenamings :: DedupeMonad m => (M.Map VariableName VariableName -> a -> b) -> a -> m b
 withRenamings f x = f <$> asks renamings <*> pure x
 
-dedupe :: (MonadError Text m) => [Binding Rhs] -> m [Binding Rhs]
-dedupe bs = catMaybes <$> runReaderT (mapM performBindingDedupe bs) def
+doDedupe :: (MonadError Text m) => [Binding Rhs] -> m [Binding Rhs]
+doDedupe bs = catMaybes <$> runReaderT (mapM performBindingDedupe bs) def
 
 performBindingDedupe :: DedupeMonad m => Binding Rhs -> m (Maybe (Binding Rhs))
 performBindingDedupe (NonRec v rhs) = fmap (NonRec v) <$> performDedupe v rhs
