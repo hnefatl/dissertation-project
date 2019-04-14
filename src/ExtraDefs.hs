@@ -8,7 +8,7 @@ import qualified Data.ByteString.Lazy    as B
 import           Data.Foldable           (foldl', foldlM, length)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
-import           Data.Text               (intercalate, lines, pack, unpack, takeEnd)
+import           Data.Text               (intercalate, lines, pack, takeEnd, unpack)
 import qualified Data.Text               as T
 import           Data.Text.Lazy          (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)

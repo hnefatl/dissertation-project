@@ -14,13 +14,13 @@ import qualified Data.Set                    as S
 import           Data.Text                   (pack, unpack)
 import           Data.Text.Lazy              (toStrict)
 import           Data.Text.Template          (substitute)
+import           System.Directory            (copyFile, createDirectoryIfMissing, listDirectory)
 import           System.Exit                 (exitFailure)
-import           System.Directory            (createDirectoryIfMissing, listDirectory, copyFile)
-import           System.Process              (callProcess, readCreateProcess, shell)
 import           System.IO.Temp              (withSystemTempDirectory)
+import           System.Process              (callProcess, readCreateProcess, shell)
 import           TextShow                    (showt)
 
-import           ExtraDefs                   (inverseMap, pretty, synPrint, endsWith)
+import           ExtraDefs                   (endsWith, inverseMap, pretty, synPrint)
 import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
 import           NameGenerator               (NameGenerator, NameGeneratorT, embedNG, evalNameGeneratorT)
 import           Names                       (VariableName, convertName)
@@ -143,7 +143,7 @@ compileRuntimeFiles flags = do
     -- Find all the runtime source files
     runtimeSrcFiles <- liftIO $ filter (\f -> pack f `endsWith` ".java") <$> listDirectory (runtimeFileDir flags)
     let variableReplacement "package" = pack (package flags)
-        variableReplacement v = error $ "Unknown variable " <> unpack v <> " in runtime source file"
+        variableReplacement v         = error $ "Unknown variable " <> unpack v <> " in runtime source file"
     buildOutput <- liftIO $ withSystemTempDirectory "compiler-runtime" $ \tmpDir -> do
         -- Read the runtime source files, replace the package name, write them to the temporary directory
         forM_ runtimeSrcFiles $ \runtimeFile -> do

@@ -15,7 +15,7 @@ import qualified Data.Map.Strict                as M
 import           Data.Maybe                     (fromJust)
 import qualified Data.Sequence                  as Seq
 import qualified Data.Set                       as S
-import           Data.Text                      (pack, unpack, replace)
+import           Data.Text                      (pack, replace, unpack)
 import           Data.Text.Lazy                 (fromStrict)
 import           Data.Text.Lazy.Encoding        (encodeUtf8)
 import           Data.Word                      (Word16)
@@ -38,7 +38,7 @@ import           Backend.ILA                    (Alt(..), AltConstructor(..), Bi
                                                  getBindingVariables, getBranchNames, getConstructorVariables,
                                                  isDataAlt, isDefaultAlt)
 import           Backend.ILB
-import           ExtraDefs                      (toLazyByteString, zipOverM_, liftJoin2)
+import           ExtraDefs                      (liftJoin2, toLazyByteString, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)

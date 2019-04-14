@@ -7,7 +7,7 @@ import           Data.ByteString.Lazy           (ByteString)
 import qualified Data.Map.Strict                as M
 import qualified Data.Set                       as S
 import           Data.Text                      (unpack)
-import           ExtraDefs                      (fromLazyByteString, toLazyByteString, liftJoin2)
+import           ExtraDefs                      (fromLazyByteString, liftJoin2, toLazyByteString)
 import           Names                          (TypeVariableName, VariableName(..), convertName)
 
 import           Java.Lang                      (runtimeException, stringClass)

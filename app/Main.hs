@@ -2,8 +2,8 @@ module Main where
 
 import BasicPrelude
 import Data.Default        (def)
-import System.FilePath     (takeBaseName)
 import Options.Applicative
+import System.FilePath     (takeBaseName)
 
 import Compiler            (Flags(..), compile)
 
@@ -20,7 +20,7 @@ parseCommandLine = do
     return $ case package flags of
         -- Default value for package is the filename of the first input file
         "" -> flags { package = takeBaseName $ head $ inputFiles flags }
-        _ -> flags
+        _  -> flags
 
 parseFlags :: Parser Flags
 parseFlags = Flags

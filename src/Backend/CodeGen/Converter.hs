@@ -3,7 +3,7 @@
 
 module Backend.CodeGen.Converter where
 
-import           BasicPrelude                   hiding (encodeUtf8, head, init, inits, swap, bool)
+import           BasicPrelude                   hiding (bool, encodeUtf8, head, init, inits, swap)
 import           Control.Monad.Except           (Except, ExceptT, runExcept, throwError)
 import           Control.Monad.State.Strict     (MonadState, StateT, get, gets, modify)
 import qualified Data.ByteString.Lazy           as B
@@ -24,7 +24,7 @@ import qualified JVM.ClassFile                  as ClassFile
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 import           Backend.ILA                    (Datatype(..), Literal(..))
 import           Backend.ILB
-import           ExtraDefs                      (fromLazyByteString, toLazyByteString, liftJoin2)
+import           ExtraDefs                      (fromLazyByteString, liftJoin2, toLazyByteString)
 import           Logger                         (LoggerT, MonadLogger, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
@@ -176,7 +176,7 @@ force :: Converter (NameType Method)
 force = heapObjectClass <&> \cls -> NameType "force" $ MethodSignature [] (Returns cls)
 functionInit :: Converter (NameType Method)
 functionInit = do
-    hoCls <- heapObjectClass 
+    hoCls <- heapObjectClass
     return $ NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf hoCls] ReturnsVoid
 thunkInit :: Converter (NameType Method)
 thunkInit = heapObjectClass <&> \cls -> NameType "<init>" $ MethodSignature [cls] ReturnsVoid

@@ -10,7 +10,7 @@ import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
 import           Control.Monad.Extra         (whenJust)
-import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify, put, evalStateT, runStateT)
+import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, get, gets, modify, put, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
