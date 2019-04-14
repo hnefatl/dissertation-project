@@ -17,6 +17,7 @@ BENCHMARKS = [
 ]
 
 for benchmark in BENCHMARKS:
+    print(benchmark.name)
     if hasattr(benchmark, "__enter__"):
         with benchmark as b:
             b.run()
