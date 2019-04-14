@@ -4,6 +4,7 @@ import sys
 
 import benchmark
 import jhaskellbenchmark
+import javabenchmark
 
 benchmarks = {}
 def add_benchmark(b):
@@ -15,6 +16,7 @@ def add_benchmark(b):
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs"))
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"))
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs"))
+add_benchmark(javabenchmark.JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 
 to_run = sys.argv[1:]
 if to_run == []:
@@ -23,8 +25,4 @@ if to_run == []:
 for bench_name in to_run:
     benchmark = benchmarks[bench_name]
     print(benchmark.name)
-    if hasattr(benchmark, "__enter__"):
-        with benchmark as b:
-            b.run()
-    else:
-        benchmark.run()
+    benchmark.run()
