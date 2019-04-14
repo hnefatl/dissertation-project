@@ -17,6 +17,7 @@ add_benchmark(jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonac
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"))
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs"))
 add_benchmark(javabenchmark.JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
+add_benchmark(javabenchmark.JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 
 to_run = sys.argv[1:]
 if to_run == []:
