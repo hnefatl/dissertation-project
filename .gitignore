@@ -7,3 +7,4 @@ compiler.cabal
 **/*.class
 hoogle.log
 out/
+**/*.jar

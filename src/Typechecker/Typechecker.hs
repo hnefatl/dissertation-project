@@ -10,7 +10,7 @@ import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
 import           Control.Monad.Extra         (whenJust)
-import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify, put, runStateT)
+import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify, put, evalStateT, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -82,15 +82,15 @@ runTypeInferrer :: TypeInferrer a -> LoggerT NameGenerator (Except Text a, Infer
 runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
     let z = case y of
-            Left err -> throwError $ unlines [err, pretty s]
+            Left err -> throwError err
             Right w  -> return w
     return (z, s)
 
 evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
 evalTypeInferrer (TypeInferrer x) = do
-    (y, s) <- lift $ runStateT (runExceptT x) def
+    y <- lift $ evalStateT (runExceptT x) def
     case y of
-        Left err -> throwError $ unlines [err, pretty s]
+        Left err -> throwError err
         Right z  -> return z
 
 

@@ -276,8 +276,8 @@ makeList' es t = do
     nil  <- Con <$> getListNilName <*> pure tList
     return $ foldr (\x y -> App (App cons x) y) nil es
 
-makeError :: Type -> Expr
-makeError = Var "compilerError"
+makeError :: Type -> Converter Expr
+makeError t = Var <$> asks (M.findWithDefault "compilerError" "compilerError" . topLevelRenames) <*> pure t
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
@@ -342,7 +342,7 @@ declToIla (HsFunBind (m:ms)) = do
     args <- flip zip argTypes <$> replicateM arity freshVarName
     let matchToArg (HsMatch _ _ pats rhs _) = (pats, rhs, retType, subEmpty)
     local (addTypes $ M.map (Quantified S.empty) $ M.fromList args) $ do
-        body <- patToIla args (map matchToArg (m:ms)) (makeError retType)
+        body <- patToIla args (map matchToArg (m:ms)) =<< makeError retType
         return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
@@ -403,7 +403,7 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addTypes patVariableTypes . addDictionaries dictionaryArgs) $ addRenamings renames $
-        patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
+        patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] =<< makeError expType
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
@@ -425,7 +425,7 @@ expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseTy
     scrutType' <- getSimpleFromSynType scrutType
     caseType' <- getSimpleFromSynType caseType
     scrut' <- expToIla scrut
-    body <- patToIla [(scrutBinder, scrutType')] [ altToPatList a caseType' | a <- alts ] (makeError caseType')
+    body <- patToIla [(scrutBinder, scrutType')] [ altToPatList a caseType' | a <- alts ] =<< makeError caseType'
     return $ Let scrutBinder scrutType' scrut' body
 expToIla HsTuple{} = throwError "HsTuple should've been removed in renamer"
 expToIla HsList{} = throwError "HsList should've been removed in renamer"
@@ -499,8 +499,9 @@ patToBindings' (HsPApp con ps) = do
             vs <- replicateM (length ps) freshVarName
             let v = vs !! i
             eType <- getExprType e
+            err <- makeError eType
             c (Var v eType) >>= \case
-              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default $ makeError eType ]
+              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default err ]
               Rec{} -> throwError "Recursive bindings not supported in patToBindings'"
     return $ map wrapInCase newBindingConts
 patToBindings' (HsPInfixApp p1 c p2) = patToBindings' $ HsPApp c [p1, p2]

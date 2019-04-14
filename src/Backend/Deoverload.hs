@@ -19,12 +19,12 @@ import qualified Data.Text                   as T
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
-import           ExtraDefs                   (pretty, synPrint, zipOverM)
+import           ExtraDefs                   (synPrint, zipOverM)
 import           Logger
-import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
+import           NameGenerator               (MonadNameGenerator, NameGenerator, freshVarName)
 import           Names                       (TypeVariableName(..), VariableName(..), convertName)
 import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
-import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
+import           Preprocessor.Info           (ClassInfo(..))
 import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
 import           Typechecker.Substitution    (Substitution(..), TypeSubstitution, applySub)
@@ -60,7 +60,7 @@ runDeoverload action ts ks ce = do
         Deoverload inner = addDictionaries ds >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
-            Left err -> throwError $ unlines [err, pretty s]
+            Left err -> throwError err
             Right y  -> return y
     return (z, s)
 

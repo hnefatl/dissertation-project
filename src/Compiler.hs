@@ -7,7 +7,7 @@ module Compiler where
 import           BasicPrelude
 import           Control.Exception           (try)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
-                                              throwError, withExceptT)
+                                              throwError)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -18,7 +18,7 @@ import           System.Exit                 (exitFailure)
 import           System.Directory            (createDirectoryIfMissing, listDirectory, copyFile)
 import           System.Process              (callProcess, readCreateProcess, shell)
 import           System.IO.Temp              (withSystemTempDirectory)
-import           TextShow                    (TextShow, showt)
+import           TextShow                    (showt)
 
 import           ExtraDefs                   (inverseMap, pretty, synPrint, endsWith)
 import           Logger                      (LoggerT, runLoggerT, writeLog, writeLogs)
@@ -93,7 +93,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
                 moduleClassInfo = getClassInfo renamedModule
-            ((taggedModule, types), classEnvironment) <- catchAddText (synPrint renamedModule) $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
+            ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
             deoverloadedModule <- liftEither $ runExcept deoverloadResult
@@ -111,9 +111,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n
             writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
-            ilaanf <- catchAddText (unlines $ map showt ila) $ ILAANF.ilaToAnf ila
+            ilaanf <- ILAANF.ilaToAnf ila
             writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
-            ilb <- catchAddText (unlines $ map showt ilaanf) $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
+            ilb <- embedExceptIntoResult $ ILB.anfToIlb ilaanf
             writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
             ilb' <- if letLift flags then do
                         ilb' <- performLetLift ilb
@@ -125,7 +125,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                         writeLog $ unlines ["Top-level dedupe", pretty ilb'', unlines $ map showt ilb'', ""]
                         return ilb''
                     else return ilb'
-            compiled <- catchAddText (unlines $ map showt ilaanf) $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            compiled <- CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb'' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
             let classDir = buildDir flags </> package flags
             lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
@@ -171,11 +171,6 @@ makeJar flags = do
 combineReverseRenamings :: M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName
 combineReverseRenamings xs ys = M.unions [xToz, xs, ys]
     where xToz = M.fromList $ flip map (M.toList xs) $ \(x,y) -> maybe (x,y) (x,) (M.lookup y ys)
-
-catchAdd :: (TextShow a, Monad m) => a -> ExceptT Text m b -> ExceptT Text m b
-catchAdd x = catchAddText (showt x)
-catchAddText :: Monad m => Text -> ExceptT Text m b -> ExceptT Text m b
-catchAddText x = withExceptT (\e -> unlines [e, x])
 
 -- Utility functions for converting between various monad transformer stacks...
 embedExceptIOIntoResult :: ExceptT e IO a -> ExceptT e (LoggerT (NameGeneratorT IO)) a

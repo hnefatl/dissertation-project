@@ -2,7 +2,6 @@
 
 package benchmark;
 
-import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
 
 import org.openjdk.jmh.annotations.Benchmark;
@@ -17,6 +16,7 @@ import org.openjdk.jmh.results.RunResult;
 
 import factorial.Factorial;
 import fibonacci.Fibonacci;
+import sort.Sort;
 
 public class Main {
     private static String[] args = new String[]{};
@@ -34,7 +34,7 @@ public class Main {
             e.printStackTrace();
         }
     }
-        
+            
     @Benchmark
     @BenchmarkMode(Mode.SampleTime)
     @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -46,5 +46,11 @@ public class Main {
     @OutputTimeUnit(TimeUnit.MILLISECONDS)
     public void fibonacci() {
         fibonacci.Fibonacci.main(args);
+    }
+    @Benchmark
+    @BenchmarkMode(Mode.SampleTime)
+    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+    public void sort() {
+        sort.Sort.main(args);
     }
 }

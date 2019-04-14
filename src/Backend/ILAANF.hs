@@ -82,10 +82,6 @@ getAnfRhsType (Lam _ t e) = T.makeFun [t] =<< getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
 
 
-makeError :: Type -> AnfTrivial
-makeError = Var "compilerError"
-
-
 ilaToAnf :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => [Binding ILA.Expr] -> m [Binding AnfRhs]
 ilaToAnf bs = writeLog "ILAANF" >> mapM ilaBindingToAnf bs
 

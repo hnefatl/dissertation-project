@@ -94,3 +94,6 @@ foldl _ a [] = a
 foldl f a (x:xs) = foldl f (f a x) xs
 
 sum = foldl (+) 0
+
+undefined :: a
+compilerError :: a
