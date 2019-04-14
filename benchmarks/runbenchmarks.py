@@ -1,22 +1,27 @@
 #!/usr/bin/env python3.7
 
-import os
-import subprocess
-import string
-import contextlib
-import tempfile
-import pathlib
+import sys
 
 import benchmark
 import jhaskellbenchmark
 
-BENCHMARKS = [
-    jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs"),
-    jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"),
-    jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs")
-]
+benchmarks = {}
+def add_benchmark(b):
+    if b.name in benchmarks:
+        raise ValueError(f"Duplicate benchmark name: {b.name}")
+    benchmarks[b.name] = b
 
-for benchmark in BENCHMARKS:
+
+add_benchmark(jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs"))
+add_benchmark(jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"))
+add_benchmark(jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs"))
+
+to_run = sys.argv[1:]
+if to_run == []:
+    to_run = benchmarks.keys()
+
+for bench_name in to_run:
+    benchmark = benchmarks[bench_name]
     print(benchmark.name)
     if hasattr(benchmark, "__enter__"):
         with benchmark as b:

@@ -8,10 +8,15 @@ import pathlib
 
 import benchmark
 
+
 class JHaskellBenchmark(benchmark.Benchmark):
-    def __init__(self, name, source_path):
+    def __init__(self, name, source_path, compiler_args=None):
+        if compiler_args is None:
+            compiler_args = []
+
         super().__init__(name)
         self._source_path = pathlib.Path(source_path)
+        self._compiler_args = compiler_args
         self._package_name = self._source_path.stem.lower()
         self._class_name = self._package_name.capitalize()
         self._exitstack = contextlib.ExitStack()
@@ -60,18 +65,21 @@ class JHaskellBenchmark(benchmark.Benchmark):
     def _run_compiler(self):
         original_dir = pathlib.Path.cwd()
         # Build the source program
-        args = [
-            "compiler-exe",
-            "--build-dir",
-            f"{self._temp_dir / 'out'}",
-            "--output-jar",
-            f"{self._temp_dir / self._name}.jar",
-            "--output-class",
-            self._class_name,
-            "--runtime-file-dir",
-            str(original_dir.parent / "runtime"),
-            f"programs/{self._package_name}.hs",
-        ]
+        args = (
+            [
+                "compiler-exe",
+                "--build-dir",
+                f"{self._temp_dir / 'out'}",
+                "--output-jar",
+                f"{self._temp_dir / self._name}.jar",
+                "--output-class",
+                self._class_name,
+                "--runtime-file-dir",
+                str(original_dir.parent / "runtime"),
+            ]
+            + self._compiler_args
+            + [f"programs/{self._package_name}.hs"]
+        )
         try:
             subprocess.check_output(args).decode()
         except subprocess.CalledProcessError as e:
@@ -80,12 +88,7 @@ class JHaskellBenchmark(benchmark.Benchmark):
 
         # Build the benchmark program
         os.chdir(self._temp_dir)
-        args = [
-            "javac",
-            "-cp",
-            f"{self._name}.jar:{original_dir / 'deps/*'}",
-            "benchmark/Main.java"
-        ]
+        args = ["javac", "-cp", f"{self._name}.jar:{original_dir / 'deps/*'}", "benchmark/Main.java"]
         try:
             subprocess.check_output(args).decode()
             os.makedirs("META-INF", exist_ok=True)
@@ -101,13 +104,7 @@ class JHaskellBenchmark(benchmark.Benchmark):
         original_dir = pathlib.Path.cwd()
         os.chdir(self._temp_dir)
         try:
-            args = [
-                "java",
-                "-noverify",
-                "-cp",
-                f"{self._name}.jar:.:{original_dir / 'deps/*'}",
-                "benchmark.Main"
-            ]
+            args = ["java", "-noverify", "-cp", f"{self._name}.jar:.:{original_dir / 'deps/*'}", "benchmark.Main"]
             output = subprocess.check_output(args)
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
