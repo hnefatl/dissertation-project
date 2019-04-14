@@ -10,13 +10,14 @@ import pathlib
 import benchmark
 import jhaskellbenchmark
 
-RUNTIME_DIR = "../runtime"
-
 BENCHMARKS = [
-    jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs")
+    jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs"),
+    jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"),
+    jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs")
 ]
 
 for benchmark in BENCHMARKS:
+    print(benchmark.name)
     if hasattr(benchmark, "__enter__"):
         with benchmark as b:
             b.run()

@@ -10,7 +10,7 @@ import benchmark
 
 class JHaskellBenchmark(benchmark.Benchmark):
     def __init__(self, name, source_path):
-        self._name = name
+        super().__init__(name)
         self._source_path = pathlib.Path(source_path)
         self._package_name = self._source_path.stem.lower()
         self._class_name = self._package_name.capitalize()
