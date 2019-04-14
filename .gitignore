@@ -8,3 +8,4 @@ compiler.cabal
 hoogle.log
 out/
 **/*.jar
+**/__pycache__
