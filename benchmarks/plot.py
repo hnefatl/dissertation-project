@@ -30,8 +30,8 @@ loc = np.arange(len(benches))
 bars = []
 for language_number, (language, results) in enumerate(language_results.items()):
     lows, medians, highs = map(np.array, zip(*results))
-    quartiles = list(zip(medians - lows, highs - medians))
-    bars.append(ax.bar(x=loc + width * language_number, height=medians, width=width, yerr=quartiles))
+    errors = [medians - lows, highs - medians]
+    bars.append(ax.bar(x=loc + width * language_number, height=medians, width=width, yerr=errors))
 
 ax.set_title("Benchmark performance by compiler")
 ax.set_xticks(loc + width / 2)
