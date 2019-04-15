@@ -101,6 +101,8 @@ addMainMethod :: Converter ()
 addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
+        --getStaticField Java.Lang.system $ NameType "in" $ ObjectType "java/io/InputStream"
+        --invokeVirtual "java/io/InputStream" $ NameType "read" $ MethodSignature [] (Returns IntType)
         -- Perform any initialisation actions
         performInitialisers
         getStaticField Java.Lang.system Java.IO.out
@@ -242,14 +244,6 @@ compileLocalClosure v (RhsClosure args body) = do
     cname <- gets classname
     invokeStatic cname f
     storeLocal v
-
--- |Compile an expression wrapped in a thunk, leaving the thunk on the top of the stack
-compileThunk :: Exp -> Converter ()
-compileThunk body = do
-    new =<< thunk
-    dup
-    compileExp body
-    liftJoin2 invokeSpecial thunk thunkInit
 
 -- |Compile a function binding into bytecode. It's a bit complicated:
 -- To compile a function `f` with free variables `fv` and arguments `as`, we create two functions.

@@ -95,5 +95,7 @@ foldl f a (x:xs) = foldl f (f a x) xs
 
 sum = foldl (+) 0
 
+const x _ = x
+
 undefined :: a
 compilerError :: a

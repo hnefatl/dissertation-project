@@ -9,6 +9,7 @@ public class Function extends HeapObject {
     // We can be given more arguments than we expect: eg. `(\x -> x) (\x -> x) 1`.
     private ArrayList<HeapObject> arguments;
     private int arity = 0; // The arity of this function
+    private HeapObject result = null; // Result of previous evaluation of this function
 
     public Function(BiFunction<HeapObject[], HeapObject[], HeapObject> inner, int arity, HeapObject[] freeVariables) {
         this.inner = inner;
@@ -21,17 +22,23 @@ public class Function extends HeapObject {
     // We *want* to mutate this function so that multiple references to the same value don't recompute.
     @Override
     public HeapObject enter() {
+        // Check if we've got a cached value
+        if (result != null) {
+            return result;
+        }
+
         if (arguments.size() < arity) {
             return this; // If we're not fully applied, we get a partially applied function
         }
         else if (arguments.size() > arity) { // If we're over-applied, carry the arguments over
             try {
-                Function result = (Function)inner
+                Function fun = (Function)inner
                     .apply(arguments.subList(0, arity).toArray(new HeapObject[0]), freeVariables)
                     .enter()
                     .clone();
                 for (HeapObject arg : arguments.subList(arity, arguments.size()))
-                    result.addArgument(arg);
+                    fun.addArgument(arg);
+                result = fun.enter();
                 return result;
             }
             catch (CloneNotSupportedException e) {
@@ -39,7 +46,8 @@ public class Function extends HeapObject {
             }
         }
         else { // Perfect number of arguments
-            return inner.apply(arguments.toArray(new HeapObject[0]), freeVariables).enter();
+            result = inner.apply(arguments.toArray(new HeapObject[0]), freeVariables).enter();
+            return result;
         }
     }
 

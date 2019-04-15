@@ -142,10 +142,9 @@ addDynamicMethod m = do
 makeClass :: IsString s => String -> Converter s
 makeClass s = fromString . (<> ("/" <> s)) <$> getPackageName
 -- The support classes written in Java and used by the Haskell translation
-heapObject, function, thunk, unboxedData, boxedData, int, integer, char, bool, list :: IsString s => Converter s
+heapObject, function, unboxedData, boxedData, int, integer, char, bool, list :: IsString s => Converter s
 heapObject = makeClass "HeapObject"
 function = makeClass "Function"
-thunk = makeClass "Thunk"
 unboxedData = makeClass "Data"
 boxedData = makeClass "BoxedData"
 int = makeClass "_Int"
@@ -155,10 +154,9 @@ bool = makeClass "_Bool"
 list = makeClass $ jvmSanitise "[]"
 bifunction :: IsString s => s
 bifunction = "java/util/function/BiFunction"
-heapObjectClass, functionClass, thunkClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, boolClass, listClass :: Converter FieldType
+heapObjectClass, functionClass, unboxedDataClass, boxedDataClass, intClass, integerClass, charClass, boolClass, listClass :: Converter FieldType
 heapObjectClass = ObjectType <$> heapObject
 functionClass = ObjectType <$> function
-thunkClass = ObjectType <$> thunk
 unboxedDataClass = ObjectType <$> unboxedData
 boxedDataClass = ObjectType <$> boxedData
 intClass = ObjectType <$> int
@@ -178,8 +176,6 @@ functionInit :: Converter (NameType Method)
 functionInit = do
     hoCls <- heapObjectClass
     return $ NameType "<init>" $ MethodSignature [bifunctionClass, IntType, arrayOf hoCls] ReturnsVoid
-thunkInit :: Converter (NameType Method)
-thunkInit = heapObjectClass <&> \cls -> NameType "<init>" $ MethodSignature [cls] ReturnsVoid
 bifunctionApply :: NameType Method
 bifunctionApply = NameType "apply" $ MethodSignature [] (Returns bifunctionClass)
 clone :: NameType Method
