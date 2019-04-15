@@ -4,7 +4,7 @@ import java.math.BigInteger;
 
 public class Fibonacci {
     public static void main(String[] args) {
-        System.out.println(fib(30));
+        System.out.println(fib(20));
     }
 
     public static int fib(int n) {
