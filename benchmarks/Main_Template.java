@@ -38,9 +38,7 @@ public class Main {
             // Prevent outputting all the benchmark prints
             PrintStream stdout = System.out;
             System.setOut(new PrintStream(new FileOutputStream("/dev/null")));
-
             RunResult run = new ArrayList<>(new Runner(opt).run()).get(0);
-
             System.setOut(stdout);
 
             BenchmarkResult bench = new ArrayList<>(run.getBenchmarkResults()).get(0);
