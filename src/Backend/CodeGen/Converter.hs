@@ -170,8 +170,6 @@ addArgument :: Converter (NameType Method)
 addArgument = heapObjectClass <&> \cls -> ClassFile.NameType "addArgument" $ MethodSignature [cls] ReturnsVoid
 enter :: Converter (NameType Method)
 enter = heapObjectClass <&> \cls -> NameType "enter" $ MethodSignature [] (Returns cls)
-force :: Converter (NameType Method)
-force = heapObjectClass <&> \cls -> NameType "force" $ MethodSignature [] (Returns cls)
 functionInit :: Converter (NameType Method)
 functionInit = do
     hoCls <- heapObjectClass
@@ -400,6 +398,8 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             builderVar <- storeUnnamedLocal
             listCls <- list
             charCls <- char
+            heapObjectCls <- heapObject
+            enterMeth <- enter
             boxedDataDataField <- boxedDataData
             let body = do
                     loadLocal builderVar
@@ -409,6 +409,9 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
                     -- Load the rest of the list, overwrite our reference
                     iconst_1
                     aaload
+                    -- Evaluate the tail
+                    invokeVirtual heapObjectCls clone
+                    invokeVirtual heapObjectCls enterMeth
                     checkCast listCls
                     storeSpecificUnnamedLocal listVar
                     -- Load the head char, append to the builder, pop the returned reference

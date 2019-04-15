@@ -108,7 +108,8 @@ addMainMethod = do
         getStaticField Java.Lang.system Java.IO.out
         main <- jvmSanitise <$> gets mainName
         pushGlobalSymbol main =<< heapObjectClass
-        liftJoin2 invokeVirtual heapObject force
+        liftJoin2 invokeVirtual heapObject (pure clone)
+        liftJoin2 invokeVirtual heapObject enter
         makeUnboxedString -- Convert the result haskell string into a java string
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN

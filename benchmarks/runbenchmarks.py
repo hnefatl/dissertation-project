@@ -15,7 +15,7 @@ def add_benchmark(b):
 
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("fibonacci", "programs/fibonacci.hs"))
 add_benchmark(jhaskellbenchmark.JHaskellBenchmark("factorial", "programs/factorial.hs"))
-add_benchmark(jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs"))
+#add_benchmark(jhaskellbenchmark.JHaskellBenchmark("sort", "programs/sort.hs"))
 add_benchmark(javabenchmark.JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 add_benchmark(javabenchmark.JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 
