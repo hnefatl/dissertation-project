@@ -24,7 +24,7 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (getBoundVariables)
+import           Preprocessor.ContainedNames (HasFreeVariables, getFreeVariables, getBoundVariables)
 import           Preprocessor.Dependency
 import           Preprocessor.Info           (ClassInfo(..), getClassInfo, getModuleKinds)
 import           Tuples                      (makeTupleName)
@@ -279,23 +279,38 @@ getQualifiedType name = do
     let qt = Qualified predicates t
     writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
-qualToQuant :: Bool -> QualifiedType -> TypeInferrer QuantifiedType
-qualToQuant freshen qt = do
-    let quantifiers = getTypeVars qt
+qualToQuant :: Bool -> S.Set TypeVariableName -> QualifiedType -> TypeInferrer QuantifiedType
+qualToQuant freshen freeTvs qt = do
+    -- Update the type variables to their latest values
+    freeTvs' <- (S.fromList . catMaybes <$>) $ forM (S.toList freeTvs) $ \tv -> do
+        t <- nameToType tv
+        t' <- applyCurrentSubstitution t
+        return $ case t' of
+            TypeVar (TypeVariable v _) -> Just v
+            _ -> Nothing
+    let keepFreeTvs = S.filter (\(TypeVariable v _) -> S.member v freeTvs')
+        quantifiers = keepFreeTvs $ getTypeVars qt
+    writeLog $ "Quantifying " <> showt qt <> " with free tvs " <> showt freeTvs'
+    writeLog $ showt quantifiers
     case freshen of
         False -> return $ Quantified quantifiers qt
         True -> do
             qt' <- instantiate $ Quantified quantifiers qt
-            let quantifiers' = getTypeVars qt'
+            let quantifiers' = keepFreeTvs $ getTypeVars qt'
             return $ Quantified quantifiers' qt'
-getQuantifiedType :: TypeVariableName -> TypeInferrer QuantifiedType
-getQuantifiedType name = do
+getQuantifiedType :: TypeVariableName -> S.Set TypeVariableName -> TypeInferrer QuantifiedType
+getQuantifiedType name freeTvs = do
     qual <- getQualifiedType name
-    quant <- qualToQuant False qual
+    quant <- qualToQuant False freeTvs qual
     writeLog $ showt name <> " has quantified type " <> showt quant
     return quant
 getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
-getVariableQuantifiedType name = getQuantifiedType =<< getVariableTypeVariable name
+getVariableQuantifiedType name = flip getQuantifiedType S.empty =<< getVariableTypeVariable name
+
+getFreeTypeVariableNames :: HasFreeVariables a => a -> TypeInferrer (S.Set TypeVariableName)
+getFreeTypeVariableNames x = do
+    fvs <- S.toList <$> getFreeVariables x
+    S.fromList <$> mapM getVariableTypeVariable fvs
 
 -- |If the given type variable name refers to a quantified type, instantiate it and return the new type variable name.
 -- If the name refers to a non-quantified type, just return the same name
@@ -394,9 +409,7 @@ inferExpression (HsCase scrut alts) = do
     makeExpTypeWrapper (HsCase scrut' alts') commonType
 inferExpression (HsIf cond e1 e2) = do
     (condExp, condVar) <- inferExpression cond
-    condType <- getQuantifiedType condVar
-    let expected = Quantified S.empty (Qualified S.empty typeBool)
-    unless (condType == expected) $ throwError $ "if condition " <> showt cond <> " doesn't have type bool"
+    unify typeBool =<< nameToType condVar
     (e1Exp, e1Var) <- inferExpression e1
     e1Type <- nameToType e1Var
     (e2Exp, e2Var) <- inferExpression e2
@@ -491,9 +504,7 @@ inferGuardedAlts (HsGuardedAlts guards) = do
 inferGuardedAlt :: HsGuardedAlt -> TypeInferrer (HsGuardedAlt, TypeVariableName)
 inferGuardedAlt (HsGuardedAlt loc cond e) = do
     (cond', condVar) <- inferExpression cond
-    condType <- getQuantifiedType condVar
-    unless (condType == Quantified S.empty (Qualified S.empty typeBool)) $
-        throwError $ unlines ["Expression in case guard has non-boolean type:", synPrint cond, showt condType]
+    unify typeBool =<< nameToType condVar
     (e', eVar) <- inferExpression e
     return (HsGuardedAlt loc cond' e', eVar)
 
@@ -546,7 +557,7 @@ inferDecl (HsFunBind matches) = do
 inferDecl d@(HsTypeSig _ names t) = do
     ks <- getKinds
     t' <- synToQualType ks t
-    qt <- qualToQuant True t'
+    qt <- qualToQuant True S.empty t'
     let varNames = map convertName names
     forM_ varNames (\v -> insertQuantifiedType v qt)
     return d
@@ -675,7 +686,8 @@ inferDecls ds = do
     addVariableTypes typeVarMapping
     declExps <- mapM inferDecl ds
     -- Update our name -> type mappings
-    mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name)) (S.toList names)
+    freeTvs <- getFreeTypeVariableNames ds
+    mapM_ (\name -> insertQuantifiedType name =<< getQuantifiedType (typeVarMapping M.! name) freeTvs) (S.toList names)
     return declExps
 
 inferDeclGroup :: [Syntax.HsDecl] -> TypeInferrer [Syntax.HsDecl]

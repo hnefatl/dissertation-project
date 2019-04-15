@@ -104,7 +104,7 @@ addDictionaries :: M.Map TypePredicate VariableName -> Deoverload ()
 addDictionaries dicts = do
     existingDicts <- gets dictionaries
     let intersection = M.intersection dicts existingDicts
-    unless (null intersection) $ throwError $ "Clashing dictionary types: " <> showt intersection
+    unless (null intersection) $ throwError $ "Existing dictionary types: " <> showt intersection
     -- Generate a type for each new dictionary bound
     let newTypes = M.fromList $ map (\(p, v) -> (v, Quantified S.empty $ Qualified S.empty $ deoverloadTypePredicate p)) (M.toList dicts)
     modify $ \s -> s
@@ -273,7 +273,7 @@ deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloade
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
-    t@(Quantified _ (Qualified quals _)) <- getType (convertName name)
+    (Quantified _ (Qualified quals _)) <- getType (convertName name)
     -- Remove any constraints that we need and are already provided by dictionaries
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)
@@ -296,7 +296,7 @@ deoverloadRhsWithoutAddingDicts _                     = throwError "Unsupported 
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
-    (HsExpTypeSig loc _ t@(HsQualType _ simpleType)) -> do
+    (HsExpTypeSig loc _ t) -> do
         -- Replace each constraint with a lambda for a dictionary
         ks                <- getKinds
         Qualified quals _ <- synToQualType ks t
