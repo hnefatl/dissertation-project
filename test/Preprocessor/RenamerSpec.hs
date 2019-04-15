@@ -4,14 +4,14 @@ import           BasicPrelude
 import           Test.Tasty              (TestTree, testGroup)
 import           Test.Tasty.HUnit        (Assertion, assertFailure, testCase)
 
-import           Language.Haskell.Syntax
 import           Language.Haskell.Parser (ParseResult(..), parseModule)
+import           Language.Haskell.Syntax
 
 import           Control.Monad.Except    (runExcept)
+import           Data.Functor.Identity   (runIdentity)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
-import           Data.Functor.Identity   (runIdentity)
 import           TextShow                (showt)
 
 import           AlphaEq                 (AlphaEq, alphaEqError, stripParens)
@@ -20,8 +20,8 @@ import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator)
 import           Names                   (VariableName)
 import           Preprocessor.Renamer    (bindVariableForScope, renameModule, runRenamer)
+import           SyntaxTraversals        (expTraverse)
 import           Typechecker.Hardcoded   (builtinConstructors, builtinFunctions)
-import           SyntaxTraversals (expTraverse)
 
 assertAlphaEq :: AlphaEq a => Text -> a -> a -> Assertion
 assertAlphaEq msg x y = case runExcept $ alphaEqError x y of
@@ -34,7 +34,7 @@ listCorrector :: HsModule -> HsModule
 listCorrector = runIdentity . expTraverse f
     where
         f (HsList []) = pure $ HsCon $ Special $ HsListCon
-        f e = pure e
+        f e           = pure e
 
 makeTest :: Text -> Text -> TestTree
 makeTest = makeTestWith (M.keysSet $ M.union builtinFunctions builtinConstructors)

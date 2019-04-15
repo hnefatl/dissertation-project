@@ -3,7 +3,7 @@
 module Backend.ILAANFSpec where
 
 import           BasicPrelude            hiding (head)
-import           Control.Monad.Except    (MonadError, runExcept, runExceptT, throwError)
+import           Control.Monad.Except    (MonadError, liftEither, runExcept, runExceptT, throwError)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
 import           Data.Text               (pack, unpack)
@@ -14,12 +14,15 @@ import           Test.Tasty.HUnit        (assertFailure, testCase)
 import           TextShow                (showt)
 
 import           AlphaEq                 (alphaEqError)
-import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, evalDeoverload)
+import           Backend.Deoverload      (deoverloadModule, deoverloadQuantType, runDeoverload)
+import qualified Backend.Deoverload      as Deoverload
 import           Backend.ILA             hiding (Expr(..), makeError, makeList, makeTuple)
 import           Backend.ILAANF
 import           ExtraDefs
 import           Logger                  (runLoggerT)
 import           NameGenerator           (evalNameGenerator, freshDummyTypeVarName)
+import           Names                   (convertName)
+import           Preprocessor.Info       (getClassInfo)
 import           Typechecker.Hardcoded   (builtinClasses, builtinDictionaries, builtinKinds)
 import           Typechecker.Typechecker
 import           Typechecker.Types       hiding (makeFunUnsafe, makeList, makeTuple)
@@ -39,12 +42,15 @@ makeTest input expected = testCase (unpack $ deline input) $
             _ -> return ()
     where foo = do
             m <- parse input
+            let moduleClassInfo = getClassInfo m
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
-            (m'', _, _) <- evalDeoverload (deoverloadModule m') ts builtinKinds builtinClasses
+            (dResult, dState) <- lift $ runDeoverload (deoverloadModule moduleClassInfo m') ts builtinKinds builtinClasses
+            m'' <- liftEither $ runExcept dResult
             -- Convert the overloaded types (Num a => a) into deoverloaded types (Num a -> a).
             dets <- mapM deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
-            evalConverter (toIla m'' >>= ilaToAnf) M.empty dets builtinKinds
+            let dictNames = S.map convertName $ M.keysSet moduleClassInfo
+            evalConverter (toIla m'' >>= ilaToAnf) M.empty dets builtinKinds (Deoverload.dictionaries dState) dictNames
 
 
 test :: TestTree
@@ -89,4 +95,4 @@ test = testGroup "ILA-ANF"
         tupleCon = DataCon "(,)"
         consCon = DataCon ":"
         nilCon = DataCon "[]"
-        errAlt t = Alt Default (Trivial $ makeError t)
+        errAlt t = Alt Default (Trivial $ Var "_compilerError" t)

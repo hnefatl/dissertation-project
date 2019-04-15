@@ -3,6 +3,7 @@ module Main where
 import BasicPrelude
 import Data.Default        (def)
 import Options.Applicative
+import System.FilePath     (takeBaseName)
 
 import Compiler            (Flags(..), compile)
 
@@ -14,8 +15,12 @@ main = do
         _   -> putStrLn "Currently only supports a single input file"
 
 parseCommandLine :: IO Flags
-parseCommandLine = execParser $
-    info (helper <*> parseFlags) (fullDesc <> progDesc "A Compiler from Haskell to Java Bytecode")
+parseCommandLine = do
+    flags <- execParser $ info (helper <*> parseFlags) (fullDesc <> progDesc "A Compiler from Haskell to Java Bytecode")
+    return $ case package flags of
+        -- Default value for package is the filename of the first input file
+        "" -> flags { package = takeBaseName $ head $ inputFiles flags }
+        _  -> flags
 
 parseFlags :: Parser Flags
 parseFlags = Flags
@@ -30,20 +35,30 @@ parseFlags = Flags
        <> help "Perform the let-lifting optimisation"
        <> showDefault)
     <*> switch
-        ( long "top-level-dedupe"
+        ( long "dedupe"
        <> short 't'
-       <> help "Perform the top-level deduplication optimisation"
+       <> help "Perform the binding deduplication optimisation"
+       <> showDefault)
+    <*> switch
+        ( long "unreachable-code-elimination"
+       <> short 'u'
+       <> help "Perform the unreachable code elimination optimisation"
+       <> showDefault)
+    <*> switch
+        ( long "no-std-import"
+       <> short 'n'
+       <> help "Don't import the standard library"
        <> showDefault)
     <*> strOption
-        ( long "output-dir"
+        ( long "build-dir"
        <> short 'd'
-       <> help "Output directory for build files"
-       <> value (outputDir def)
+       <> help "Directory to store build files"
+       <> value (buildDir def)
        <> showDefault)
     <*> strOption
         ( long "output-jar"
        <> short 'o'
-       <> help "Output jar name"
+       <> help "Output jar path"
        <> value (outputJar def)
        <> showDefault)
     <*> strOption
@@ -57,4 +72,9 @@ parseFlags = Flags
        <> help "Directory containing the compiler's runtime class files."
        <> value (runtimeFileDir def)
        <> showDefault)
+    <*> strOption
+        ( long "package"
+       <> short 'p'
+       <> help "Java package used for the output java files"
+       <> value "")
     <*> some (argument str (metavar "input-files" <> help "Haskell source files to compile"))

@@ -1,18 +1,18 @@
 module Typechecker.TypeTaggerSpec where
 
-import           BasicPrelude
-import           Test.Tasty              (TestTree, testGroup)
-import           Test.Tasty.HUnit        (assertBool, assertFailure, testCase)
+import BasicPrelude
+import Test.Tasty              (TestTree, testGroup)
+import Test.Tasty.HUnit        (assertBool, assertFailure, testCase)
 
-import           Control.Monad.Except
-import           Data.Text               (unpack)
-import           Language.Haskell.Parser (ParseResult(..), parseModule)
+import Control.Monad.Except
+import Data.Text               (unpack)
+import Language.Haskell.Parser (ParseResult(..), parseModule)
 
-import           AlphaEq
-import           ExtraDefs               (deline, pretty, synPrint)
-import           Logger
-import           NameGenerator
-import           Typechecker.Typechecker
+import AlphaEq
+import ExtraDefs               (deline, pretty, synPrint)
+import Logger
+import NameGenerator
+import Typechecker.Typechecker
 
 makeTest :: Text -> Text -> TestTree
 makeTest input expected = testCase (unpack $ deline input) $ do

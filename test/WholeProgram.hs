@@ -2,57 +2,67 @@
 
 module WholeProgram where
 
-import Test.Tasty
-import Test.Tasty.HUnit
+import           Test.Tasty
+import           Test.Tasty.HUnit
 
-import BasicPrelude
-import Compiler          (Flags(outputJar))
-import Data.Default      (def)
-import Data.Text         (unpack)
-import NeatInterpolation
-import System.Exit       (ExitCode(ExitSuccess))
-import System.IO.Temp
-import System.Process    (readProcessWithExitCode)
+import           BasicPrelude      hiding (unwords)
+import           Data.List         (unwords)
+import qualified Data.Set          as S
+import           Data.Text         (pack, strip, unpack)
+import           NeatInterpolation
+import           System.Exit       (ExitCode(ExitSuccess))
+import           System.IO.Temp    (withSystemTempDirectory)
+import           System.Process    (readProcessWithExitCode)
 
 
-makeTest :: (String, Text, String) -> TestTree
-makeTest (title, source, expected) = testCase title $ do
-    tempDir <- getCanonicalTemporaryDirectory
-    withTempDirectory tempDir "compiler-test" $ \dir -> do
-        sourceFile <- writeTempFile dir "compiler-test" (unpack source)
-        let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, dir </> sourceFile]
-            runArgs = ["-noverify", "-jar", dir </> outputJar def]
-        (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
-        unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
-        (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
-        unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
-        assertEqual buildOutput expected runOutput
+makeTest :: (String, Text, String) -> [TestTree]
+makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimisations)
+    where optimisations = S.fromList ["-l", "-t", "-u"]
+          makeTest' opts = do
+            let optList = S.toList opts
+            testCase (makeTitle title optList) $ do
+                withSystemTempDirectory "compiler-test" $ \dir -> do
+                    let sourceFile = dir </> "testsrc.hs"
+                        outputJar = dir </> "a.jar"
+                    writeFile sourceFile source
+                    let buildArgs = ["exec", "compiler-exe", "--", "-v", "-d", dir, "-o", outputJar, sourceFile] <> optList
+                        runArgs = ["-noverify", "-jar", outputJar]
+                    (buildResult, buildOutput, buildErr) <- readProcessWithExitCode "stack" buildArgs ""
+                    unless (buildResult == ExitSuccess) $ assertFailure $ intercalate "\n" [buildOutput, buildErr]
+                    (runResult, runOutput, runErr) <- readProcessWithExitCode "java" runArgs ""
+                    unless (runResult == ExitSuccess) $ assertFailure $ intercalate "\n" [runOutput, runErr]
+                    assertEqual buildOutput expected (unpack $ strip $ pack runOutput)
+
+
+makeTitle :: String -> [String] -> String
+makeTitle title []   = title
+makeTitle title opts = unwords $ title:"with":opts
 
 test :: TestTree
-test = testGroup "Whole Program" $ map makeTest
+test = testGroup "Whole Program" $ concatMap makeTest
     [
         (
-            "_main = True"
+            "main = show True"
         ,
             [text|
-                _main = True
+                main = show True
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
-            "_main = id id False"
+            "main = show (id id False)"
         ,
             [text|
-                _main = id id False
+                main = show (id id False)
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
-            "_main = foo [True, False]"
+            "main = show (foo [True, False])"
         ,
             [text|
                 class Foo a where
@@ -62,32 +72,34 @@ test = testGroup "Whole Program" $ map makeTest
                 instance Foo [Bool] where
                     foo = all foo
 
-                _main = foo [True, False]
+                main = show (foo [True, False])
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
-            "_main = (True, False, True)"
+            "main = show (snd (True, 0 :: Int))"
         ,
             [text|
-                _main = (True, False, True)
+                snd (_, y) = y
+
+                main = show (snd (True, 0 :: Int))
             |]
         ,
-            "Data: { branch: 0, data: { Data: { branch: 1, data: { } } Data: { branch: 0, data: { } } Data: { branch: 1, data: { } } } }\n"
+            "0"
         )
     ,
         (
-            "_main = (\\(Foo x) -> x) (Foo True)"
+            "main = show ((\\(Foo x) -> x) (Foo True))"
         ,
             [text|
                 data Foo a = Foo a
 
-                _main = (\(Foo x) -> x) (Foo True)
+                main = show ((\(Foo x) -> x) (Foo True))
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
@@ -95,42 +107,55 @@ test = testGroup "Whole Program" $ map makeTest
         ,
             [text|
                 [x, y] = [False, True]
-                _main = x
+                main = show x
             |]
         ,
-            "Data: { branch: 0, data: { } }\n"
+            "False"
         )
     ,
         (
-            "_main = all not [False, True]"
+            "main = all not [False, True]"
         ,
             [text|
-                _main = all not [False, False]
+                main = show (all not [False, False])
             |]
         ,
-            "Data: { branch: 1, data: { } }\n"
+            "True"
         )
     ,
         (
-            "_main = sum [1,2,3,4,5,6,7,8,9,10]"
+            "main = sum [1,2,3,4,5,6,7,8,9,10]"
         ,
             [text|
-                _main = sum [1,2,3,4,5,6,7,8,9,10] :: Int
+                main = show (sum [1,2,3,4,5,6,7,8,9,10] :: Int)
             |]
         ,
-            "Int: 55\n"
+            "55"
         )
     ,
         (
-            "_main = factorial 10"
+            "main = factorial 10"
         ,
             [text|
                 factorial 0 = 1
                 factorial n = n * factorial (n - 1)
-                
-                _main = factorial 10 :: Int
+
+                main = show (factorial 10 :: Int)
             |]
         ,
-            "Int: 3628800\n"
+            "3628800"
+        )
+    ,
+        (
+            "main = factorial 50"
+        ,
+            [text|
+                factorial 0 = 1
+                factorial n = n * factorial (n - 1)
+
+                main = show (factorial 50 :: Integer)
+            |]
+        ,
+            "30414093201713378043612608166064768844377641568960512000000000000"
         )
     ]

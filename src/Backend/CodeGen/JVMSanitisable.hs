@@ -26,8 +26,7 @@ jvmSanitises = fmap jvmSanitise
 -- though, so we're limited to the Java characters.
 -- We add the underscore to prevent the sanitised names from clashing with anything compiler-inserted like `HeapObject`.
 instance JVMSanitisable String where
-    jvmSanitise = ("_" <>) . concatMap (\c -> if validChar c then [c] else showHex (ord c) "")
-        where validChar c = isAlphaNum c || c == '$' || c == '_'
+    jvmSanitise = ("_" <>) . concatMap (\c -> if isAlphaNum c then [c] else "$" <> showHex (ord c) "" <> "$")
 instance JVMSanitisable Text where
     jvmSanitise = pack . jvmSanitise . unpack
 instance JVMSanitisable TypeVariableName where
@@ -50,7 +49,6 @@ instance JVMSanitisable a => JVMSanitisable (Alt a) where
     jvmSanitise (Alt c e) = Alt (jvmSanitise c) (jvmSanitise e)
 instance JVMSanitisable AltConstructor where
     jvmSanitise (DataCon v vs) = DataCon (jvmSanitise v) (jvmSanitises vs)
-    jvmSanitise l@LitCon{}     = l
     jvmSanitise Default        = Default
 instance JVMSanitisable a => JVMSanitisable (Binding a) where
     jvmSanitise (NonRec v e) = NonRec (jvmSanitise v) (jvmSanitise e)

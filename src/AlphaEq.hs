@@ -12,16 +12,16 @@ import           Control.Monad.Extra        (findM)
 import           Control.Monad.State.Strict (MonadState, State, evalStateT, get, gets, modify, put, runState)
 import           Data.Either                (isRight)
 import           Data.Functor.Identity      (runIdentity)
+import qualified Data.HashSet               as HS
 import qualified Data.Map.Strict            as M
 import qualified Data.Set                   as S
-import qualified Data.HashSet               as HS
 import           Language.Haskell.Syntax
 import           TextShow                   (TextShow, showt)
 import           TextShow.Instances         ()
 
-import           SyntaxTraversals           (SyntaxTraversable, expTraverse)
 import           ExtraDefs                  (synPrint)
 import           Names
+import           SyntaxTraversals           (SyntaxTraversable, expTraverse)
 import           TextShowHsSrc              ()
 import           Typechecker.Types
 
@@ -250,4 +250,4 @@ stripParens :: SyntaxTraversable a => a -> a
 stripParens = runIdentity . expTraverse f
     where
         f (HsParen e) = pure e
-        f e = pure e
+        f e           = pure e

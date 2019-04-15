@@ -1,25 +1,26 @@
 module Backend.DeoverloadSpec where
 
-import           Test.Tasty              (TestTree, testGroup)
-import           Test.Tasty.HUnit        (assertFailure, testCase)
+import Test.Tasty              (TestTree, testGroup)
+import Test.Tasty.HUnit        (assertFailure, testCase)
 
-import           Language.Haskell.Syntax
-import           Language.Haskell.Parser
+import Language.Haskell.Parser
+import Language.Haskell.Syntax
 
-import           BasicPrelude            hiding (intercalate)
-import           Control.Monad.Except    (runExcept)
-import           Data.Text               (intercalate, unpack)
-import           Data.Functor.Identity   (runIdentity)
-import           Data.Tuple.Extra        (both)
+import BasicPrelude            hiding (intercalate)
+import Control.Monad.Except    (runExcept)
+import Data.Functor.Identity   (runIdentity)
+import Data.Text               (intercalate, unpack)
+import Data.Tuple.Extra        (both)
 
-import           AlphaEq
-import           Backend.Deoverload
-import           ExtraDefs               (pretty, synPrint)
-import           Logger                  (runLoggerT)
-import           NameGenerator
-import           Typechecker.Hardcoded
-import           Typechecker.Typechecker
-import           SyntaxTraversals (expTraverse)
+import AlphaEq
+import Backend.Deoverload
+import ExtraDefs               (pretty, synPrint)
+import Logger                  (runLoggerT)
+import NameGenerator
+import Preprocessor.Info       (getClassInfo)
+import SyntaxTraversals        (expTraverse)
+import Typechecker.Hardcoded
+import Typechecker.Typechecker
 
 unpackEither :: Either e a -> (e -> Text) -> IO a
 unpackEither (Left err) f = assertFailure $ unpack (f err)
@@ -31,8 +32,9 @@ makeTest sActual sExpected = testCase (unpack sActual) $ case both (parseModule 
         let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
             (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
         (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-        let deoverload = runDeoverload (deoverloadModule taggedModule) ts builtinKinds builtinClasses
-            ((eDeoverloaded, _, _, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
+        let moduleClassInfo = getClassInfo taggedModule
+            deoverload = runDeoverload (deoverloadModule moduleClassInfo taggedModule) ts builtinKinds builtinClasses
+            ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
             expected' = listCorrector $ stripParens expected
         actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
         let result = runExcept $ alphaEqError expected' actual
@@ -50,7 +52,7 @@ listCorrector :: HsModule -> HsModule
 listCorrector = runIdentity . expTraverse f
     where
         f (HsList []) = pure $ HsCon $ Special $ HsListCon
-        f e = pure e
+        f e           = pure e
 
 test :: TestTree
 test = testGroup "Deoverload"

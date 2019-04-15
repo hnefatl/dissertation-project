@@ -15,15 +15,16 @@ import           Data.Foldable               (foldlM, null, toList)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
+import qualified Data.Text                   as T
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
-import           ExtraDefs                   (pretty, synPrint, zipOverM)
+import           ExtraDefs                   (synPrint, zipOverM)
 import           Logger
-import           NameGenerator               (MonadNameGenerator, NameGenerator, freshTypeVarName, freshVarName)
+import           NameGenerator               (MonadNameGenerator, NameGenerator, freshVarName)
 import           Names                       (TypeVariableName(..), VariableName(..), convertName)
-import           Preprocessor.Info           (ClassInfo(..), getClassInfo)
 import           Preprocessor.ContainedNames (HasFreeTypeVariables, getFreeTypeVariables)
+import           Preprocessor.Info           (ClassInfo(..))
 import           Preprocessor.Renamer        (renameIsolated)
 import           TextShowHsSrc               ()
 import           Typechecker.Substitution    (Substitution(..), TypeSubstitution, applySub)
@@ -52,22 +53,22 @@ instance Default DeoverloadState where
         , classEnvironment = M.empty
         , classInfo = M.empty }
 
-runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind, DeoverloadState)
+runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
 runDeoverload action ts ks ce = do
     let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
                 flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
         Deoverload inner = addDictionaries ds >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
-            Left err -> throwError $ unlines [err, pretty s]
+            Left err -> throwError err
             Right y  -> return y
-    return (z, types s, kinds s, s)
+    return (z, s)
 
-evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) (a, M.Map VariableName QuantifiedType, M.Map TypeVariableName Kind)
+evalDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> ExceptT Text (LoggerT NameGenerator) a
 evalDeoverload action ts ks ce = do
-    (a, b, c, _) <- lift $ runDeoverload action ts ks ce
+    (a, _) <- lift $ runDeoverload action ts ks ce
     a' <- liftEither $ runExcept a
-    return (a', b, c)
+    return a'
 
 typePredToDictionaryName :: TypePredicate -> VariableName
 typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t
@@ -126,13 +127,9 @@ getDictionaryExp p = do
     VariableName name <- getDictionary p
     return $ HsVar $ UnQual $ HsIdent $ unpack name
 
-makeDictName :: MonadNameGenerator m => TypePredicate -> m VariableName
-makeDictName (IsInstance (TypeVariableName cl) t) = do
-    TypeVariableName suffix <- case t of
-        TypeVar (TypeVariable tvn _) -> return tvn
-        TypeCon (TypeConstant tcn _) -> return tcn
-        TypeApp{}                    -> freshTypeVarName
-    return $ VariableName $ "d" <> cl <> suffix
+makeDictName :: TypePredicate -> VariableName
+makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> suffix
+    where suffix = T.filter (/= ' ') $ showt t
 
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do
@@ -143,12 +140,11 @@ quantifyType t = do
 
 -- TODO(kc506): Dependency order: we need to process class/data/instance declarations before function definitions.
 -- Can wait until we properly support data declarations, as until then we're injecting the class/instance defns manually
-deoverloadModule :: HsModule -> Deoverload HsModule
-deoverloadModule m@(HsModule a b c d decls) = do
+deoverloadModule :: M.Map HsQName ClassInfo -> HsModule -> Deoverload HsModule
+deoverloadModule ci (HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
-    let ci = getClassInfo m
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls
@@ -282,8 +278,8 @@ deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)
         constraints = S.toAscList quals'
-    args <- mapM makeDictName constraints
-    let dictArgs = M.fromList $ zip constraints args
+        args = map makeDictName constraints
+        dictArgs = M.fromList $ zip constraints args
         funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
     writeLog $ "Processing match " <> showt name <> " " <> showt pats
     (wheres', rhs') <- addScopedDictionaries dictArgs $ (,) <$> deoverloadDecls wheres <*> deoverloadRhsWithoutAddingDicts rhs
@@ -296,7 +292,7 @@ isTypeSig _           = False
 
 deoverloadRhsWithoutAddingDicts :: HsRhs -> Deoverload HsRhs
 deoverloadRhsWithoutAddingDicts (HsUnGuardedRhs expr) = HsUnGuardedRhs <$> deoverloadExp expr
-deoverloadRhsWithoutAddingDicts _ = throwError "Unsupported RHS in deoverloader"
+deoverloadRhsWithoutAddingDicts _                     = throwError "Unsupported RHS in deoverloader"
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
@@ -305,8 +301,8 @@ deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint
         ks                <- getKinds
         Qualified quals _ <- synToQualType ks t
         let constraints = S.toAscList quals
-        args <- mapM makeDictName constraints
-        let funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
+            args = map makeDictName constraints
+            funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
             dictArgs = M.fromList $ zip constraints args
         e' <- addScopedDictionaries dictArgs (deoverloadRhsWithoutAddingDicts rhs) >>= \case
             HsUnGuardedRhs e' -> return e'

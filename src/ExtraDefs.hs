@@ -2,15 +2,16 @@
 
 module ExtraDefs where
 
-import           BasicPrelude            hiding (encodeUtf8, decodeUtf8, intercalate)
+import           BasicPrelude            hiding (decodeUtf8, encodeUtf8, intercalate)
 import           Control.Monad.Except    (MonadError, catchError, throwError)
 import qualified Data.ByteString.Lazy    as B
 import           Data.Foldable           (foldl', foldlM, length)
 import qualified Data.Map                as M
 import qualified Data.Set                as S
-import           Data.Text               (intercalate, lines, pack, unpack)
+import           Data.Text               (intercalate, lines, pack, takeEnd, unpack)
+import qualified Data.Text               as T
 import           Data.Text.Lazy          (fromStrict, toStrict)
-import           Data.Text.Lazy.Encoding (encodeUtf8, decodeUtf8)
+import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Tuple              (swap)
 import           Language.Haskell.Pretty (Pretty, prettyPrint)
 import           Text.Pretty.Simple      (pString)
@@ -23,6 +24,12 @@ toLazyByteString :: Text -> B.ByteString
 toLazyByteString = encodeUtf8 . fromStrict
 fromLazyByteString :: B.ByteString -> Text
 fromLazyByteString = toStrict . decodeUtf8
+
+endsWith :: Text -> Text -> Bool
+endsWith s1 s2 = takeEnd (T.length s2) s1 == s2
+
+liftJoin2 :: Monad m => (a -> b -> m c) -> m a -> m b -> m c
+liftJoin2 f x y = join (liftM2 f x y)
 
 allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True

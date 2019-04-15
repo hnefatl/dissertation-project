@@ -16,6 +16,7 @@ import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, 
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
+import           Data.Functor                ((<&>))
 import           Data.Hashable               (Hashable)
 import           Data.List.Extra             (foldl', groupOn, intersperse)
 import qualified Data.Map.Strict             as M
@@ -27,8 +28,9 @@ import           TextShow                    (TextShow, showb, showt)
 import           TextShow.Instances          ()
 import           TextShowHsSrc               ()
 
-import           ExtraDefs                   (allM, inverseMap, mapError, middleText, synPrint)
 import           AlphaEq                     (AlphaEq, alphaEq')
+import           Backend.Deoverload          (makeDictName)
+import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
 import           NameGenerator
 import           Names
@@ -37,9 +39,8 @@ import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariable
 import           Typechecker.Substitution    (NameSubstitution, Substitutable, Substitution(..), applySub, subCompose,
                                               subEmpty, subSingle)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
-                                              TypePredicate(..))
+                                              TypeConstant(..), TypePredicate(..))
 import qualified Typechecker.Types           as T
-import           Backend.Deoverload          (makeDictName)
 
 
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
@@ -70,16 +71,12 @@ instance TextShow Typeclass where
 
 -- |A literal value
 data Literal = LiteralInt Integer
-             | LiteralFrac Rational
              | LiteralChar Char
-             | LiteralString String
     deriving (Eq, Ord, Show, Generic)
 instance Hashable Literal
 instance TextShow Literal where
-    showb (LiteralInt i)    = showb i
-    showb (LiteralFrac r)   = showb r
-    showb (LiteralChar c)   = showb c
-    showb (LiteralString s) = showb s
+    showb (LiteralInt i)  = showb i
+    showb (LiteralChar c) = showb c
 
 -- |An alternative in a case expression.
 -- Consists of a constructor, a list of the variables bound to its arguments, and an RHS
@@ -96,13 +93,12 @@ getConstructorVariables :: AltConstructor -> [VariableName]
 getConstructorVariables (DataCon _ vs) = vs
 getConstructorVariables _              = []
 -- |A constructor that can be used in an alternative statement
-data AltConstructor = DataCon VariableName [VariableName] | LitCon Literal | Default
+data AltConstructor = DataCon VariableName [VariableName] | Default
     deriving (Eq, Ord, Show, Generic)
 instance Hashable AltConstructor
 instance TextShow AltConstructor where
     showb (DataCon n vs) = showb n <> (if null vs then "" else " " <> args)
         where args = mconcat $ intersperse " " $ map showb vs
-    showb (LitCon l)  = showb l
     showb Default     = "default"
 isDefaultAlt :: Alt a -> Bool
 isDefaultAlt (Alt Default _) = True
@@ -110,9 +106,6 @@ isDefaultAlt _               = False
 isDataAlt :: Alt a -> Bool
 isDataAlt (Alt DataCon{} _) = True
 isDataAlt _                 = False
-isLiteralAlt :: Alt a -> Bool
-isLiteralAlt (Alt (LitCon _) _) = True
-isLiteralAlt _                  = False
 
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
@@ -167,14 +160,20 @@ data ConverterReadableState = ConverterReadableState
     , renamings       :: M.Map VariableName VariableName
       -- The renamings from the renamer stage: used to get the right name for eg. tuple constructors if they've been
       -- renamed
-    , topLevelRenames :: M.Map VariableName VariableName }
+    , topLevelRenames :: M.Map VariableName VariableName
+      -- The names of all the dictionaries in the source, like `Num` and `Eq`
+    , dictionaryNames :: S.Set TypeVariableName
+      -- As we traverse the source we build up a mapping of available dictionaries within the current scope. This
+      -- includes top-level definitions like `Num Int`, but also type-dependent ones like `Num t201`. This is needed for
+      -- lowering int literals, where we need to call `fromInteger` and pass a dictionary.
+    , dictionaries    :: M.Map TypePredicate VariableName }
     deriving (Eq, Show)
 instance TextShow ConverterReadableState where
     showb = fromString . show
 data ConverterState = ConverterState
     { datatypes        :: M.Map TypeVariableName Datatype
     , kinds            :: M.Map TypeVariableName Kind
-    , reverseRenamings :: M.Map VariableName VariableName }
+    , reverseRenamings :: M.Map VariableName VariableName}
     deriving (Eq, Show)
 instance Default ConverterState where
     def = ConverterState
@@ -187,12 +186,13 @@ instance TextShow ConverterState where
 newtype Converter a = Converter (ReaderT ConverterReadableState (StateT ConverterState (ExceptT Text (LoggerT NameGenerator))) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
-runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter x rs ts ks = runStateT (runReaderT inner rState) Default.def
+runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
+runConverter x rs ts ks ds dNames = runStateT (runReaderT inner rState) Default.def
     where Converter inner = addKinds ks >> x
-          rState = ConverterReadableState { renamings = M.empty, topLevelRenames = rs, types = ts }
-evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> ExceptT Text (LoggerT NameGenerator) a
-evalConverter x rs ts ks = fst <$> runConverter x rs ts ks
+          rState = ConverterReadableState
+            { renamings = M.empty, topLevelRenames = rs, types = ts, dictionaryNames = dNames, dictionaries = ds }
+evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) a
+evalConverter x rs ts ks ds dNames = fst <$> runConverter x rs ts ks ds dNames
 
 addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
@@ -206,10 +206,19 @@ addTypes :: M.Map VariableName QuantifiedSimpleType -> ConverterReadableState ->
 addTypes ts state = state { types = M.union ts (types state) }
 addKinds :: M.Map TypeVariableName Kind -> Converter ()
 addKinds ks = modify $ \st -> st { kinds = M.union ks (kinds st) }
+addDictionaries :: M.Map TypePredicate VariableName -> ConverterReadableState -> ConverterReadableState
+addDictionaries ds state = state { dictionaries = M.union ds (dictionaries state) }
 getKinds :: Converter (M.Map TypeVariableName Kind)
 getKinds = gets kinds
 addDatatype :: Datatype -> Converter ()
 addDatatype d = modify (\s -> s { datatypes = M.insert (typeName d) d (datatypes s) })
+
+dictionaryArgToTypePred :: Type -> Converter (Maybe TypePredicate)
+dictionaryArgToTypePred c = case T.unmakeApp c of
+    (TypeCon (TypeConstant conName _), [arg]) -> do
+        dictNames <- asks dictionaryNames
+        return $ if S.member conName dictNames then Just $ IsInstance conName arg else Nothing
+    _ -> return Nothing
 
 getRenamed :: VariableName -> Converter VariableName
 getRenamed name = asks (M.lookup name . renamings) >>= \case
@@ -242,7 +251,7 @@ makeTuple ps = do
     resultType <- T.makeTuple ts
     funType <- T.makeFun ts resultType
     makeTuple' es funType
-   
+
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the function
 -- constructing the tuple
 makeTuple' :: [Expr] -> Type -> Converter Expr
@@ -267,8 +276,8 @@ makeList' es t = do
     nil  <- Con <$> getListNilName <*> pure tList
     return $ foldr (\x y -> App (App cons x) y) nil es
 
-makeError :: Type -> Expr
-makeError = Var "compilerError"
+makeError :: Type -> Converter Expr
+makeError t = Var <$> asks (M.findWithDefault "compilerError" "compilerError" . topLevelRenames) <*> pure t
 
 getPatRenamings :: HsPat -> Converter ([VariableName], M.Map VariableName VariableName)
 getPatRenamings pat = do
@@ -310,8 +319,7 @@ toIla (HsModule _ _ _ _ decls) = do
     writeLog "-------"
     ts <- asks types
     forM_ (M.toList ts) $ \(v,t) -> writeLog $ showt v <> " :: " <> showt t
-    let mapper e = unlines [e, unlines $ map synPrint decls]
-    mapError mapper $ concat <$> mapM declToIla decls
+    concat <$> mapM declToIla decls
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
@@ -333,7 +341,7 @@ declToIla (HsFunBind (m:ms)) = do
     args <- flip zip argTypes <$> replicateM arity freshVarName
     let matchToArg (HsMatch _ _ pats rhs _) = (pats, rhs, retType, subEmpty)
     local (addTypes $ M.map (Quantified S.empty) $ M.fromList args) $ do
-        body <- patToIla args (map matchToArg (m:ms)) (makeError retType)
+        body <- patToIla args (map matchToArg (m:ms)) =<< makeError retType
         return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
@@ -362,10 +370,6 @@ conDeclToBranch (HsConDecl _ name ts) = do
     return (convertName name, ts')
 conDeclToBranch d@HsRecDecl{} = throwError $ "Record datatypes not supported:\n" <> showt d
 
-rhsType :: HsRhs -> Converter Type
-rhsType (HsUnGuardedRhs (HsExpTypeSig _ _ t)) = getSimpleFromSynType t
-rhsType (HsUnGuardedRhs _)                    = throwError "Missing explicit type sig on top-level expression in RHS"
-rhsType (HsGuardedRhss _)                     = throwError "Guarded RHS not supported"
 rhsToIla :: HsRhs -> Converter Expr
 rhsToIla (HsUnGuardedRhs e) = expToIla e
 rhsToIla (HsGuardedRhss  _) = throwError "Guarded RHS not supported"
@@ -377,12 +381,12 @@ expToIla (HsExpTypeSig loc (HsVar v) t) = case v of
     Qual _ HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
     _                  -> Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
 expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
-expToIla (HsExpTypeSig _ (HsLit l) t) = Lit <$> litToIla l <*> getSimpleFromSynType t
+expToIla (HsExpTypeSig _ (HsLit l) t) = litToIlaExpr l =<< getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda _ [] e) = expToIla e
 -- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
-expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
+expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     argNames <- replicateM (length pats) freshVarName
     expType <- getSimpleFromSynType t
     (argTypes, _) <- T.unmakeFun expType
@@ -392,9 +396,13 @@ expToIla (HsExpTypeSig l (HsLambda l' pats e) t) = do
         log_renames = Text.intercalate ", " $ map (uncurry $ middleText "/") $ M.toList renames
         log_types = Text.intercalate ", " $ map (uncurry $ middleText " :: ") $ M.toList renamedVariableTypes
     writeLog $ "Lambda pattern: added [" <> log_renames <> "] and [" <> log_types <> "]"
+    -- We need to keep track of any dictionaries being passed in, so lower functions can use them.
+    let convert (_, Nothing)        = Nothing
+        convert (n, Just predicate) = Just (predicate, n)
+    dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
-    body <- local (addTypes patVariableTypes) $ addRenamings renames $
-        patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] (makeError expType)
+    body <- local (addTypes patVariableTypes . addDictionaries dictionaryArgs) $ addRenamings renames $
+        patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] =<< makeError expType
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
@@ -410,40 +418,56 @@ expToIla (HsIf cond e1 e2) = do
     e2Exp   <- expToIla e2
     let alts = [ Alt (DataCon "True" []) e1Exp , Alt (DataCon "False" []) e2Exp ]
     return $ Case condExp [] alts
-expToIla (HsCase scrut alts) = do
+expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseType) = do
+    -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
+    scrutBinder <- freshVarName
+    scrutType' <- getSimpleFromSynType scrutType
+    caseType' <- getSimpleFromSynType caseType
     scrut' <- expToIla scrut
-    alts' <- mapM altToIla alts
-    return $ Case scrut' [] alts'
+    body <- patToIla [(scrutBinder, scrutType')] [ altToPatList a caseType' | a <- alts ] =<< makeError caseType'
+    return $ Let scrutBinder scrutType' scrut' body
 expToIla HsTuple{} = throwError "HsTuple should've been removed in renamer"
 expToIla HsList{} = throwError "HsList should've been removed in renamer"
 expToIla (HsParen exp) = expToIla exp
 expToIla (HsExpTypeSig _ e _) = expToIla e
-expToIla e = throwError $ "Unsupported expression: " <> showt e
+expToIla e = throwError $ "Unsupported expression in ILA: " <> showt e
 
--- Big TODO(kc506): Need to handle any pattern, not just this subset. So need to find a way to reuse patToIla to
--- construct alts.... Handle anything other than these types by using patToIla and using altToIla in the body?
-altToIla :: HsAlt -> Converter (Alt Expr)
-altToIla (HsAlt _ pat alts wheres) = helper pat
-    where helper p = case p of
-            HsPApp con vs -> Alt (DataCon (convertName con) (map patToVar vs)) <$> guardedAltsToIla alts
-            HsPInfixApp p1 con p2 -> Alt (DataCon (convertName con) [patToVar p1, patToVar p2]) <$> guardedAltsToIla alts
-            HsPLit l      -> Alt <$> (LitCon <$> litToIla l) <*> guardedAltsToIla alts
-            HsPWildCard   -> Alt Default <$> guardedAltsToIla alts
-            HsPParen p'   -> helper p'
-            _             -> throwError $ unlines ["Case expression with non-constructor-application pattern:", showt pat]
-          patToVar (HsPVar v) = convertName v
-          patToVar _          = error "Non-variable in ILA, need to rework case alt patterns"
+-- Used to convert a HsAlt into the representation of an alt expected by patToIla
+altToPatList :: HsAlt -> Type -> ([HsPat], HsRhs, Type, NameSubstitution)
+altToPatList (HsAlt _ pat a _) rhsType = ([pat], guardedAltsToRhs a, rhsType, subEmpty)
 
-guardedAltsToIla :: HsGuardedAlts -> Converter Expr
-guardedAltsToIla (HsUnGuardedAlt e) = expToIla e
-guardedAltsToIla HsGuardedAlts{}    = throwError "Guarded alts not supported in ILA" -- Should be able to rewrite into a chain of if expressions (so a chain of case expressions)
+guardedAltsToRhs :: HsGuardedAlts -> HsRhs
+guardedAltsToRhs (HsUnGuardedAlt e) = HsUnGuardedRhs e
+guardedAltsToRhs (HsGuardedAlts as) = HsGuardedRhss [ HsGuardedRhs l cond e | HsGuardedAlt l cond e <- as ]
 
-litToIla :: HsLiteral -> Converter Literal
-litToIla (HsChar c)   = return $ LiteralChar c
-litToIla (HsString s) = return $ LiteralString s
-litToIla (HsInt i)    = return $ LiteralInt i  -- Replace with fromInteger to cast to arbitrary Num?
-litToIla (HsFrac r)   = return $ LiteralFrac r
-litToIla l            = throwError $ "Unboxed primitives not supported: " <> showt l
+-- TODO(kc506): Remove once we've changed altToIla to use patToIla, as this is unused
+litToIla :: MonadError Text m => HsLiteral -> m Literal
+litToIla (HsChar c) = return $ LiteralChar c
+litToIla (HsInt i)  = return $ LiteralInt i
+litToIla l          = throwError $ "Unboxed primitives not supported: " <> showt l
+
+-- |Convert a HsLiteral to an equivalent ILA literal
+litToIlaExpr :: HsLiteral -> Type -> Converter Expr
+litToIlaExpr (HsChar c) t = return $ Lit (LiteralChar c) t
+litToIlaExpr (HsString s) t = case T.unmakeApp t of
+    (conType, [elemType])
+        | conType /= T.typeList -> throwError $ "Expected list type, got: " <> showt t
+        | otherwise -> do
+            -- Convert each char to a literal, make an ILA list of the results
+            ls <- mapM (flip litToIlaExpr elemType . HsChar) s
+            makeList' ls elemType
+    _ -> throwError $ "Expected list type, got: " <> showt t
+litToIlaExpr HsFrac{} _ = throwError "Rationals not supported in ILA"
+litToIlaExpr (HsInt i) t = asks (M.lookup "fromInteger" . topLevelRenames) >>= \case
+    Just funFromInteger -> asks (M.lookup (IsInstance "Num" t) . dictionaries) >>= \case
+        Just dictName -> do
+            let integerType = TypeCon $ TypeConstant "Integer" KindStar
+                dictType = TypeApp (TypeCon $ TypeConstant "Num" $ KindFun KindStar KindStar) t KindStar
+            funFromIntegerType <- T.makeFun [dictType, integerType] t
+            return $ App (App (Var funFromInteger funFromIntegerType) (Var dictName dictType)) (Lit (LiteralInt i) integerType)
+        Nothing -> throwError $ "No dictionary found for " <> showt (IsInstance "Num" t)
+    Nothing -> throwError "No renaming for fromInteger."
+litToIlaExpr l _ = throwError $ "Unboxed primitives not supported: " <> synPrint l
 
 
 -- |Wrapper around patToBindings' that ensures we don't generate two bindings for simple variable bindings.
@@ -474,8 +498,9 @@ patToBindings' (HsPApp con ps) = do
             vs <- replicateM (length ps) freshVarName
             let v = vs !! i
             eType <- getExprType e
+            err <- makeError eType
             c (Var v eType) >>= \case
-              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default $ makeError eType ]
+              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default err ]
               Rec{} -> throwError "Recursive bindings not supported in patToBindings'"
     return $ map wrapInCase newBindingConts
 patToBindings' (HsPInfixApp p1 c p2) = patToBindings' $ HsPApp c [p1, p2]
@@ -492,10 +517,10 @@ patToIla _ [] def = return def
 patToIla [] (([], r, _, Substitution sub):_) _ =
     -- TODO(kc506): If the first case can fail somehow, we need to use the later ones? Weird notation in the book
     addRenamings sub $ rhsToIla r
-patToIla ((v, t):vs) cs def = do
-    let getPat (x:_, _, _, _) = x
-        getPat ([], _, _, _)  = error "Empty initial pattern in patToIla"
-        allPatType pt = allM (fmap (== pt) . getPatType . getPat)
+patToIla ((v, varType):vs) cs def = do
+    let getPat (x:_, _, _, _) = return x
+        getPat ([], _, _, _)  = throwError "Empty initial pattern in patToIla"
+        allPatType pt = allM (fmap (== pt) . getPatType <=< getPat)
     pats <- mapM (reducePats v) cs
     allVariable <- allPatType Variable pats
     allLiteral <- allPatType Literal pats
@@ -507,28 +532,33 @@ patToIla ((v, t):vs) cs def = do
             HsPWildCard:ps -> return ((ps, e, et, sub), Nothing)
             [] -> throwError "Internal: wrong patterns length"
             p:_ -> throwError $ "Non-HsPVar in variables: " <> showt p
-        local (addTypes $ M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty t)) $
+        let newTypes = M.fromList $ zip (catMaybes varNames) (repeat $ Quantified S.empty varType)
+        -- Keep track of dictionary arguments being passed in
+        dictionaryArgs <- dictionaryArgToTypePred varType <&> \case
+            Nothing -> M.empty
+            Just predicate -> M.singleton predicate v
+        local (addTypes newTypes . addDictionaries dictionaryArgs) $
             patToIla vs pats' def
     else if allLiteral then do
         -- To check literals we create a right-leaning tree of case statements, like:
         -- > case x == 0 of { True -> E1 ; False -> case x == 1 of { ... } }
         rs <- asks topLevelRenames
-        eqDictPlainName <- makeDictName $ IsInstance "Eq" t -- Might need to be renamed with a substitution below
-        eqDictType <- T.makeApp (T.TypeCon $ T.TypeConstant "Eq" (KindFun KindStar KindStar)) [t]
+        let eqDictPlainName = makeDictName $ IsInstance "Eq" varType -- May need to be renamed with a substitution below
+        eqDictType <- T.makeApp (T.TypeCon $ T.TypeConstant "Eq" (KindFun KindStar KindStar)) [varType]
         case (M.lookup "True" rs, M.lookup "False" rs, M.lookup "==" rs) of
             (Nothing, _, _) -> throwError "True constructor not found in ILA lowering"
             (_, Nothing, _) -> throwError "False constructor not found in ILA lowering"
             (_, _, Nothing) -> throwError "(==) function not found in ILA lowering"
             (Just trueName, Just falseName, Just equals) -> do
-                equalsType <- T.makeFun [eqDictType, t, t] T.typeBool
+                equalsType <- T.makeFun [eqDictType, varType, varType] T.typeBool
                 let trueCon = DataCon trueName []
                     falseCon = DataCon falseName []
                     equalsFun = Var equals equalsType
                     customFoldM d xs f = foldrM f d xs
-                customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
+                customFoldM def pats $ \(pl, rhs, _, sub) body -> case pl of
                     [HsPLit l] -> do
-                        l' <- litToIla l
-                        let cond = foldl App equalsFun [eqDict, Var v t, Lit l' t]
+                        l' <- litToIlaExpr l varType
+                        let cond = foldl App equalsFun [eqDict, Var v varType, l']
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
                         expr <- rhsToIla rhs
@@ -536,21 +566,17 @@ patToIla ((v, t):vs) cs def = do
                     p -> throwError $ "Expected single literal in ILA lowering, got: " <> showt p
     else if allCon then do
         conGroups <- groupPatCons getPat pats
-        alts <- forM conGroups $ \(con, (HsPApp _ newpats:ps, r, t, s):es) -> do
-            cont <- asks (M.lookup con . types) >>= \case
-                Just (Quantified _ t) -> return t
-                Nothing -> throwError $ "No type for constructor " <> showt con
-            let (argTypes, _) = T.unmakeCon cont
-            freshArgVars <- replicateM (length argTypes) freshVarName
-            let freshArgTypes = zip freshArgVars argTypes
+        alts <- forM conGroups $ \(con, es) -> do
+            freshArgTypes <- makeVarsForCon con varType
+            let es' = map (\(HsPApp _ newpats:ps, r, t, s) -> (newpats <> ps, r, t, s)) es
             local (addTypes $ M.map (Quantified S.empty) $ M.fromList freshArgTypes) $ do
-                body <- patToIla (freshArgTypes <> vs) ((newpats <> ps, r, t, s):es) def
-                return $ Alt (DataCon con freshArgVars) body
+                body <- patToIla (freshArgTypes <> vs) es' def
+                return $ Alt (DataCon con $ map fst freshArgTypes) body
         let defaultAlt = Alt Default def
-        return $ Case (Var v t) [] (defaultAlt:alts)
+        return $ Case (Var v varType) [] (defaultAlt:alts)
     else do -- Mixture of variables/literals/constructors
         patGroups <- map snd <$> groupPatsOn getPat pats
-        foldrM (patToIla $ (v,t):vs) def patGroups
+        foldrM (patToIla $ (v,varType):vs) def patGroups
 patToIla a b c = throwError $ unlines ["patToIla bug: ", showt a, showt b, showt c]
 
 -- Get the type of each pattern:
@@ -564,15 +590,15 @@ getPatType HsPApp{}    = return Constructor
 getPatType p           = throwError $ "Illegal pattern " <> showt p
 
 -- |Group items by their pattern type
-groupPatsOn :: MonadError Text m => (a -> HsPat) -> [a] -> m [(PatType, [a])]
+groupPatsOn :: MonadError Text m => (a -> m HsPat) -> [a] -> m [(PatType, [a])]
 groupPatsOn f xl = do
-    grouped <- groupOn fst <$> mapM (\x -> fmap (,x) $ getPatType $ f x) xl
+    grouped <- groupOn fst <$> mapM (\x -> fmap (,x) . getPatType =<< f x) xl
     return $ map (\((p, x):xs) -> (p, x:map snd xs)) grouped
 
 -- |Reorder and group the items so that each group contains all items with the same constructor
-groupPatCons :: (MonadError Text m, Eq a) => (a -> HsPat) -> [a] -> m [(VariableName, [a])]
+groupPatCons :: (MonadError Text m, Eq a) => (a -> m HsPat) -> [a] -> m [(VariableName, [a])]
 groupPatCons f xl = do
-    tagged <- forM xl $ \x -> case f x of
+    tagged <- forM xl $ \x -> f x >>= \case
         HsPApp n _ -> return (convertName n, x)
         _          -> throwError "Non-constructor in rearrangePatCons"
     return $ map (\((v, x):xs) -> (v, x:map snd xs)) $ groupOn fst $ sortOn fst tagged
@@ -588,18 +614,35 @@ reducePats v (p:ps, e, t', s) = case p of
     HsPList{}            -> throwError "HsPList should've been removed in the renamer"
     _                    -> return (p:ps, e, t', s)
 
+makeVarsForCon :: VariableName -> Type -> Converter [(VariableName, Type)]
+makeVarsForCon conName variableType = case T.unmakeApp variableType of
+    -- Eg. ("[]", ["t151"])
+    (TypeCon (TypeConstant datatypeName _), typeArgs) -> do
+        datatype <- gets (M.lookup datatypeName . datatypes) >>= \case
+            Nothing -> throwError $ "Unknown datatype " <> showt datatypeName
+            Just d -> return d
+        -- Make a mapping from the placeholder datatype type variables (eg. "a") to the real type variables (eg. "t151")
+        let sub = Substitution $ M.fromList $ zip (parameters datatype) typeArgs
+        -- Get the arguments for the constructor use we're looking at
+        branchArgTypes <- case M.lookup conName (branches datatype) of
+            Nothing -> throwError $ "Unknown branch " <> showt conName <> " of datatype " <> showt datatypeName
+            Just ba -> return $ map fst ba
+        -- Apply the substitution to fill in the type variables we're actually using
+        let branchArgTypes' = applySub sub branchArgTypes
+        mapM (\argType -> (,argType) <$> freshVarName) branchArgTypes'
+    (TypeVar _, []) -> return []
+    _ -> throwError $ "Invalid type in makeVarsForCon: " <> showt variableType
+
 
 instance HasFreeVariables a => HasFreeVariables (Alt a) where
     getFreeVariables (Alt c e) = S.difference <$> getFreeVariables e <*> getFreeVariables c
 instance HasFreeVariables AltConstructor where
     getFreeVariables Default        = return S.empty
-    getFreeVariables LitCon{}       = return S.empty
     getFreeVariables (DataCon _ vs) = return $ S.fromList vs
 instance HasBoundVariables (Alt a) where
     getBoundVariablesAndConflicts (Alt c _) = getBoundVariablesAndConflicts c
 instance HasBoundVariables AltConstructor where
     getBoundVariablesAndConflicts Default          = return M.empty
-    getBoundVariablesAndConflicts LitCon{}         = return M.empty
     getBoundVariablesAndConflicts (DataCon con vs) = return $ M.fromList $ zip (con:vs) (repeat $ S.singleton SymDef)
 instance HasBoundVariables (Binding a) where
     getBoundVariablesAndConflicts (NonRec v _) = return $ M.singleton v (S.singleton SymDef)
@@ -622,23 +665,18 @@ instance Substitutable a b c => Substitutable a b (Alt c) where
 
 instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
     alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2
-    alphaEq' (Rec m1) (Rec m2) = alphaEq' m1 m2
-    alphaEq' b1 b2 = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
+    alphaEq' (Rec m1) (Rec m2)             = alphaEq' m1 m2
+    alphaEq' b1 b2                         = throwError $ unlines [ "Binding mismatch:", showt b1, "vs", showt b2 ]
 instance AlphaEq a => AlphaEq (Alt a) where
     alphaEq' (Alt ac1 e1) (Alt ac2 e2) = alphaEq' ac1 ac2 >> alphaEq' e1 e2
 instance AlphaEq Literal where
     alphaEq' (LiteralInt i1) (LiteralInt i2) =
         unless (i1 == i2) $ throwError $ "Integer literal mismatch:" <> showt i1 <> " vs " <> showt i2
-    alphaEq' (LiteralFrac f1) (LiteralFrac f2) =
-        unless (f1 == f2) $ throwError $ "Rational literal mismatch:" <> showt f1 <> " vs " <> showt f2
     alphaEq' (LiteralChar c1) (LiteralChar c2) =
         unless (c1 == c2) $ throwError $ "Character literal mismatch:" <> showt c1 <> " vs " <> showt c2
-    alphaEq' (LiteralString s1) (LiteralString s2) =
-        unless (s1 == s2) $ throwError $ "Text literal mismatch:" <> showt s1 <> " vs " <> showt s2
     alphaEq' l1 l2 = throwError $ "Literal mismatch:" <> showt l1 <> " vs " <> showt l2
 instance AlphaEq AltConstructor where
     alphaEq' (DataCon con1 vs1) (DataCon con2 vs2) = alphaEq' con1 con2 >> alphaEq' vs1 vs2
-    alphaEq' (LitCon l1) (LitCon l2) = alphaEq' l1 l2
     alphaEq' Default Default = return ()
     alphaEq' c1 c2 = throwError $ unlines [ "Alt constructor mismatch:", showt c1, "vs", showt c2 ]
 instance AlphaEq Expr where

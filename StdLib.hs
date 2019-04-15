@@ -1,5 +1,6 @@
 data Int
 data Integer
+data Char
 data [] a = [] | a : [a]
 data (,) a b = (,) a b
 data (,,) a b c = (,,) a b c
@@ -50,6 +51,9 @@ instance Eq Int where
 instance Eq Integer where
     (==) = primEqIntegerEq
     x /= y = not (x == y)
+instance Eq Char where
+    (==) = primEqCharEq
+    x /= y = not (x == y)
 instance Eq Bool where
     True == True = True
     False == False = True
@@ -58,6 +62,22 @@ instance Eq Bool where
 
 primEqIntEq :: Int -> Int -> Bool
 primEqIntegerEq :: Integer -> Integer -> Bool
+primEqCharEq :: Char -> Char -> Bool
+
+class Show a where
+    show :: a -> [Char]
+instance Show Char where
+    show c = [c]
+instance Show Int where
+    show = primShowIntShow
+instance Show Integer where
+    show = primShowIntegerShow
+instance Show Bool where
+    show True = "True"
+    show False = "False"
+
+primShowIntShow :: Int -> [Char]
+primShowIntegerShow :: Integer -> [Char]
 
 class Monoid a where
     mempty :: a
@@ -84,3 +104,8 @@ foldl _ a [] = a
 foldl f a (x:xs) = foldl f (f a x) xs
 
 sum = foldl (+) 0
+
+const x _ = x
+
+undefined :: a
+compilerError :: a

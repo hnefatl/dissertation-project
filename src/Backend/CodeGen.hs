@@ -15,12 +15,12 @@ import qualified Data.Map.Strict                as M
 import           Data.Maybe                     (fromJust)
 import qualified Data.Sequence                  as Seq
 import qualified Data.Set                       as S
-import           Data.Text                      (pack, unpack)
+import           Data.Text                      (pack, replace, unpack)
 import           Data.Text.Lazy                 (fromStrict)
 import           Data.Text.Lazy.Encoding        (encodeUtf8)
 import           Data.Word                      (Word16)
 import           System.FilePath                ((<.>), (</>))
-import           TextShow                       (showt)
+import           TextShow                       (TextShow, showt)
 
 import           Java.ClassPath
 import qualified Java.IO
@@ -36,9 +36,9 @@ import           Backend.CodeGen.Hooks          (compilerGeneratedHooks, primiti
 import           Backend.CodeGen.JVMSanitisable (jvmSanitise, jvmSanitises)
 import           Backend.ILA                    (Alt(..), AltConstructor(..), Binding(..), Datatype(..),
                                                  getBindingVariables, getBranchNames, getConstructorVariables,
-                                                 isDataAlt, isDefaultAlt, isLiteralAlt)
+                                                 isDataAlt, isDefaultAlt)
 import           Backend.ILB
-import           ExtraDefs                      (toLazyByteString, zipOverM_)
+import           ExtraDefs                      (liftJoin2, toLazyByteString, zipOverM_)
 import           Logger                         (LoggerT, writeLog)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
@@ -55,26 +55,28 @@ freeVariables name args x = do
     return $ S.difference fvs (S.unions [S.singleton name, S.fromList args, tls])
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
--- the top-level symbols and produces a class file
-convert :: Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname primitiveClassDir bs main revRenames topRenames ds = do
+-- the top-level symbols and produces class files
+convert :: Text -> Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname package primitiveClassDir bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
-    let ds' = jvmSanitises ds
+    let heapObjectCls = ObjectType $ unpack package <> "/HeapObject"
+        cname' = package <> "/" <> cname
+        ds' = jvmSanitises ds
         bindings = jvmSanitises bs
         hooks = compilerGeneratedHooks topRenames
-        topSymbols = M.fromSet (const heapObjectClass) $ S.unions $ M.keys hooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
+        topSymbols = M.fromSet (const heapObjectCls) $ S.unions $ M.keys hooks <> map getBindingVariables bindings <> map getBranchNames (M.elems ds')
         initialState = ConverterState
             { mainName = main
+            , packageName = unpack $ replace "." "/" package
             , localVarCounter = 0
             , datatypes = ds'
             , topLevelSymbols = topSymbols
             , topLevelRenames = topRenames
             , reverseRenames = revRenames
             , localSymbols = M.empty
-            , initialisers = map (\gen -> gen cname) $ M.elems hooks
+            , initialisers = map (\gen -> gen cname') $ M.elems hooks
             , dynamicMethods = Seq.empty
-            , dictionaries = S.empty
-            , classname = toLazyByteString cname }
+            , classname = toLazyByteString cname' }
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
@@ -87,7 +89,7 @@ convert cname primitiveClassDir bs main revRenames topRenames ds = do
     writeLog "-----------"
     writeLog "Renames"
     forM_ (M.toList revRenames) $ \(r, v) -> writeLog $ showt r <> ": " <> showt v
-    dataClasses <- compileDatatypes (M.elems ds') classpath
+    dataClasses <- compileDatatypes (M.elems ds') classpath package
     mainClass <- withExceptT (\e -> unlines [e, showt bs]) action
     return $ mainClass:dataClasses
 
@@ -99,37 +101,44 @@ addMainMethod :: Converter ()
 addMainMethod = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
+        --getStaticField Java.Lang.system $ NameType "in" $ ObjectType "java/io/InputStream"
+        --invokeVirtual "java/io/InputStream" $ NameType "read" $ MethodSignature [] (Returns IntType)
         -- Perform any initialisation actions
         performInitialisers
         getStaticField Java.Lang.system Java.IO.out
         main <- jvmSanitise <$> gets mainName
-        pushGlobalSymbol main heapObjectClass
-        invokeVirtual heapObject force
-        invokeVirtual heapObject toString
+        pushGlobalSymbol main =<< heapObjectClass
+        liftJoin2 invokeVirtual heapObject (pure clone)
+        liftJoin2 invokeVirtual heapObject enter
+        makeUnboxedString -- Convert the result haskell string into a java string
         invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
 
 -- |Create a new class for each datatype
-compileDatatypes :: [Datatype] -> [Tree CPEntry] -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-compileDatatypes ds classpath = do
+compileDatatypes :: [Datatype] -> [Tree CPEntry] -> Text -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+compileDatatypes ds classpath package = do
     writeLog $ "Compiling datatypes: " <> showt ds
     fmap catMaybes $ forM ds $ \datatype -> do
-        let dname = convertName (typeName datatype)
-            dclass = toLazyByteString dname
+        let boxedDataCls = unpack package <> "/BoxedData"
+            heapObjectCls = unpack package <> "/HeapObject"
+            heapObjectField = ObjectType heapObjectCls
+            dname = convertName (typeName datatype)
+            dname' = package <> "/" <> dname
+            dclass = toLazyByteString dname'
             methFlags = [ ACC_PUBLIC, ACC_STATIC ]
             compileDatatype = do
                 -- Create a boring constructor
                 void $ newMethod [ACC_PUBLIC] "<init>" [] ReturnsVoid $ do
                     aload_ I0
-                    invokeSpecial boxedData Java.Lang.objectInit
+                    invokeSpecial (fromString boxedDataCls) Java.Lang.objectInit
                     i0 RETURN
                 -- Compile each constructor into a static "maker" method
                 zipOverM_ (M.toList $ branches datatype) [0..] $ \(branchName, args) branchTag -> do
-                    void $ addToPool (CClass boxedData)
+                    void $ addToPool (CClass $ fromString boxedDataCls)
                     let numArgs = length args
                         methName = toLazyByteString $ "_make" <> convertName branchName
-                        methArgs = replicate numArgs heapObjectClass
-                        methRet = Returns $ ObjectType $ unpack dname
+                        methArgs = replicate numArgs heapObjectField
+                        methRet = Returns $ ObjectType $ unpack dname'
                     newMethod methFlags methName methArgs methRet $ do
                         -- Create a new instance of the class representing this datatype
                         new dclass
@@ -142,14 +151,14 @@ compileDatatypes ds classpath = do
                         -- Create a data array, fill it with the arguments
                         dup
                         pushInt numArgs
-                        allocNewArray heapObject
+                        allocNewArray (fromString heapObjectCls)
                         forM_ [0..numArgs - 1] $ \i -> do
                             dup
                             pushInt i
                             loadLocal (fromIntegral i)
                             aastore
                         -- Assign it to the datatype's data field
-                        putField dclass boxedDataData
+                        putField dclass (NameType "data" $ arrayOf heapObjectField)
                         -- Return the instance of our class, fully initialised
                         i0 ARETURN
         -- Don't codegen this datatype if it's provided by the runtime classes
@@ -158,24 +167,8 @@ compileDatatypes ds classpath = do
         else case runExcept $ generate classpath dclass compileDatatype of
             Left err -> throwError $ pack $ show err
             Right ((), out) -> do
-                let out' = out { superClass = boxedData }
+                let out' = out { superClass = fromString boxedDataCls }
                 return $ Just $ NamedClass dname (classDirect2File out')
-
--- TODO(kc506): Should be uneccessary: dictionaries should be created by `instance` decls in ILA conversion
-compileDictionaries :: Converter ()
-compileDictionaries = do
-    dicts <- gets dictionaries
-    cname <- gets classname
-    -- For each dictionary, create a new static field
-    -- TODO(kc506): Create the dictionary functions in this class
-    forM_ dicts $ \(Types.IsInstance c t) -> do
-        -- TODO(kc506): Verify the name's acceptable (like `NumInt`, not `Num[a]`)
-        let name = showt c <> showt t
-            datatype = ObjectType $ unpack name
-        makePublicStaticField ("d" <> name) datatype $ \field -> do
-            let method = ClassFile.NameType (toLazyByteString $ "_make" <> name) $ MethodSignature [] (Returns datatype)
-            invokeStatic (toLazyByteString name) method
-            putStaticField cname field
 
 -- |We use an invokeDynamic instruction to pass functions around in the bytecode. In order to use it, we need to add a
 -- bootstrap method for each function we create.
@@ -207,11 +200,13 @@ addBootstrapPoolItems (Converter x) s = do
             , methodAttributes = AR M.empty }
     mfIndex <- addToPool (CMethodHandle InvokeStatic "java/lang/invoke/LambdaMetafactory" metafactoryMethod)
     -- Add some constants to the pool that we'll need later, when we're creating the bootstrap method attribute
+    let heapObjectPath = toLazyByteString (pack $ packageName s) <> "/HeapObject"
     arg1 <- addToPool (CMethodType "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
-    arg3 <- addToPool (CMethodType "([LHeapObject;[LHeapObject;)LHeapObject;")
+    arg3 <- addToPool (CMethodType $ "([L" <> heapObjectPath <> ";[L" <> heapObjectPath <> ";)L" <> heapObjectPath <> ";")
     let ms = dynamicMethods converterState
+        heapObjectCls = ObjectType $ packageName s <> "/HeapObject"
     arg2s <- forM (toList ms) $ \name -> do
-        let sig = MethodSignature [arrayOf heapObjectClass, arrayOf heapObjectClass] (Returns heapObjectClass)
+        let sig = MethodSignature [arrayOf heapObjectCls, arrayOf heapObjectCls] (Returns heapObjectCls)
             method = ClassFile.Method
                 { methodAccessFlags = S.fromList [ ACC_PUBLIC, ACC_STATIC ]
                 , methodName = toLazyByteString name
@@ -233,7 +228,8 @@ compileGlobalClosure v (RhsClosure args body) = do
     -- We compile the function to get an implementation and _makeX function (f is a handle on the _makeX function)
     f <- compileFunction v args body
     -- Get a function instance using f, then store it as a static field
-    makePublicStaticField (convertName v) (ObjectType heapObject) $ \field -> do
+    ho <- heapObject
+    makePublicStaticField (convertName v) (ObjectType ho) $ \field -> do
         cname <- gets classname
         invokeStatic cname f
         putStaticField cname field
@@ -250,14 +246,6 @@ compileLocalClosure v (RhsClosure args body) = do
     invokeStatic cname f
     storeLocal v
 
--- |Compile an expression wrapped in a thunk, leaving the thunk on the top of the stack
-compileThunk :: Exp -> Converter ()
-compileThunk body = do
-    new thunk
-    dup
-    compileExp body
-    invokeSpecial thunk thunkInit
-
 -- |Compile a function binding into bytecode. It's a bit complicated:
 -- To compile a function `f` with free variables `fv` and arguments `as`, we create two functions.
 -- - `_fImpl`, which takes two arrays of heap objects (first contains arguments, second contains free variables) and
@@ -269,8 +257,9 @@ compileFunction :: VariableName -> [VariableName] -> Exp -> Converter (ClassFile
 compileFunction name args body = do
     freeVars <- freeVariables name args body
     writeLog $ "Function " <> showt name <> " has free variables " <> showt freeVars
+    heapObjectCls <- heapObjectClass
     let implName = convertName name <> "Impl"
-        implArgs = [arrayOf heapObjectClass, arrayOf heapObjectClass]
+        implArgs = [arrayOf heapObjectCls, arrayOf heapObjectCls]
         implAccs = [ACC_PRIVATE, ACC_STATIC]
     inScope $ do
         setLocalVarCounter 2 -- The first two local variables (0 and 1) are reserved for the function arguments
@@ -284,7 +273,7 @@ compileFunction name args body = do
             pushInt n
             aaload
         -- The actual implementation of the function
-        void $ newMethod implAccs (toLazyByteString implName) implArgs (Returns heapObjectClass) $ do
+        void $ newMethod implAccs (toLazyByteString implName) implArgs (Returns heapObjectCls) $ do
             compileExp body
             i0 ARETURN
     let wrapperName = "_make" <> convertName name
@@ -298,36 +287,42 @@ compileExp (ExpVar v) = pushSymbol v
 compileExp (ExpLit l) = pushLit l
 compileExp (ExpApp fun args) = do
     pushSymbol fun -- Grab the function
-    invokeVirtual heapObject enter -- Make sure we evaluate any thunks
-    invokeVirtual heapObject clone -- Copy it so we don't mutate the reference version
-    checkCast function -- Cast the returned Object to a Function
+    liftJoin2 invokeVirtual heapObject enter -- Make sure we evaluate any thunks
+    liftJoin2 invokeVirtual heapObject (pure clone) -- Copy it so we don't mutate the reference version
+    checkCast =<< function -- Cast the returned Object to a Function
     -- Add each argument to the function object
     forM_ args $ \arg -> do
         dup
         pushArg arg
-        invokeVirtual function addArgument
-    invokeVirtual function enter
+        liftJoin2 invokeVirtual function addArgument
+    liftJoin2 invokeVirtual function enter
 compileExp (ExpConApp con args) = do
     ds <- gets datatypes
     datatype <- case find (\d -> S.member con (M.keysSet $ branches d)) ds of
         Nothing -> throwTextError $ "Datatype constructor not found: " <> showt con <> "\n" <> showt ds
         Just d  -> return d
-    let cname = convertName (typeName datatype)
+    heapObjectCls <- heapObjectClass
+    package <- getPackageName
+    let cname = package <> "/" <> convertName (typeName datatype)
         methodname = "_make" <> convertName con
-        methodSig = MethodSignature (replicate numArgs heapObjectClass) (Returns $ ObjectType $ unpack cname)
+        methodRet = Returns $ ObjectType $ unpack cname
+        methodArgs = replicate numArgs heapObjectCls
+        methodSig = MethodSignature methodArgs methodRet
         numArgs = length args
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
     invokeStatic (toLazyByteString cname) $ NameType (toLazyByteString methodname) methodSig
 compileExp (ExpCase head t vs alts) = do
-    let headType = case fst $ Types.unmakeApp t of
+    package <- getPackageName
+    headType <- case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
-            Types.TypeCon (Types.TypeConstant n _)    -> encodeUtf8 $ fromStrict $ convertName $ jvmSanitise n
+            Types.TypeCon (Types.TypeConstant n _)    ->
+                return $ encodeUtf8 $ fromStrict $ package <> "/" <> (convertName $ jvmSanitise n)
             _                                         -> boxedData -- If it's not a datatype, pretend it's boxed data
     writeLog $ showt $ Types.unmakeApp t
     compileExp head
     -- Evaluate the expression
-    invokeVirtual heapObject enter
+    liftJoin2 invokeVirtual heapObject enter
     -- Bind each extra variable to the head
     forM_ vs $ \var -> do
         dup -- Copy the head expression
@@ -376,7 +371,7 @@ bindDataVariables :: B.ByteString -> [VariableName] -> Converter ()
 bindDataVariables _ [] = pop
 bindDataVariables headType vs = do
     -- Replace the head expression with a ref to its data array
-    getField headType boxedDataData
+    getField headType =<< boxedDataData
     zipOverM_ vs [0..] $ \var index -> do
         -- Store the data at the given index into the given variable
         dup
@@ -387,7 +382,7 @@ bindDataVariables headType vs = do
 
 
 -- |Sort Alts into order of compilation, tagging them with the key to use in the switch statement
-sortAlts :: [Alt a] -> Converter [(Word32, Alt a)]
+sortAlts :: TextShow a => [Alt a] -> Converter [(Word32, Alt a)]
 sortAlts [] = return []
 sortAlts alts@(Alt (DataCon con _) _:_) = do
     unless (all isDataAlt alts) $ throwTextError "Alt mismatch: expected all data alts"
@@ -400,9 +395,6 @@ sortAlts alts@(Alt (DataCon con _) _:_) = do
                 getDataCon _                     = error "Compiler error: can only have datacons here"
                 okay = all ((`S.member` bs) . getDataCon) alts
             unless okay $ throwTextError "Alt mismatch: constructors from different types"
-            let alts' = map (\a -> (fromIntegral $ fromJust $ (getDataCon a) `elemIndex` S.toAscList bs, a)) alts
+            let alts' = map (\a -> (fromIntegral $ fromJust $ getDataCon a `elemIndex` S.toAscList bs, a)) alts
             return $ sortOn fst alts'
-sortAlts alts@(Alt (LitCon _) _:_) = do
-    unless (all isLiteralAlt alts) $ throwTextError "Alt mismatch: expected all literal alts"
-    throwTextError "Need to refactor literals to only be int/char before doing this"
-sortAlts (Alt Default _:_) = throwTextError "Can't have Default constructor"
+sortAlts alts@(Alt Default _:_) = throwTextError $ unlines ["Can't have Default constructor", showt alts]

@@ -10,7 +10,7 @@ import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
 import           Control.Monad.Extra         (whenJust)
-import           Control.Monad.State.Strict  (MonadState, StateT, get, gets, modify, put, runStateT)
+import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, get, gets, modify, put, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
 import qualified Data.Set                    as S
@@ -24,10 +24,10 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Tuples                      (makeTupleName)
-import           Preprocessor.Info      (ClassInfo(..), getClassInfo, getModuleKinds)
 import           Preprocessor.ContainedNames (getBoundVariables)
 import           Preprocessor.Dependency
+import           Preprocessor.Info           (ClassInfo(..), getClassInfo, getModuleKinds)
+import           Tuples                      (makeTupleName)
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
 import           Typechecker.Substitution
@@ -82,15 +82,15 @@ runTypeInferrer :: TypeInferrer a -> LoggerT NameGenerator (Except Text a, Infer
 runTypeInferrer (TypeInferrer x) = do
     (y, s) <- runStateT (runExceptT x) def
     let z = case y of
-            Left err -> throwError $ unlines [err, pretty s]
+            Left err -> throwError err
             Right w  -> return w
     return (z, s)
 
 evalTypeInferrer :: TypeInferrer a -> ExceptT Text (LoggerT NameGenerator) a
 evalTypeInferrer (TypeInferrer x) = do
-    (y, s) <- lift $ runStateT (runExceptT x) def
+    y <- lift $ evalStateT (runExceptT x) def
     case y of
-        Left err -> throwError $ unlines [err, pretty s]
+        Left err -> throwError err
         Right z  -> return z
 
 
@@ -617,13 +617,13 @@ checkInstanceDecls cname argSynTypes ds = do
         HsFunBind matches -> do
             funName <- case matches of
                 (HsMatch _ name _ _ _):_ -> return $ convertName name
-                _ -> throwError "No matches in HsFunBind"
+                _                        -> throwError "No matches in HsFunBind"
             funType <- case M.lookup funName methodTypes of
                 Just ft -> nameToType ft
                 Nothing -> throwError $ "No type for method " <> showt funName
             (matches', matchTypeVars) <- unzip <$> mapM inferMatch matches
             matchTypes <- mapM nameToType matchTypeVars
-            -- Infer the RHS type, match against 
+            -- Infer the RHS type, match against
             mapM_ (unifyLeft funType) matchTypes
             writeLog $ "Match types: " <> showt matchTypes
             return $ HsFunBind matches'
@@ -687,12 +687,11 @@ inferDeclGroup ds = do
         inferDecls group
     return $ concat declExps
 
-inferModule :: M.Map TypeVariableName Kind -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule ks m@(HsModule p1 p2 p3 p4 decls) = do
+inferModule :: M.Map TypeVariableName Kind -> M.Map HsQName ClassInfo -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
+inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
-    let ci = getClassInfo m
     modify $ \s -> s { classInfo = ci, kinds = ks }
     writeLog $ "Got class information: " <> showt ci
     let isTypeclassInstance HsInstDecl{} = True
@@ -743,7 +742,7 @@ inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.M
 inferModuleWithBuiltins m = do
     addClasses builtinClasses
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-    inferModule (M.union builtinKinds $ getModuleKinds m) m
+    inferModule (M.union builtinKinds $ getModuleKinds m) (getClassInfo m) m
 
 getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getAllVariableTypes = do

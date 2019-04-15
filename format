@@ -1,3 +1,5 @@
 #!/bin/bash
 
+shopt -s globstar
+
 stack exec stylish-haskell -- --inplace app/*.hs src/**/*.hs test/**/*.hs

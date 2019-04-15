@@ -269,9 +269,9 @@ class HasTypeVars t where
     getTypeVars :: t -> S.Set TypeVariable
 
 instance HasTypeVars Type where
-    getTypeVars (TypeVar v) = S.singleton v
-    getTypeVars (TypeCon _)                     = S.empty
-    getTypeVars (TypeApp t1 t2 _)               = S.union (getTypeVars t1) (getTypeVars t2)
+    getTypeVars (TypeVar v)       = S.singleton v
+    getTypeVars (TypeCon _)       = S.empty
+    getTypeVars (TypeApp t1 t2 _) = S.union (getTypeVars t1) (getTypeVars t2)
 instance HasTypeVars TypePredicate where
     getTypeVars (IsInstance _ t) = getTypeVars t
 instance HasTypeVars a => HasTypeVars (Qualified a) where
