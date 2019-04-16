@@ -323,6 +323,7 @@ toIla (HsModule _ _ _ _ decls) = do
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
+    writeLog $ "HsPatBind: " <> synPrint pat <> " " <> synPrint rhs
     -- Add the types of bound variables
     (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
@@ -380,7 +381,14 @@ expToIla (HsExpTypeSig loc (HsVar v) t) = case v of
     UnQual HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
     Qual _ HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
     _                  -> Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
-expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
+--expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
+expToIla (HsExpTypeSig _ (HsCon c) t) = do
+    writeLog "con"
+    writeLog $ synPrint c
+    writeLog $ synPrint t
+    res <- Con (convertName c) <$> getSimpleFromSynType t
+    writeLog "done"
+    return res
 expToIla (HsExpTypeSig _ (HsLit l) t) = litToIlaExpr l =<< getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"

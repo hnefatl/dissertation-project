@@ -183,10 +183,13 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         writeLog $ "Generated function declaration " <> synPrint decl
         return decl
     -- Add the type and kind of the data constructor to our environment
+    ci <- gets (M.lookup (UnQual cname) . classInfo) >>= \case
+        Nothing -> throwError $ "No class with name " <> showt cname <> " found."
+        Just info -> return info
     let conName = convertName cname
         argNames = map convertName args
-        -- The kind of the datatype is how many class arguments it has
-        conKind = foldr KindFun KindStar (replicate (length args) KindStar)
+        -- The kind of the datatype is a function between the kinds of its arguments
+        conKind = foldr KindFun KindStar $ map snd $ argVariables ci
     writeLog $ "Added kind " <> showt conKind <> " for constructor " <> showt conName
     addKinds $ M.singleton conName conKind
     ks <- getKinds
@@ -221,11 +224,10 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
             let synName = convertName newName
                 transform (HsMatch loc fname args rhs wheres) = do
                     fType <- getType (convertName fname)
-                    argType <- synToType ks arg
                     -- Change the type of this instance of the function to use the instance argument instead of the
                     -- class variable
                     let sub :: TypeSubstitution
-                        sub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) [argType]
+                        sub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci) [paramType]
                         fType' = applySub sub fType
                     match' <- addScopedTypes (M.singleton newName fType') $
                         deoverloadMatch (HsMatch loc synName args rhs wheres)
@@ -239,10 +241,15 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.
-    let typeSub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci :: [TypeVariableName]) [paramType]
+    let typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci :: [TypeVariableName]) [paramType]
     Quantified _ t' <- deoverloadQuantType =<< getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''
+    writeLog "----------------------"
+    writeLog $ showt typeSub
+    writeLog $ showt t'
+    writeLog $ synPrint conType
+    writeLog "----------------------"
     writeLog $ "Constructor type: " <> synPrint conType
     let renamings = M.unions declRenames
         conArgs = map (HsVar . UnQual . HsIdent . unpack . convertName . snd) $ M.toAscList renamings
@@ -273,7 +280,7 @@ deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloade
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
-    t@(Quantified _ (Qualified quals _)) <- getType (convertName name)
+    (Quantified _ (Qualified quals _)) <- getType (convertName name)
     -- Remove any constraints that we need and are already provided by dictionaries
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)
@@ -296,7 +303,7 @@ deoverloadRhsWithoutAddingDicts _                     = throwError "Unsupported 
 
 deoverloadRhs :: HsRhs -> Deoverload HsRhs
 deoverloadRhs rhs@(HsUnGuardedRhs expr) = writeLog ("Deoverloading " <> synPrint expr) >> case expr of
-    (HsExpTypeSig loc _ t@(HsQualType _ simpleType)) -> do
+    (HsExpTypeSig loc _ t) -> do
         -- Replace each constraint with a lambda for a dictionary
         ks                <- getKinds
         Qualified quals _ <- synToQualType ks t

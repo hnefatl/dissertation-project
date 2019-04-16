@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE LambdaCase            #-}
 
 module Typechecker.Types where
 
@@ -44,11 +45,13 @@ instance Hashable Type
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
 applyTypeFun :: MonadError Text m => Type -> Type -> m Type
-applyTypeFun t1 t2 = case kind t1 of
-    KindStar -> throwError $ "Application to type of kind *: " <> showt t1 <> " applied to " <> showt t2
-    KindFun argKind resKind
-        | argKind == kind t2 -> return $ TypeApp t1 t2 resKind
-        | otherwise -> throwError $ "Kind mismatch: " <> showt t1 <> " applied to " <> showt t2
+applyTypeFun t1 t2 =
+    let errMsg = "Kind mismatch: " <> showt t1 <> " " <> showt t2
+    in case kind t1 of
+        KindStar -> throwError errMsg
+        KindFun argKind resKind
+            | argKind == kind t2 -> return $ TypeApp t1 t2 resKind
+            | otherwise -> throwError errMsg
 
 -- |"Unsafe" version of `applyTypeFun` which uses `error` instead of `throwError`: useful for compiler tests etc where
 -- it's convenient to avoid boilerplate and we shouldn't have invalid types being used
@@ -97,7 +100,8 @@ instance TextShow Kind where
         assocShow False (KindFun k1 k2) = assocShow True k1 <> " -> " <> assocShow False k2
         assocShow True k                = "(" <> assocShow False k <> ")"
 instance TextShow TypeVariable where
-    showb (TypeVariable name _) = showb name
+    showb (TypeVariable name KindStar) = showb name
+    showb (TypeVariable name k) = "(" <> showb name <> " :: " <> showb k <> ")"
 instance TextShow TypeConstant where
     showb (TypeConstant name _) = showb name
 instance TextShow Type where
@@ -121,8 +125,10 @@ instance TextShow a => TextShow (Qualified a) where
                 _ -> "(" <> qualifiers <> ") => "
               qualifiers = mconcat $ intersperse ", " $ map showb $ S.toList quals
 instance TextShow a => TextShow (Quantified a) where
-    showb (Quantified quants t) = (if S.null quants then "" else quantifiers) <> showb t
-        where quantifiers = "∀" <> (mconcat $ intersperse ", " $ map showb $ S.toList quants) <> ". "
+    showb (Quantified quants t)
+        | S.null quants = showb t
+        | otherwise = quantifiers <> showb t
+            where quantifiers = "∀" <> mconcat (intersperse ", " $ map showb $ S.toList quants) <> ". "
 
 getInstantiatingTypeMap :: (MonadNameGenerator m, MonadError Text m) => QuantifiedType -> m (M.Map TypeVariableName Type)
 getInstantiatingTypeMap q = do
@@ -184,6 +190,10 @@ unmakeApp :: Type -> (Type, [Type])
 unmakeApp (TypeApp t1 t2 _) = (baseT, ts ++ [t2])
     where (baseT, ts) = unmakeApp t1
 unmakeApp t = (t, [])
+unmakeSynApp :: HsType -> (HsType, [HsType])
+unmakeSynApp (HsTyApp t1 t2) = (base, args <> [t2])
+    where (base, args) = unmakeSynApp t1
+unmakeSynApp t = (t, [])
 
 -- |Split a type representing a function into the argument and the return type
 unwrapFunMaybe :: Type -> Maybe (Type, Type)
@@ -237,6 +247,7 @@ typeToSyn (TypeApp t1 t2 _) = do
         HsTyCon (Special (HsTupleCon _))        -> HsTyTuple [t2']
         _                                       -> HsTyApp t1' t2'
 synToType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsType -> m Type
+-- A sole type variable in a type must have kind *, as a "terminal" type can't have any other kind
 synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
 synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
     Nothing -> throwError $ "Type constructor not in kind mapping: " <> showt name
@@ -247,10 +258,17 @@ synToType ks (HsTyFun arg body) = do
     body' <- synToType ks body
     makeFun [arg'] body'
 synToType ks (HsTyTuple ts) = makeTuple =<< mapM (synToType ks) ts
-synToType ks (HsTyApp t1 t2) = do
-    t1' <- synToType ks t1
-    t2' <- synToType ks t2
-    applyTypeFun t1' t2'
+synToType ks t@HsTyApp{} = do
+    let (base, args) = unmakeSynApp t
+    args' <- mapM (synToType ks) args
+    let actualKind = foldr (\a r -> KindFun (kind a) r) KindStar args'
+    base' <- synToType ks base >>= \case
+        TypeVar (TypeVariable n _) -> return $ TypeVar (TypeVariable n actualKind)
+        c@(TypeCon (TypeConstant _ k))
+            | k == actualKind -> return c
+            | otherwise -> throwError $ unlines ["Kind mismatch in HsType:", synPrint t, showt k, showt actualKind]
+        _ -> throwError "Weird type in synToType"
+    foldlM applyTypeFun base' args'
 
 typePredToSyn :: MonadError Text m => TypePredicate -> m Syntax.HsAsst
 typePredToSyn (IsInstance (TypeVariableName c) t) = do

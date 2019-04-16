@@ -198,6 +198,7 @@ addTypePredicates = mapM_ addTypePredicate
 insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
 insertQuantifiedType name t = do
     bs <- gets bindings
+    writeLog $ "Inserting qualified type " <> showt name <> " :: " <> showt t
     whenJust (M.lookup name bs) $
         \t' -> throwError $ "Overwriting binding " <> showt name <> " :: " <> showt t' <> " with " <> showt t
     modify (\s -> s { bindings = M.insert name t bs })
@@ -550,25 +551,25 @@ inferDecl d@(HsTypeSig _ names t) = do
     let varNames = map convertName names
     forM_ varNames (\v -> insertQuantifiedType v qt)
     return d
-inferDecl d@(HsClassDecl _ ctx name args decls) = case (ctx, args) of
-    ([], [arg]) -> do
-        let className = convertName name
-        writeLog $ unwords ["Processing class decl for", showt className, showt arg]
-        forM_ decls $ \case
-            HsTypeSig _ names (HsQualType quals t) -> do
-                let classPred = (UnQual name, [HsTyVar arg])
-                    -- Update eg. `a -> a -> a` in class `Num a` to be `Num a => a -> a -> a`
-                    varNames = map convertName names
-                quantType <- synToQuantType (HsQualType (classPred:quals) t)
-                forM_ varNames (\v -> insertQuantifiedType v quantType)
-                writeLog $ "Processed " <> showt names <> ", got " <> showt quantType
-            _ -> throwError "Only support type signature declarations in typeclasses"
-        -- Update our running class environment
-        -- TODO(kc506): When we support contexts, update this to include the superclasses
-        addClasses $ M.singleton className (Class S.empty S.empty)
-        return d
-    ([], _) -> throwError "Multiparameter typeclasses not supported"
-    (_, _) -> throwError "Contexts not yet supported in typeclasses"
+inferDecl d@(HsClassDecl _ _ name args _) = do
+    let className = convertName name
+    writeLog $ unwords ["Processing class decl for", showt className, unwords $ map showt args]
+    ci <- gets (M.lookup (UnQual name) . classInfo) >>= \case
+        Nothing -> throwError $ "No class with name " <> showt name <> " found."
+        Just info -> return info
+    ks <- getKinds
+    let classVariableKinds = M.fromList [ (convertName v, k) | (v, k) <- argVariables ci]
+        ks' = M.union ks classVariableKinds
+    forM_ (M.toList $ methods ci) $ \(m, HsQualType con t) -> do
+        -- Augment the type with the class constraint, eg. `Functor a`
+        let t' = HsQualType ((UnQual name, map (HsTyVar . fst) $ argVariables ci):con) t
+        qualType <- synToQualType ks' t'
+        qt <- qualToQuant True qualType
+        insertQuantifiedType (convertName m) qt
+    -- Update our running class environment
+    -- TODO(kc506): When we support contexts, update this to include the superclasses
+    addClasses $ M.singleton className (Class S.empty S.empty)
+    return d
 inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
     ([], [_]) -> HsInstDecl loc ctx name args <$> checkInstanceDecls name args decls
     ([], _)   -> throwError "Multiparameter typeclass instances not supported"
@@ -592,16 +593,21 @@ checkInstanceDecls cname argSynTypes ds = do
         Nothing -> throwError $ "No class with name " <> showt cname <> " found."
         Just info -> return info
     ks <- getKinds
-    argTypes <- mapM (synToType ks) argSynTypes
-    let sub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) argTypes  :: TypeSubstitution
+    let classVariableKinds = M.fromList [ (convertName v, k) | (v, k) <- argVariables ci]
+        ks' = M.union ks classVariableKinds
+    argTypes <- mapM (synToType ks') argSynTypes
+    let sub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci) argTypes  :: TypeSubstitution
     writeLog $ "Sub: " <> showt sub
     methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m, t) -> do
-        qualType <- synToQualType ks t
+        qualType <- synToQualType ks' t
         writeLog $ "Before: " <> showt (m, qualType)
         let qt = applySub sub $ Quantified (getTypeVars qualType) qualType
         t' <- instantiateToVar qt
         writeLog $ "After: " <> showt (m, t')
         return (convertName m, t')
+    writeLog "------------------------------------------"
+    writeLog "------------------------------------------"
+    writeLog "------------------------------------------"
     forM ds $ \d -> case d of
         HsPatBind loc pat rhs wheres -> do
             -- Temporarily add the renamed types, infer the pattern, then reset to the old types
@@ -742,7 +748,8 @@ inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.M
 inferModuleWithBuiltins m = do
     addClasses builtinClasses
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
-    inferModule (M.union builtinKinds $ getModuleKinds m) (getClassInfo m) m
+    ci <- getClassInfo m
+    inferModule (M.union builtinKinds $ getModuleKinds m) ci m
 
 getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getAllVariableTypes = do
