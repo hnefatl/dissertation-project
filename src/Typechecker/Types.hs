@@ -10,6 +10,7 @@ module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
 import           Control.Monad.Except    (MonadError, throwError)
+import           Control.Monad.State.Strict    (MonadState, evalStateT, gets, modify)
 import           Data.Foldable           (foldlM, foldrM)
 import           Data.Hashable           (Hashable)
 import qualified Data.Map.Strict         as M
@@ -60,6 +61,12 @@ applyTypeFunUnsafe t1 t2 = case applyTypeFun t1 t2 of
     Left err -> error (unpack err)
     Right t  -> t
 
+unmakeKindFun :: MonadError Text m => Kind -> m ([Kind], Kind)
+unmakeKindFun (KindFun k1 KindStar) = return ([k1], KindStar)
+unmakeKindFun (KindFun k1 k2) = do
+    (argKinds, baseKind) <- unmakeKindFun k2
+    return (k1:argKinds, baseKind)
+unmakeKindFun KindStar = throwError "unmakeKindFun given KindStar"
 
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
@@ -103,7 +110,8 @@ instance TextShow TypeVariable where
     showb (TypeVariable name KindStar) = showb name
     showb (TypeVariable name k) = "(" <> showb name <> " :: " <> showb k <> ")"
 instance TextShow TypeConstant where
-    showb (TypeConstant name _) = showb name
+    showb (TypeConstant name KindStar) = showb name
+    showb (TypeConstant name k) = "(" <> showb name <> " :: " <> showb k <> ")"
 instance TextShow Type where
     showb (TypeVar v) = showb v
     showb (TypeCon c) = showb c
@@ -247,27 +255,30 @@ typeToSyn (TypeApp t1 t2 _) = do
         HsTyCon (Special (HsTupleCon _))        -> HsTyTuple [t2']
         _                                       -> HsTyApp t1' t2'
 synToType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsType -> m Type
--- A sole type variable in a type must have kind *, as a "terminal" type can't have any other kind
-synToType _ (HsTyVar v) = return $ TypeVar $ TypeVariable (convertName v) KindStar
-synToType kinds (HsTyCon c) = case M.lookup (TypeVariableName name) kinds of
+synToType ks t = evalStateT (synToType' t) ks
+
+-- Helper version adds kinds as it processes the type: if we see `Functor a` then we remember `a :: * -> *`
+synToType' :: (MonadState (M.Map TypeVariableName Kind) m, MonadError Text m) => Syntax.HsType -> m Type
+synToType' (HsTyVar v) = TypeVar . TypeVariable name <$> gets (M.findWithDefault KindStar name)
+    where name = convertName v
+synToType' (HsTyCon c) = gets (M.lookup (TypeVariableName name)) >>= \case
     Nothing -> throwError $ "Type constructor not in kind mapping: " <> showt name
     Just k  -> return $ TypeCon $ TypeConstant (TypeVariableName name) k
     where name = convertName c
-synToType ks (HsTyFun arg body) = do
-    arg' <- synToType ks arg
-    body' <- synToType ks body
+synToType' (HsTyFun arg body) = do
+    arg' <- synToType' arg
+    body' <- synToType' body
     makeFun [arg'] body'
-synToType ks (HsTyTuple ts) = makeTuple =<< mapM (synToType ks) ts
-synToType ks t@HsTyApp{} = do
+synToType' (HsTyTuple ts) = makeTuple =<< mapM synToType' ts
+synToType' t@HsTyApp{} = do
     let (base, args) = unmakeSynApp t
-    args' <- mapM (synToType ks) args
-    let actualKind = foldr (\a r -> KindFun (kind a) r) KindStar args'
-    base' <- synToType ks base >>= \case
-        TypeVar (TypeVariable n _) -> return $ TypeVar (TypeVariable n actualKind)
-        c@(TypeCon (TypeConstant _ k))
-            | k == actualKind -> return c
-            | otherwise -> throwError $ unlines ["Kind mismatch in HsType:", synPrint t, showt k, showt actualKind]
-        _ -> throwError "Weird type in synToType"
+    base' <- synToType' base
+    (argKinds, _) <- unmakeKindFun $ kind base'
+    let setKind (HsTyVar v) k = M.singleton (convertName v) k
+        setKind _ _ = M.empty
+        newKinds = M.unions $ zipWith setKind args argKinds
+    modify (M.union newKinds)
+    args' <- mapM synToType' args
     foldlM applyTypeFun base' args'
 
 typePredToSyn :: MonadError Text m => TypePredicate -> m Syntax.HsAsst
@@ -281,7 +292,16 @@ synToTypePred _ _         = throwError "Invalid constraint (unary or multiparame
 qualTypeToSyn :: MonadError Text m => QualifiedType -> m Syntax.HsQualType
 qualTypeToSyn (Qualified quals t) = HsQualType <$> mapM typePredToSyn (S.toAscList quals) <*> typeToSyn t
 synToQualType :: MonadError Text m => M.Map TypeVariableName Kind -> Syntax.HsQualType -> m QualifiedType
-synToQualType ks (HsQualType quals t) = Qualified <$> (S.fromList <$> mapM (synToTypePred ks) quals) <*> synToType ks t
+synToQualType ks (HsQualType quals t) = do
+    quals' <- mapM (synToTypePred ks) quals
+    -- Using the type constraints, infer the constraints of some of the type variables
+    let makeKind (IsInstance c (TypeVar (TypeVariable v _))) = case M.lookup c ks of
+            Nothing -> throwError $ "Missing kind for class " <> showt c
+            Just (KindFun argKind _) -> return $ M.singleton v argKind
+            Just k -> throwError $ "Invalid kind for class " <> showt c <> ": " <> showt k
+        makeKind _ = return M.empty -- This should possibly handle adding kinds for constraints like `Functor [a]`?
+    newKinds <- M.unions <$> mapM makeKind quals'
+    Qualified (S.fromList quals') <$> synToType (M.union newKinds ks) t
 
 class HasTypeVars t where
     getTypeVars :: t -> S.Set TypeVariable

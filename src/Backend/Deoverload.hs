@@ -16,6 +16,7 @@ import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import qualified Data.Text                   as T
+import           Data.Composition            ((.:))
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
@@ -129,7 +130,12 @@ getDictionaryExp p = do
 
 makeDictName :: TypePredicate -> VariableName
 makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> suffix
-    where suffix = T.filter (/= ' ') $ showt t
+    where suffix = T.filter (/= ' ') $ flattenType t
+
+flattenType :: Type -> Text
+flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
+flattenType (TypeCon (TypeConstant (TypeVariableName c) _)) = c
+flattenType (TypeApp t1 t2 _) = flattenType t1 <> flattenType t2
 
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do
@@ -145,6 +151,9 @@ deoverloadModule ci (HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
+    ts <- gets types
+    writeLog "Got types:"
+    forM_ (M.toList ts) $ \(v,t) -> writeLog $ showt v <> " :: " <> showt t
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls
@@ -188,13 +197,17 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         Just info -> return info
     let conName = convertName cname
         argNames = map convertName args
+        argKinds = map snd $ argVariables ci
         -- The kind of the datatype is a function between the kinds of its arguments
-        conKind = foldr KindFun KindStar $ map snd $ argVariables ci
+        conKind = foldr KindFun KindStar argKinds
     writeLog $ "Added kind " <> showt conKind <> " for constructor " <> showt conName
     addKinds $ M.singleton conName conKind
     ks <- getKinds
-    argTypes <- mapM (synToType ks . snd) methods
-    resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (map (\a -> TypeCon $ TypeConstant a KindStar) argNames)
+    -- Temporary kinds for the type variables in the class
+    let newKinds = M.fromList $ zip argNames argKinds
+        ks' = M.union newKinds ks
+    argTypes <- mapM (synToType ks' . snd) methods
+    resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (zipWith (TypeCon .: TypeConstant) argNames argKinds)
     conType <- makeFun argTypes resultType
     conQuantType <- quantifyType $ Qualified S.empty conType
     writeLog $ "Added type " <> showt conQuantType <> " for constructor " <> showt conName
@@ -207,7 +220,8 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         Nothing -> throwError $ "No class with name " <> showt name <> " found."
         Just info -> return info
     paramType <- synToType ks arg
-    let predicate = IsInstance (convertName name) paramType
+    let paramKind = kind paramType
+        predicate = IsInstance (convertName name) paramType
     dictName <- gets (M.lookup predicate . dictionaries) >>= \case
         Nothing -> throwError $ "No dictionary name found for " <> showt predicate
         Just n -> return n
@@ -245,11 +259,6 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     Quantified _ t' <- deoverloadQuantType =<< getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''
-    writeLog "----------------------"
-    writeLog $ showt typeSub
-    writeLog $ showt t'
-    writeLog $ synPrint conType
-    writeLog "----------------------"
     writeLog $ "Constructor type: " <> synPrint conType
     let renamings = M.unions declRenames
         conArgs = map (HsVar . UnQual . HsIdent . unpack . convertName . snd) $ M.toAscList renamings
@@ -262,12 +271,16 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         makeConApp e _ = throwError $ "Illegal expression in makeConApp: " <> showt e
     dictRhs <- HsUnGuardedRhs <$> foldlM makeConApp (HsExpTypeSig nullSrcLoc (HsCon name) conType) conArgs
     let dictDecl = HsPatBind nullSrcLoc (HsPVar $ HsIdent $ unpack $ convertName dictName) dictRhs []
+        dictType = TypeApp (TypeCon $ TypeConstant (convertName name) (KindFun paramKind KindStar)) paramType KindStar
     -- Add types for each of the generated decls
-    dictType <- TypeApp (TypeCon $ TypeConstant (convertName name) (KindFun KindStar KindStar)) <$> synToType ks arg <*> pure KindStar
     addTypes . M.singleton dictName =<< quantifyType (Qualified S.empty dictType)
     writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
+    -- Add the kinds of each of the class variables, so the class' method types have the right kinds
+    let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) $ argVariables ci
+        ks' = M.union argKinds ks
     forM_ (M.toList $ methods ci) $ \(n, t) -> do
-        methodType <- quantifyType . applySub typeSub =<< synToQualType ks t
+        writeLog $ convertName n <> " :: " <> synPrint t
+        methodType <- quantifyType . applySub typeSub =<< synToQualType ks' t
         case M.lookup (convertName n) renamings of
             Nothing -> throwError $ unwords
                 ["Instance declaration for", synPrint name, synPrint arg, "missing definition of", convertName n]
@@ -405,9 +418,9 @@ deoverloadQuantType :: MonadError Text m => QuantifiedType -> m QuantifiedSimple
 deoverloadQuantType (Quantified qs qt) = Quantified qs <$> deoverloadQualType qt
 deoverloadQualType :: MonadError Text m => QualifiedType -> m Type
 deoverloadQualType (Qualified quals t) = makeFun (map deoverloadTypePredicate $ toList quals) t
-deoverloadTypePredicate :: TypePredicate -> Type -- TODO(kc506): This should use `getKinds`
+deoverloadTypePredicate :: TypePredicate -> Type
 deoverloadTypePredicate (IsInstance c t) = TypeApp base t KindStar
-    where base = TypeCon $ TypeConstant c (KindFun KindStar KindStar)
+    where base = TypeCon $ TypeConstant c (KindFun (kind t) KindStar)
 
 -- |Given eg. `(+) :: Num a -> a -> a -> a` and `[dNuma]`, produce a type-annotated tree for the following:
 -- `((+) :: Num a -> a -> a -> a) (dNuma :: Num a) :: a -> a -> a`

@@ -174,12 +174,12 @@ instantiateToVar qt = do
     unify vt t
     return v
 
-instantiate :: (MonadError Text m, MonadNameGenerator m) => QuantifiedType -> m QualifiedType
-instantiate qt@(Quantified _ ql) = do
-    -- Create a "default" mapping from each type variable in the type to itself
-    let identityMap = M.fromList $ map (\var@(TypeVariable name _) -> (name, TypeVar var)) $ S.toList $ getTypeVars ql
-    -- Create a substitution for each quantified variable to a fresh name, using the identity sub as default
-    sub <- Substitution <$> (M.union <$> getInstantiatingTypeMap qt <*> pure identityMap)
+instantiate :: MonadNameGenerator m => QuantifiedType -> m QualifiedType
+instantiate (Quantified quants ql) = do
+    let giveNewName (TypeVariable oldName k) = do
+            newName <- freshTypeVarName
+            return (oldName, TypeVar $ TypeVariable newName k)
+    sub <- Substitution . M.fromList <$> mapM giveNewName (S.toList quants)
     return $ applySub sub ql
 
 
@@ -412,7 +412,7 @@ inferExpression (HsExpTypeSig l e t) = do
     (taggedExp, expVar) <- inferExpression e
     ks <- getKinds
     Qualified quals t' <- synToQualType ks t
-    unify (TypeVar $ TypeVariable expVar KindStar) t'
+    unify (TypeVar $ TypeVariable expVar (kind t')) t'
     addTypePredicates quals
     -- Wrap this type signature in another one - each expression should be tagged with a type sig, this is no different
     makeExpTypeWrapper (HsExpTypeSig l taggedExp t) expVar
@@ -557,14 +557,18 @@ inferDecl d@(HsClassDecl _ _ name args _) = do
     ci <- gets (M.lookup (UnQual name) . classInfo) >>= \case
         Nothing -> throwError $ "No class with name " <> showt name <> " found."
         Just info -> return info
-    ks <- getKinds
     let classVariableKinds = M.fromList [ (convertName v, k) | (v, k) <- argVariables ci]
-        ks' = M.union ks classVariableKinds
+        classKind = foldr KindFun KindStar classVariableKinds
+    addKinds $ M.singleton className classKind
+    ks <- getKinds
+    let ks' = M.union ks classVariableKinds
     forM_ (M.toList $ methods ci) $ \(m, HsQualType con t) -> do
         -- Augment the type with the class constraint, eg. `Functor a`
         let t' = HsQualType ((UnQual name, map (HsTyVar . fst) $ argVariables ci):con) t
         qualType <- synToQualType ks' t'
         qt <- qualToQuant True qualType
+        writeLog $ ">>>>>>>>>>>>>" <> showt ks'
+        writeLog $ ">>>>>>>>>>>>>" <> convertName m <> " :: " <> showt qt
         insertQuantifiedType (convertName m) qt
     -- Update our running class environment
     -- TODO(kc506): When we support contexts, update this to include the superclasses

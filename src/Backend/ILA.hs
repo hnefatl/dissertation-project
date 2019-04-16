@@ -237,7 +237,10 @@ getSimpleType name = (\(Quantified _ t) -> t) <$> getType name
 getSimpleFromSynType :: HsQualType -> Converter Type
 getSimpleFromSynType t = do
     ks <- getKinds
+    writeLog (showt t)
+    writeLog (showt ks)
     Qualified s t' <- T.synToQualType ks t
+    writeLog "after synToQualType"
     unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
     return t'
 
@@ -323,10 +326,12 @@ toIla (HsModule _ _ _ _ decls) = do
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
-    writeLog $ "HsPatBind: " <> synPrint pat <> " " <> synPrint rhs
+    writeLog $ "\nHsPatBind: " <> synPrint pat <> " " <> synPrint rhs
     -- Add the types of bound variables
     (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
+    writeLog $ "Bound name types:"
+    forM_ (M.toList ts) $ \(n,t) -> writeLog $ showt n <> " :: " <> showt t
     local (addTypes ts) $ do
         e <- rhsToIla rhs
         patToBindings pat e
@@ -347,29 +352,35 @@ declToIla (HsFunBind (m:ms)) = do
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
 declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
     ([], []) -> do
-        writeLog $ "Processing datatype " <> showt name
-        bs' <- M.fromList <$> mapM conDeclToBranch bs
+        let name' = convertName name
+        writeLog $ "Processing datatype " <> showt name'
+        ks <- getKinds
+        argKinds <- case M.lookup name' ks of
+            Nothing -> throwError $ "Missing kind for datatype " <> showt name'
+            Just KindStar -> return []
+            Just k -> fst <$> T.unmakeKindFun k
+        let newKinds = M.fromList $ zip (map convertName args) argKinds
+            ks' = M.union newKinds ks
+        bs' <- M.fromList <$> mapM (conDeclToBranch ks') bs
         addDatatype $ Datatype
-            { typeName = convertName name
+            { typeName = name'
             , parameters = map convertName args
             , branches = bs' }
-        let kind = foldr KindFun KindStar $ replicate (length args) KindStar
-        writeLog $ "Got kind " <> showt kind
-        addKinds $ M.singleton (convertName name) kind
         return []
     (_, []) -> throwError $ "Datatype contexts not supported:\n" <> showt d
     (_, _) -> throwError $ "Deriving clauses not supported:\n" <> showt d
 declToIla HsTypeSig{} = return []
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
-conDeclToBranch :: HsConDecl -> Converter (VariableName, [(Type, Strictness)])
-conDeclToBranch (HsConDecl _ name ts) = do
-    ks <- getKinds
+conDeclToBranch :: M.Map TypeVariableName Kind ->HsConDecl -> Converter (VariableName, [(Type, Strictness)])
+conDeclToBranch ks (HsConDecl _ name ts) = do
+    writeLog $ showt ks
+    writeLog $ unlines $ map synPrint ts
     ts' <- forM ts $ \case
         HsBangedTy t -> (, Strict) <$> T.synToType ks t
         HsUnBangedTy t -> (, NonStrict) <$> T.synToType ks t
     return (convertName name, ts')
-conDeclToBranch d@HsRecDecl{} = throwError $ "Record datatypes not supported:\n" <> showt d
+conDeclToBranch _ d@HsRecDecl{} = throwError $ "Record datatypes not supported:\n" <> showt d
 
 rhsToIla :: HsRhs -> Converter Expr
 rhsToIla (HsUnGuardedRhs e) = expToIla e
@@ -381,21 +392,14 @@ expToIla (HsExpTypeSig loc (HsVar v) t) = case v of
     UnQual HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
     Qual _ HsSpecial{} -> expToIla (HsExpTypeSig loc (HsCon v) t)
     _                  -> Var <$> getRenamedOrDefault (convertName v) <*> getSimpleFromSynType t
---expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
-expToIla (HsExpTypeSig _ (HsCon c) t) = do
-    writeLog "con"
-    writeLog $ synPrint c
-    writeLog $ synPrint t
-    res <- Con (convertName c) <$> getSimpleFromSynType t
-    writeLog "done"
-    return res
+expToIla (HsExpTypeSig _ (HsCon c) t) = Con (convertName c) <$> getSimpleFromSynType t
 expToIla (HsExpTypeSig _ (HsLit l) t) = litToIlaExpr l =<< getSimpleFromSynType t
 expToIla (HsApp e1 e2) = App <$> expToIla e1 <*> expToIla e2
 expToIla HsInfixApp{} = throwError "Infix applications not supported: should've been removed by the typechecker"
 expToIla (HsLambda _ [] e) = expToIla e
--- TODO(kc506): Rewrite to not use the explicit type signature: get the types of the subexpressions instead
 expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     argNames <- replicateM (length pats) freshVarName
+    writeLog $ "Lam " <> synPrint t
     expType <- getSimpleFromSynType t
     (argTypes, _) <- T.unmakeFun expType
     renames <- M.unions . map snd <$> mapM getPatRenamings pats
@@ -408,9 +412,11 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     let convert (_, Nothing)        = Nothing
         convert (n, Just predicate) = Just (predicate, n)
     dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
+    writeLog "foo"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addTypes patVariableTypes . addDictionaries dictionaryArgs) $ addRenamings renames $
         patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] =<< makeError expType
+    writeLog "bar"
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e
