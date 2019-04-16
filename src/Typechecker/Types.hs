@@ -9,7 +9,7 @@
 module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
-import           Control.Monad.Except    (MonadError, throwError, catchError)
+import           Control.Monad.Except    (MonadError, throwError)
 import           Control.Monad.State.Strict    (MonadState, evalStateT, gets, modify)
 import           Data.Foldable           (foldlM, foldrM)
 import           Data.Hashable           (Hashable)

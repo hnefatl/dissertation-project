@@ -567,8 +567,6 @@ inferDecl d@(HsClassDecl _ _ name args _) = do
         let t' = HsQualType ((UnQual name, map (HsTyVar . fst) $ argVariables ci):con) t
         qualType <- synToQualType ks' t'
         qt <- qualToQuant True qualType
-        writeLog $ ">>>>>>>>>>>>>" <> showt ks'
-        writeLog $ ">>>>>>>>>>>>>" <> convertName m <> " :: " <> showt qt
         insertQuantifiedType (convertName m) qt
     -- Update our running class environment
     -- TODO(kc506): When we support contexts, update this to include the superclasses
@@ -601,17 +599,11 @@ checkInstanceDecls cname argSynTypes ds = do
         ks' = M.union ks classVariableKinds
     argTypes <- mapM (synToType ks') argSynTypes
     let sub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci) argTypes  :: TypeSubstitution
-    writeLog $ "Sub: " <> showt sub
     methodTypes <- fmap M.fromList $ forM (M.toList $ methods ci) $ \(m, t) -> do
         qualType <- synToQualType ks' t
-        writeLog $ "Before: " <> showt (m, qualType)
         let qt = applySub sub $ Quantified (getTypeVars qualType) qualType
         t' <- instantiateToVar qt
-        writeLog $ "After: " <> showt (m, t')
         return (convertName m, t')
-    writeLog "------------------------------------------"
-    writeLog "------------------------------------------"
-    writeLog "------------------------------------------"
     forM ds $ \d -> case d of
         HsPatBind loc pat rhs wheres -> do
             -- Temporarily add the renamed types, infer the pattern, then reset to the old types
@@ -720,7 +712,6 @@ inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     writeLog "Updated explicit type tags"
     checkModuleExpTypes m''
     writeLog "Checked explicit type tags"
-    writeLog . pretty =<< get
     return (m'', ts)
 
 getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
