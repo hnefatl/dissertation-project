@@ -293,7 +293,7 @@ deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloade
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
-    qt@(Quantified _ (Qualified quals _)) <- getType $ convertName name
+    Quantified _ (Qualified quals _) <- getType $ convertName name
     -- Remove any constraints that we need and are already provided by dictionaries
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)

@@ -551,7 +551,7 @@ inferDecl d@(HsTypeSig _ names t) = do
     let varNames = map convertName names
     forM_ varNames (\v -> insertQuantifiedType v qt)
     return d
-inferDecl d@(HsClassDecl _ _ name args _) = do
+inferDecl d@(HsClassDecl _ _ name args decls) = do
     let className = convertName name
     writeLog $ unwords ["Processing class decl for", showt className, unwords $ map showt args]
     ci <- gets (M.lookup (UnQual name) . classInfo) >>= \case
@@ -562,12 +562,18 @@ inferDecl d@(HsClassDecl _ _ name args _) = do
     addKinds $ M.singleton className classKind
     ks <- getKinds
     let ks' = M.union ks classVariableKinds
-    forM_ (M.toList $ methods ci) $ \(m, HsQualType con t) -> do
-        -- Augment the type with the class constraint, eg. `Functor a`
-        let t' = HsQualType ((UnQual name, map (HsTyVar . fst) $ argVariables ci):con) t
-        qualType <- synToQualType ks' t'
-        qt <- qualToQuant True qualType
-        insertQuantifiedType (convertName m) qt
+    forM_ decls $ \case
+        HsTypeSig _ names (HsQualType quals t) -> do
+            -- Augment the type with the class constraint, eg. `Functor a`
+            let classPred = (UnQual name, map HsTyVar args)
+                varNames = map convertName names
+            qualType <- synToQualType ks' (HsQualType (classPred:quals) t)
+            qt <- qualToQuant True qualType
+            writeLog "-------------"
+            forM_ varNames (\v -> writeLog (showt v <> " ::" <> showt qt) >> insertQuantifiedType v qt)
+            writeLog "-------------"
+            writeLog $ "Processed " <> showt names <> ", got " <> showt qt
+        _ -> throwError "Only support type signature declarations in typeclasses"
     -- Update our running class environment
     -- TODO(kc506): When we support contexts, update this to include the superclasses
     addClasses $ M.singleton className (Class S.empty S.empty)

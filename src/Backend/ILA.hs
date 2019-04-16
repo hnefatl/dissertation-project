@@ -369,8 +369,6 @@ declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
 conDeclToBranch :: M.Map TypeVariableName Kind ->HsConDecl -> Converter (VariableName, [(Type, Strictness)])
 conDeclToBranch ks (HsConDecl _ name ts) = do
-    writeLog $ showt ks
-    writeLog $ unlines $ map synPrint ts
     ts' <- forM ts $ \case
         HsBangedTy t -> (, Strict) <$> T.synToType ks t
         HsUnBangedTy t -> (, NonStrict) <$> T.synToType ks t
@@ -394,7 +392,6 @@ expToIla HsInfixApp{} = throwError "Infix applications not supported: should've 
 expToIla (HsLambda _ [] e) = expToIla e
 expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     argNames <- replicateM (length pats) freshVarName
-    writeLog $ "Lam " <> synPrint t
     expType <- getSimpleFromSynType t
     (argTypes, _) <- T.unmakeFun expType
     renames <- M.unions . map snd <$> mapM getPatRenamings pats
