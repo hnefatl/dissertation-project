@@ -237,10 +237,9 @@ getSimpleType name = (\(Quantified _ t) -> t) <$> getType name
 getSimpleFromSynType :: HsQualType -> Converter Type
 getSimpleFromSynType t = do
     ks <- getKinds
-    writeLog (showt t)
-    writeLog (showt ks)
+    writeLog $ showt t
+    writeLog $ showt ks
     Qualified s t' <- T.synToQualType ks t
-    writeLog "after synToQualType"
     unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
     return t'
 
@@ -326,11 +325,9 @@ toIla (HsModule _ _ _ _ decls) = do
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
-    writeLog $ "\nHsPatBind: " <> synPrint pat <> " " <> synPrint rhs
     -- Add the types of bound variables
     (boundNames, _) <- getPatRenamings pat
     ts <- M.fromList <$> mapM (\n -> (n, ) <$> getType n) boundNames
-    writeLog $ "Bound name types:"
     forM_ (M.toList ts) $ \(n,t) -> writeLog $ showt n <> " :: " <> showt t
     local (addTypes ts) $ do
         e <- rhsToIla rhs
@@ -346,6 +343,11 @@ declToIla (HsFunBind (m:ms)) = do
     (argTypes, retType) <- T.unmakeFun =<< getSimpleType (convertName funName)
     args <- flip zip argTypes <$> replicateM arity freshVarName
     let matchToArg (HsMatch _ _ pats rhs _) = (pats, rhs, retType, subEmpty)
+    writeLog "before patToIla"
+    writeLog $ unlines $ map synPrint $ m:ms
+    writeLog $ showt argTypes
+    writeLog $ showt retType
+    writeLog ""
     local (addTypes $ M.map (Quantified S.empty) $ M.fromList args) $ do
         body <- patToIla args (map matchToArg (m:ms)) =<< makeError retType
         return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
@@ -412,11 +414,10 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
     let convert (_, Nothing)        = Nothing
         convert (n, Just predicate) = Just (predicate, n)
     dictionaryArgs <- M.fromList . mapMaybe convert . zip argNames <$> mapM dictionaryArgToTypePred argTypes
-    writeLog "foo"
     -- The body of this lambda is constructed by wrapping the next body with pattern match code
     body <- local (addTypes patVariableTypes . addDictionaries dictionaryArgs) $ addRenamings renames $
         patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty)] =<< makeError expType
-    writeLog "bar"
+    writeLog "after patToIla"
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
 --expToIla (HsLet [] e) = expToIla e

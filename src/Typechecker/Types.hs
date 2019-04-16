@@ -9,7 +9,7 @@
 module Typechecker.Types where
 
 import           BasicPrelude            hiding (intercalate)
-import           Control.Monad.Except    (MonadError, throwError)
+import           Control.Monad.Except    (MonadError, throwError, catchError)
 import           Control.Monad.State.Strict    (MonadState, evalStateT, gets, modify)
 import           Data.Foldable           (foldlM, foldrM)
 import           Data.Hashable           (Hashable)
@@ -273,13 +273,20 @@ synToType' (HsTyTuple ts) = makeTuple =<< mapM synToType' ts
 synToType' t@HsTyApp{} = do
     let (base, args) = unmakeSynApp t
     base' <- synToType' base
-    (argKinds, _) <- unmakeKindFun $ kind base'
+    -- If the base type's kind is * then we don't know enough about it, so just assume it has the right number of
+    -- arguments and they're all *. `minKind` is this simplest possible kind.
+    let minKind = foldr KindFun KindStar $ replicate (length args) KindStar
+        (base'', extraKinds) = case base' of
+            TypeVar (TypeVariable v KindStar) -> (TypeVar $ TypeVariable v minKind, M.singleton v minKind)
+            TypeCon (TypeConstant c KindStar) -> (TypeCon $ TypeConstant c minKind, M.singleton c minKind)
+            _ -> (base', M.empty)
+    (argKinds, _) <- unmakeKindFun $ kind base''
     let setKind (HsTyVar v) k = M.singleton (convertName v) k
         setKind _ _ = M.empty
-        newKinds = M.unions $ zipWith setKind args argKinds
+        newKinds = M.unions $ extraKinds:zipWith setKind args argKinds
     modify (M.union newKinds)
     args' <- mapM synToType' args
-    foldlM applyTypeFun base' args'
+    foldlM applyTypeFun base'' args'
 
 typePredToSyn :: MonadError Text m => TypePredicate -> m Syntax.HsAsst
 typePredToSyn (IsInstance (TypeVariableName c) t) = do
