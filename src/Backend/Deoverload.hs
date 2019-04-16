@@ -220,42 +220,63 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         Nothing -> throwError $ "No class with name " <> showt name <> " found."
         Just info -> return info
     paramType <- synToType ks arg
-    let paramKind = kind paramType
+    let argVars = argVariables ci
+        meths = M.mapKeys convertName $ methods ci
+        paramKind = kind paramType
         predicate = IsInstance (convertName name) paramType
+        typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars :: [TypeVariableName]) [paramType]
     dictName <- gets (M.lookup predicate . dictionaries) >>= \case
         Nothing -> throwError $ "No dictionary name found for " <> showt predicate
         Just n -> return n
+
+    -- Add the kinds of each of the class variables, so the class' method types have the right kinds
+    let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) argVars
+        ks' = M.union argKinds ks
+        addMethodTypes renamings = forM_ (M.toList renamings) $ \(methodName, methodRenamed) ->
+            case M.lookup methodName meths of
+                Nothing -> throwError $ unwords
+                    ["Instance decl for", synPrint name, synPrint arg, "missing definition of", convertName methodName]
+                Just t -> do
+                    methodType <- quantifyType . applySub typeSub =<< synToQualType ks' t
+                    addTypes $ M.singleton methodRenamed methodType
+                    writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodRenamed
+
     -- Generate a top-level declaration for each member declaration, bound to a new name
     (methodDecls, declRenames) <- fmap unzip $ forM ds $ \case
         HsPatBind l pat rhs wheres -> do
             (pat', renaming) <- (Deoverload $ lift $ lift $ runExceptT $ renameIsolated pat) >>= \case
                 Left err -> throwError err
                 Right v -> return v
+            writeLog $ "Pattern " <> synPrint pat <> " " <> showt renaming
+            addMethodTypes renaming
             d' <- HsPatBind l pat' <$> deoverloadRhs rhs <*> deoverloadDecls wheres
             return (d', renaming)
         HsFunBind matches -> do
             newName <- freshVarName
+            matchName <- case [ matchName | HsMatch _ matchName _ _ _ <- matches ] of
+                [] -> throwError $ "No matches in function bind"
+                fname:fnames
+                    | all (== fname) fnames -> return fname
+                    | otherwise -> throwError $ "Function name mismatch in deoverloader"
+            let renaming = M.singleton (convertName matchName) newName
+            writeLog $ "Method " <> synPrint matchName <> " " <> showt renaming
+            addMethodTypes renaming
             let synName = convertName newName
-                transform (HsMatch loc fname args rhs wheres) = do
-                    fType <- getType (convertName fname)
+                transform (HsMatch loc _ args rhs wheres) = do
+                    fType <- getType newName
                     -- Change the type of this instance of the function to use the instance argument instead of the
                     -- class variable
                     let sub :: TypeSubstitution
-                        sub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci) [paramType]
+                        sub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars) [paramType]
                         fType' = applySub sub fType
-                    match' <- addScopedTypes (M.singleton newName fType') $
+                    addScopedTypes (M.singleton newName fType') $
                         deoverloadMatch (HsMatch loc synName args rhs wheres)
-                    return (match', fname)
-            (matches', fnames) <- unzip <$> mapM transform matches
-            case fnames of
-                [] -> throwError $ "No matches in function bind"
-                fname:_ -> do
-                    unless (all (== fname) fnames) $ throwError $ "Function name mismatch in deoverloader"
-                    return (HsFunBind matches', M.singleton (convertName fname) newName)
+                    --deoverloadMatch (HsMatch loc synName args rhs wheres)
+            matches' <- mapM transform matches
+            return (HsFunBind matches', renaming)
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.
-    let typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) $ argVariables ci :: [TypeVariableName]) [paramType]
     Quantified _ t' <- deoverloadQuantType =<< getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''
@@ -275,18 +296,6 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
     -- Add types for each of the generated decls
     addTypes . M.singleton dictName =<< quantifyType (Qualified S.empty dictType)
     writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
-    -- Add the kinds of each of the class variables, so the class' method types have the right kinds
-    let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) $ argVariables ci
-        ks' = M.union argKinds ks
-    forM_ (M.toList $ methods ci) $ \(n, t) -> do
-        writeLog $ convertName n <> " :: " <> synPrint t
-        methodType <- quantifyType . applySub typeSub =<< synToQualType ks' t
-        case M.lookup (convertName n) renamings of
-            Nothing -> throwError $ unwords
-                ["Instance declaration for", synPrint name, synPrint arg, "missing definition of", convertName n]
-            Just methodName -> do
-                addTypes $ M.singleton methodName methodType
-                writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
     return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 

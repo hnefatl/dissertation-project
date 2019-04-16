@@ -32,8 +32,8 @@ makeTest sActual sExpected = testCase (unpack sActual) $ case both (parseModule 
         let infer = runTypeInferrer (inferModuleWithBuiltins actualModule)
             (((eTiOutput, tState), inferLogs), i) = runNameGenerator (runLoggerT infer) 0
         (taggedModule, ts) <- unpackEither (runExcept eTiOutput) id
-        let moduleClassInfo = getClassInfo taggedModule
-            deoverload = runDeoverload (deoverloadModule moduleClassInfo taggedModule) ts builtinKinds builtinClasses
+        moduleClassInfo <- unpackEither (getClassInfo taggedModule) id
+        let deoverload = runDeoverload (deoverloadModule moduleClassInfo taggedModule) ts builtinKinds builtinClasses
             ((eDeoverloaded, dState), deoverloadLogs) = evalNameGenerator (runLoggerT deoverload) i
             expected' = listCorrector $ stripParens expected
         actual <- unpackEither (runExcept eDeoverloaded) (\err -> unlines [err, "Expected:", synPrint expected', "Got:", synPrint taggedModule, pretty tState, pretty dState, unlines inferLogs, unlines deoverloadLogs])
