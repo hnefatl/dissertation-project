@@ -49,6 +49,10 @@ parseFlags = Flags
        <> short 'n'
        <> help "Don't import the standard library"
        <> showDefault)
+    <*> switch
+        ( long "dump-types"
+       <> help "Display all types after compiling"
+       <> showDefault)
     <*> strOption
         ( long "build-dir"
        <> short 'd'

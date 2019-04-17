@@ -153,8 +153,14 @@ addVariableTypes vs = do
 -- |Given a variable name, get the type variable name that corresponds
 getVariableTypeVariable :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariable name = do
+    writeLog $ "getVariableTypeVariable " <> showt name
     x <- gets (M.lookup name . variableTypes) -- Variable's either provided by the variableTypes
-    y <- traverse instantiateToVar =<< gets (M.lookup name . bindings) -- Or the bindings
+    writeLog $ "x: " <> showt x
+    tmp <- gets (M.lookup name . bindings)
+    writeLog $ "tmp: " <> showt tmp
+    y <- traverse instantiateToVar tmp -- Or the bindings
+    --y <- traverse instantiateToVar =<< gets (M.lookup name . bindings) -- Or the bindings
+    writeLog $ "y: " <> showt y
     maybe (throwError $ "Symbol " <> showt name <> " not in environment") return (x <|> y)
 getVariableTypeVariableOrAdd :: VariableName -> TypeInferrer TypeVariableName
 getVariableTypeVariableOrAdd name = catchError (getVariableTypeVariable name) $ \_ -> do
@@ -335,8 +341,11 @@ inferLiteral l = throwError $ "Unboxed literals not supported: " <> showt l
 -- one, which wraps the given node in an explicit type signature (eg. `5` is replaced with `(5 :: Num t2 => t2)`)
 inferExpression :: Syntax.HsExp -> TypeInferrer (Syntax.HsExp, TypeVariableName)
 inferExpression e@(HsVar name) = do
+    writeLog $ "inferExpression " <> convertName name
     v <- getVariableTypeVariable (convertName name)
+    writeLog $ "typeVar " <> showt v
     t <- instantiateIfNeeded v
+    writeLog $ "instantiated " <> showt t
     makeExpTypeWrapper e t
 inferExpression e@(HsCon name) = do
     v <- getVariableTypeVariable (convertName name)
@@ -569,10 +578,7 @@ inferDecl d@(HsClassDecl _ _ name args decls) = do
                 varNames = map convertName names
             qualType <- synToQualType ks' (HsQualType (classPred:quals) t)
             qt <- qualToQuant True qualType
-            writeLog "-------------"
             forM_ varNames (\v -> writeLog (showt v <> " ::" <> showt qt) >> insertQuantifiedType v qt)
-            writeLog "-------------"
-            writeLog $ "Processed " <> showt names <> ", got " <> showt qt
         _ -> throwError "Only support type signature declarations in typeclasses"
     -- Update our running class environment
     -- TODO(kc506): When we support contexts, update this to include the superclasses
@@ -610,6 +616,9 @@ checkInstanceDecls cname argSynTypes ds = do
         let qt = applySub sub $ Quantified (getTypeVars qualType) qualType
         t' <- instantiateToVar qt
         return (convertName m, t')
+    writeLog "--------"
+    writeLog $ unwords $ convertName cname:map showt argTypes
+    writeLog $ showt methodTypes
     forM ds $ \d -> case d of
         HsPatBind loc pat rhs wheres -> do
             -- Temporarily add the renamed types, infer the pattern, then reset to the old types
@@ -618,9 +627,15 @@ checkInstanceDecls cname argSynTypes ds = do
             patType <- nameToType =<< inferPattern pat
             modify $ \s -> s { variableTypes = origTypes }
             -- Infer the RHS type, unify
+            writeLog "Before inferRhs"
             (rhsExp, rhsVar) <- inferRhs rhs
+            writeLog "Before inferRhs"
             rhsType <- nameToType rhsVar
+            writeLog "Before unify"
             unify patType rhsType
+            writeLog "After unify"
+            writeLog $ "patType " <> showt patType
+            writeLog $ "rhsType " <> showt rhsType
             return $ HsPatBind loc pat rhsExp wheres
         HsFunBind matches -> do
             funName <- case matches of

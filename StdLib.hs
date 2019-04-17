@@ -5,6 +5,7 @@ data [] a = [] | a : [a]
 data (,) a b = (,) a b
 data (,,) a b c = (,,) a b c
 data Bool = False | True
+data Maybe a = Nothing | Just a
 
 class Ord a where
     (<) :: a -> a -> Bool
@@ -79,12 +80,35 @@ instance Show Bool where
 primShowIntShow :: Int -> [Char]
 primShowIntegerShow :: Integer -> [Char]
 
-class Monoid a where
-    mempty :: a
-    (<>) :: a -> a -> a
---instance Monoid [a] where
---    mempty = []
---    (<>) = (++)
+instance Show [Int] where
+    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+instance Show [Integer] where
+    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+instance Show [Char] where
+    show = concat . map show
+instance Show [Bool] where
+    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+
+
+class Functor f where
+    fmap :: (a -> b) -> f a -> f b
+instance Functor Maybe where
+    fmap _ Nothing = Nothing
+    fmap f (Just x) = Just (f x)
+instance Functor [] where
+    fmap = map
+
+class Monad m where
+    (>>=) :: (a -> m b) -> m a -> m b
+    return :: a -> m a
+instance Monad Maybe where
+    _ >>= Nothing = Nothing
+    f >>= (Just x) = f x
+    return = Just
+instance Monad [] where
+    _ >>= [] = []
+    f >>= (x:xs) = (f x) ++ (f >>= xs)
+    return x = [x]
 
 [] ++ ys = ys
 (x:xs) ++ ys = x:(xs ++ ys)
@@ -103,9 +127,20 @@ all f (x:xs) = f x && all f xs
 foldl _ a [] = a
 foldl f a (x:xs) = foldl f (f a x) xs
 
+map f [] = []
+map f (x:xs) = (f x):(map f xs)
+
+concat = foldl (++) []
+
+intercalate sep [] = []
+intercalate sep [x] = x
+intercalate sep (x:xs) = x ++ (sep ++ intercalate sep xs)
+
 sum = foldl (+) 0
 
 const x _ = x
+
+f . g = \x -> f (g x)
 
 undefined :: a
 compilerError :: a

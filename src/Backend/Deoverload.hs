@@ -57,7 +57,7 @@ instance Default DeoverloadState where
 runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
 runDeoverload action ts ks ce = do
     let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
-                flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
+                map (\(Qualified _ c) -> (c, makeDictName c)) $ (S.toList instances)
         Deoverload inner = addDictionaries ds >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
@@ -70,9 +70,6 @@ evalDeoverload action ts ks ce = do
     (a, _) <- lift $ runDeoverload action ts ks ce
     a' <- liftEither $ runExcept a
     return a'
-
-typePredToDictionaryName :: TypePredicate -> VariableName
-typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
@@ -95,6 +92,10 @@ addKinds :: M.Map TypeVariableName Kind -> Deoverload ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
 getKinds :: Deoverload (M.Map TypeVariableName Kind)
 getKinds = gets kinds
+getKind :: TypeVariableName -> Deoverload Kind
+getKind v = gets (M.lookup v . kinds) >>= \case
+    Nothing -> throwError $ "No kind found for " <> showt v
+    Just k -> return k
 
 addClassEnvironment :: ClassEnvironment -> Deoverload ()
 addClassEnvironment ce = modify (\s -> s { classEnvironment = M.union ce (classEnvironment s) })
@@ -133,7 +134,10 @@ makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> 
     where suffix = T.filter (/= ' ') $ flattenType t
 
 flattenType :: Type -> Text
-flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
+--flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
+-- This might be preventing us from have instances like `instance Show a => Show [a]`, but they're not supported yet
+-- anyway
+flattenType TypeVar{} = ""
 flattenType (TypeCon (TypeConstant (TypeVariableName c) _)) = c
 flattenType (TypeApp t1 t2 _) = flattenType t1 <> flattenType t2
 
@@ -225,10 +229,13 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         paramKind = kind paramType
         predicate = IsInstance (convertName name) paramType
         typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars :: [TypeVariableName]) [paramType]
-    dictName <- gets (M.lookup predicate . dictionaries) >>= \case
-        Nothing -> throwError $ "No dictionary name found for " <> showt predicate
-        Just n -> return n
+    writeLog $ showt meths
+    writeLog $ showt predicate
+    writeLog $ showt typeSub
+    writeLog . showt =<< gets dictionaries
+    dictName <- getDictionary predicate
 
+    writeLog "foo"
     -- Add the kinds of each of the class variables, so the class' method types have the right kinds
     let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) argVars
         ks' = M.union argKinds ks
@@ -271,7 +278,6 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
                         fType' = applySub sub fType
                     addScopedTypes (M.singleton newName fType') $
                         deoverloadMatch (HsMatch loc synName args rhs wheres)
-                    --deoverloadMatch (HsMatch loc synName args rhs wheres)
             matches' <- mapM transform matches
             return (HsFunBind matches', renaming)
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
@@ -312,7 +318,7 @@ deoverloadMatch (HsMatch loc name pats rhs wheres) = do
         funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
     writeLog $ "Processing match " <> showt name <> " " <> showt pats
     (wheres', rhs') <- addScopedDictionaries dictArgs $ (,) <$> deoverloadDecls wheres <*> deoverloadRhsWithoutAddingDicts rhs
-    writeLog $ "Finish processing. New args: " <> showt (funArgs <> pats)
+    writeLog $ "Finished processing. New args: " <> showt (funArgs <> pats)
     return $ HsMatch loc name (funArgs <> pats) rhs' wheres'
 
 isTypeSig :: HsDecl -> Bool

@@ -48,6 +48,7 @@ data Flags = Flags
     , dedupe          :: Bool
     , unreachableElim :: Bool
     , noStdImport     :: Bool
+    , dumpTypes       :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -62,6 +63,7 @@ instance Default Flags where
         , dedupe = True
         , unreachableElim = True
         , noStdImport = False
+        , dumpTypes = False
         , buildDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -120,6 +122,10 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
+            when (dumpTypes flags) $ forM_ (M.toList topLevelRenames) $ \(origName, renamed) ->
+                case M.lookup renamed types' of
+                    Nothing -> return ()
+                    Just t -> putStrLn $ showt origName <> " :: " <> showt t
             mainName <- case M.lookup "main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n
@@ -140,7 +146,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
             lift $ compileRuntimeFiles flags
             lift $ lift $ lift $ makeJar flags
-
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do
