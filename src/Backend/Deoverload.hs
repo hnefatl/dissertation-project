@@ -229,13 +229,8 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         paramKind = kind paramType
         predicate = IsInstance (convertName name) paramType
         typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars :: [TypeVariableName]) [paramType]
-    writeLog $ showt meths
-    writeLog $ showt predicate
-    writeLog $ showt typeSub
-    writeLog . showt =<< gets dictionaries
     dictName <- getDictionary predicate
 
-    writeLog "foo"
     -- Add the kinds of each of the class variables, so the class' method types have the right kinds
     let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) argVars
         ks' = M.union argKinds ks
@@ -378,7 +373,6 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType _ origSimpleType)) = do
             -- pull out the superclass types though, which means we need to find a path from the subclass to the
             -- superclass and translate it.
             fmap catMaybes $ forM (S.toList $ applySub sub varQuals) $ \varQual -> do
-                writeLog $ showt varQual
                 -- Using ifPThenBySuper would let us check for superclasses. Using entails lets us also grab any
                 -- instances like `Num Int` which we'd like to keep so we know to pass a dictionary.
                 p <- entails classEnv tagQuals varQual

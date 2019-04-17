@@ -252,7 +252,7 @@ instance Renameable HsExp where
         rename $ foldr (HsApp . HsApp consCon) nilCon es
     rename (HsParen e) = HsParen <$> rename e
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
-    rename _ = throwError "Renaming expression not supported"
+    rename e = throwError $ unlines ["Renaming expression not supported:", synPrint e]
 instance Renameable HsAlt where
     rename (HsAlt loc pat alts wheres) = do
         names <- getBoundVariables pat
