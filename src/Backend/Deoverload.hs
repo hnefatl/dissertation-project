@@ -173,7 +173,9 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     writeLog $ "Deoverloading class declaration " <> showt cname
     unless (null ctx) $ throwError $ "Class contexts not supported: " <> showt ctx
     -- Sort all type bindings like `x, y :: a -> a` into a list of pairs `[(x, a -> a), (y, a -> a)]`
-    methods <- fmap (sortOn fst) $ concatForM ds $ \decl -> case decl of
+    -- Convert them to Texts first as otherwise we compare on HsIdent/HsSym etc first before the actual string...
+    let toName = (convertName :: HsName -> Text) . fst
+    methods <- fmap (sortOn toName) $ concatForM ds $ \decl -> case decl of
         HsTypeSig _ names (HsQualType [] t) -> return [ (name, t) | name <- names ]
         HsTypeSig{} -> throwError $ "No support for class methods with constraints: " <> synPrint decl
         _ -> return []

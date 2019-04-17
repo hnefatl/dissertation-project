@@ -367,7 +367,7 @@ declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
 declToIla HsTypeSig{} = return []
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
-conDeclToBranch :: M.Map TypeVariableName Kind ->HsConDecl -> Converter (VariableName, [(Type, Strictness)])
+conDeclToBranch :: M.Map TypeVariableName Kind -> HsConDecl -> Converter (VariableName, [(Type, Strictness)])
 conDeclToBranch ks (HsConDecl _ name ts) = do
     ts' <- forM ts $ \case
         HsBangedTy t -> (, Strict) <$> T.synToType ks t
