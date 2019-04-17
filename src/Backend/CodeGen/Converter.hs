@@ -25,7 +25,7 @@ import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 import           Backend.ILA                    (Datatype(..), Literal(..))
 import           Backend.ILB
 import           ExtraDefs                      (fromLazyByteString, liftJoin2, toLazyByteString)
-import           Logger                         (LoggerT, MonadLogger, writeLog)
+import           Logger                         (LoggerT, MonadLogger)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
 
@@ -95,12 +95,12 @@ getFreshLocalVar = do
 -- |Record that the given variable is in the given local variable index
 addLocalVariable :: VariableName -> LocalVar -> Converter ()
 addLocalVariable v i = do
-    writeLog $ "Local variable " <> showt v <> " stored with index " <> showt i
+    --writeLog $ "Local variable " <> showt v <> " stored with index " <> showt i
     addComplexLocalVariable v (void $ loadLocal i)
 -- |Same as addLocalVariable but with a user-defined action to push the variable onto the stack
 addComplexLocalVariable :: VariableName -> Converter () -> Converter ()
 addComplexLocalVariable v action = do
-    writeLog $ "Local variable " <> showt v <> " stored with custom pusher"
+    --writeLog $ "Local variable " <> showt v <> " stored with custom pusher"
     modify (\s -> s { localSymbols = M.insert v action (localSymbols s) } )
 pushSymbol :: VariableName -> Converter ()
 pushSymbol v = do
@@ -113,13 +113,13 @@ pushSymbol v = do
         (Nothing, True)  -> pushLocalSymbol v
 pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
 pushGlobalSymbol v t = do
-    writeLog $ "Pushing " <> showt v <> " from globals"
+    --writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
     getStaticField cname $ NameType { ntName = toLazyByteString $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
     Just pusher -> do
-        writeLog $ "Pushing " <> showt v <> " from locals"
+        --writeLog $ "Pushing " <> showt v <> " from locals"
         pusher
     Nothing -> throwTextError $ "No action for local symbol " <> showt v
 

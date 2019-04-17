@@ -98,17 +98,17 @@ instance Functor Maybe where
 instance Functor [] where
     fmap = map
 
-class Monad m where
-    (>>=) :: (a -> m b) -> m a -> m b
-    return :: a -> m a
-instance Monad Maybe where
-    _ >>= Nothing = Nothing
-    f >>= (Just x) = f x
-    return = Just
-instance Monad [] where
-    _ >>= [] = []
-    f >>= (x:xs) = (f x) ++ (f >>= xs)
-    return x = [x]
+--class Monad m where
+--    (>>=) :: (a -> m b) -> m a -> m b
+--    return :: a -> m a
+--instance Monad Maybe where
+--    _ >>= Nothing = Nothing
+--    f >>= (Just x) = f x
+--    return = Just
+--instance Monad [] where
+--    _ >>= [] = []
+--    f >>= (x:xs) = (f x) ++ (f >>= xs)
+--    return x = [x]
 
 -- (++) :: [a] -> [a] -> [a]
 [] ++ ys = ys
