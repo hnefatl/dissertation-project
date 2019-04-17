@@ -31,7 +31,8 @@ import           Tuples                      (makeTupleName)
 import           Typechecker.Hardcoded
 import           Typechecker.Simplifier
 import           Typechecker.Substitution
-import           Typechecker.Typeclasses
+import           Typechecker.Typeclasses     hiding (addClass, addInstance)
+import qualified Typechecker.Typeclasses     as TypeClasses
 import           Typechecker.Types
 import           Typechecker.Unifier
 
@@ -134,8 +135,13 @@ getClassEnvironment = gets classEnvironment
 getConstraints :: Type -> TypeInferrer (S.Set ClassName)
 getConstraints name = gets (M.findWithDefault S.empty name . typePredicates)
 
-addClasses :: ClassEnvironment -> TypeInferrer ()
-addClasses env = modify (\s -> s { classEnvironment = M.union env (classEnvironment s) })
+setClasses :: ClassEnvironment -> TypeInferrer ()
+setClasses env = modify (\s -> s { classEnvironment = env })
+addClass :: ClassName -> S.Set ClassName -> TypeInferrer()
+addClass name supers = do
+    ce <- gets classEnvironment
+    ce' <- TypeClasses.addClass name supers ce
+    modify (\s -> s { classEnvironment = ce' })
 
 addKinds :: M.Map TypeVariableName Kind -> TypeInferrer ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
@@ -220,13 +226,24 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                 ce <- getClassEnvironment
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
                 predicate <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
+                writeLog ""
+                writeLog ""
+                writeLog ""
+                writeLog ""
+                writeLog ""
+                writeLog ""
+                writeLog $ "Looking for predicate " <> showt predicate
                 newPreds <- ifPThenByInstance ce predicate >>= \case
                     Nothing -> do
+                        writeLog "Not found"
                         -- Failed to find an instance: check if we can create one on-demand from the typeclass instance
                         -- declarations we've not yet processed
                         synType <- typeToSyn =<< applyCurrentSubstitution t
                         let key = (UnQual $ HsIdent $ unpack $ convertName classInstance, [synType])
-                        gets (M.lookup key . typeclassInstances) >>= \case
+                        writeLog $ "Finding typeclass for " <> showt key
+                        insts <- gets typeclassInstances
+                        writeLog $ "Typeclass instances: " <> showt insts
+                        case M.lookup key insts of
                             Just d -> do
                                 -- We've got a typeclass declaration for the instance we want: remove it, process it,
                                 -- then retry
@@ -276,7 +293,10 @@ getQualifiedType name = do
     ce <- getClassEnvironment
     t <- getSimpleType name
     let types = map TypeVar (S.toList $ getTypeVars t)
+    writeLog "foo"
+    writeLog $ showt name
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates types
+    writeLog "bar"
     let qt = Qualified predicates t
     writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
@@ -573,7 +593,7 @@ inferDecl d@(HsClassDecl _ _ name args decls) = do
         _ -> throwError "Only support type signature declarations in typeclasses"
     -- Update our running class environment
     -- TODO(kc506): When we support contexts, update this to include the superclasses
-    addClasses $ M.singleton className (Class S.empty S.empty)
+    addClass className S.empty
     return d
 inferDecl (HsInstDecl loc ctx name args decls) = case (ctx, args) of
     ([], [_]) -> HsInstDecl loc ctx name args <$> checkInstanceDecls name args decls
@@ -708,6 +728,14 @@ inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     -- be processed
     decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
     mapM_ addTypeclassInstanceFromDecl . M.elems =<< gets typeclassInstances
+    writeLog "after all decls"
+    writeLog "---------------------------------------"
+    writeLog "---------------------------------------"
+    writeLog "---------------------------------------"
+    writeLog . showt =<< gets classEnvironment
+    writeLog "---------------------------------------"
+    writeLog "---------------------------------------"
+    writeLog "---------------------------------------"
     let m' = HsModule p1 p2 p3 p4 decls''
     writeLog "Inferred module types"
     ts <- gets bindings
@@ -737,12 +765,12 @@ addTypeclassInstance inst = do
     -- Make sure we use the most resolved type we for the head of the instance
     inst' <- applyCurrentSubstitution inst
     s <- get
-    ce' <- addInstance (classEnvironment s) inst'
+    ce' <- TypeClasses.addInstance (classEnvironment s) inst'
     put $ s { classEnvironment = ce' }
 
 inferModuleWithBuiltins :: Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
 inferModuleWithBuiltins m = do
-    addClasses builtinClasses
+    setClasses builtinClasses
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     ci <- getClassInfo m
     inferModule (M.union builtinKinds $ getModuleKinds m) ci m

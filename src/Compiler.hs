@@ -109,6 +109,11 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             let kinds = getModuleKinds renamedModule
             moduleClassInfo <- getClassInfo renamedModule
             ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
+            writeLog ""
+            writeLog ""
+            writeLog $ showt classEnvironment
+            writeLog ""
+            writeLog ""
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
             deoverloadedModule <- liftEither $ runExcept deoverloadResult

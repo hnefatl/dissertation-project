@@ -175,17 +175,17 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     -- Sort all type bindings like `x, y :: a -> a` into a list of pairs `[(x, a -> a), (y, a -> a)]`
     -- Convert them to Texts first as otherwise we compare on HsIdent/HsSym etc first before the actual string...
     let toName = (convertName :: HsName -> Text) . fst
-    methods <- fmap (sortOn toName) $ concatForM ds $ \decl -> case decl of
+    classMethods <- fmap (sortOn toName) $ concatForM ds $ \decl -> case decl of
         HsTypeSig _ names (HsQualType [] t) -> return [ (name, t) | name <- names ]
         HsTypeSig{} -> throwError $ "No support for class methods with constraints: " <> synPrint decl
         _ -> return []
-    let numMethods = length methods
-        dataArgs = map (HsBangedTy . snd) methods
+    let numMethods = length classMethods
+        dataArgs = map (HsBangedTy . snd) classMethods
         -- dataDecl is `data Foo a = Foo (a -> a) (a -> Int)` for `class Foo a { f :: a -> a ; g :: a -> Int }`
         dataDecl = HsDataDecl nullSrcLoc [] cname args [ HsConDecl nullSrcLoc cname dataArgs ] []
     writeLog $ "Generated data declaration " <> synPrint dataDecl
     -- methodDecls are `f (Foo f' _) = f'` and `g (Foo _ g') = g'` for each method `f`/`g` of the class
-    methodDecls <- zipOverM methods [0..] $ \(name, t) i -> do
+    methodDecls <- zipOverM classMethods [0..] $ \(name, t) i -> do
         patVar <- convertName <$> freshVarName
         let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numMethods - 1 - i) HsPWildCard
             funArgs = [HsPApp (UnQual cname) pattern]
@@ -212,7 +212,7 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     -- Temporary kinds for the type variables in the class
     let newKinds = M.fromList $ zip argNames argKinds
         ks' = M.union newKinds ks
-    argTypes <- mapM (synToType ks' . snd) methods
+    argTypes <- mapM (synToType ks' . snd) classMethods
     resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (zipWith (TypeCon .: TypeConstant) argNames argKinds)
     conType <- makeFun argTypes resultType
     conQuantType <- quantifyType $ Qualified S.empty conType

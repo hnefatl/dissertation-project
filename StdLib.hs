@@ -84,8 +84,8 @@ instance Show [Int] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
 instance Show [Integer] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
-instance Show [Char] where
-    show = concat . map show
+--instance Show [Char] where
+--    show = concat . map show
 instance Show [Bool] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
 
@@ -110,6 +110,20 @@ instance Monad [] where
     f >>= (x:xs) = (f x) ++ (f >>= xs)
     return x = [x]
 
+class Foldable t where
+    foldr :: (a -> b -> b) -> b -> t a -> b
+    foldl :: (b -> a -> b) -> b -> t a -> b
+    null :: t a -> Bool
+    toList :: t a -> [a]
+instance Foldable [] where
+    foldr _ e [] = e
+    foldr f e (x:xs) = f x (foldr f e xs)
+    foldl _ e [] = e
+    foldl f e (x:xs) = foldl f (f e x) xs
+    null [] = True
+    null _ = False
+    toList = id
+
 -- (++) :: [a] -> [a] -> [a]
 [] ++ ys = ys
 (x:xs) ++ ys = x:(xs ++ ys)
@@ -133,24 +147,20 @@ not False = True
 all f [] = True
 all f (x:xs) = f x && all f xs
 
--- foldl :: (b -> a -> b) -> b -> [a] -> a
-foldl _ a [] = a
-foldl f a (x:xs) = foldl f (f a x) xs
-
 -- map :: (a -> b) -> [a] -> [b]
 map f [] = []
 map f (x:xs) = (f x):(map f xs)
 
--- map :: [a] -> [a] -> [a]
-concat = foldl (++) []
+-- concat :: [a] -> [a] -> [a]
+--concat = foldl (++) []
 
 -- intercalate :: [a] -> [[a]] -> [a]
 intercalate sep [] = []
 intercalate sep [x] = x
 intercalate sep (x:xs) = x ++ (sep ++ intercalate sep xs)
 
--- sum :: Num a => [a] -> a
-sum = foldl (+) 0
+-- sum :: (Foldable t, Num a) => t a -> a
+--sum = foldl (+) 0
 
 -- const :: a -> b -> a
 const x _ = x
