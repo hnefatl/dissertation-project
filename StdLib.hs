@@ -110,36 +110,52 @@ instance Monad [] where
     f >>= (x:xs) = (f x) ++ (f >>= xs)
     return x = [x]
 
+-- (++) :: [a] -> [a] -> [a]
 [] ++ ys = ys
 (x:xs) ++ ys = x:(xs ++ ys)
 
+-- id :: a -> a
 id x = x
 
+-- (&&) :: Bool -> Bool -> Bool
 True && True = True
 _ && _ = False
 
+-- (||) :: Bool -> Bool -> Bool
+False || False = False
+_ || _ = True
+
+-- not :: Bool -> Bool
 not True = False
 not False = True
 
+-- all :: (a -> Bool) -> [a] -> Bool
 all f [] = True
 all f (x:xs) = f x && all f xs
 
+-- foldl :: (b -> a -> b) -> b -> [a] -> a
 foldl _ a [] = a
 foldl f a (x:xs) = foldl f (f a x) xs
 
+-- map :: (a -> b) -> [a] -> [b]
 map f [] = []
 map f (x:xs) = (f x):(map f xs)
 
+-- map :: [a] -> [a] -> [a]
 concat = foldl (++) []
 
+-- intercalate :: [a] -> [[a]] -> [a]
 intercalate sep [] = []
 intercalate sep [x] = x
 intercalate sep (x:xs) = x ++ (sep ++ intercalate sep xs)
 
+-- sum :: Num a => [a] -> a
 sum = foldl (+) 0
 
+-- const :: a -> b -> a
 const x _ = x
 
+-- (.) :: (b -> c) -> (a -> b) -> a -> c
 f . g = \x -> f (g x)
 
 undefined :: a
