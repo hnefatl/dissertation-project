@@ -84,8 +84,8 @@ instance Show [Int] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
 instance Show [Integer] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
---instance Show [Char] where
---    show = concat . map show
+instance Show [Char] where
+    show = concat . map show
 instance Show [Bool] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
 
@@ -99,30 +99,34 @@ instance Functor [] where
     fmap = map
 
 class Monad m where
-    (>>=) :: (a -> m b) -> m a -> m b
+    (>>=) :: m a -> (a -> m b) -> m b
     return :: a -> m a
 instance Monad Maybe where
-    _ >>= Nothing = Nothing
-    f >>= (Just x) = f x
+    Nothing >>= _ = Nothing
+    (Just x) >>= f = f x
     return = Just
 instance Monad [] where
-    _ >>= [] = []
-    f >>= (x:xs) = (f x) ++ (f >>= xs)
+    xs >>= f = concat (map f xs)
     return x = [x]
 
-class Foldable t where
-    foldr :: (a -> b -> b) -> b -> t a -> b
-    foldl :: (b -> a -> b) -> b -> t a -> b
-    null :: t a -> Bool
-    toList :: t a -> [a]
-instance Foldable [] where
-    foldr _ e [] = e
-    foldr f e (x:xs) = f x (foldr f e xs)
-    foldl _ e [] = e
-    foldl f e (x:xs) = foldl f (f e x) xs
-    null [] = True
-    null _ = False
-    toList = id
+
+--class Foldable t where
+--    foldr :: (a -> b -> b) -> b -> t a -> b
+--    foldl :: (b -> a -> b) -> b -> t a -> b
+--    null :: t a -> Bool
+--    toList :: t a -> [a]
+--instance Foldable [] where
+--    foldr _ e [] = e
+--    foldr f e (x:xs) = f x (foldr f e xs)
+--    foldl _ e [] = e
+--    foldl f e (x:xs) = foldl f (f e x) xs
+--    null [] = True
+--    null _ = False
+--    toList = id
+-- TODO(kc506)
+-- Currently investigating why above causes error
+foldl _ e [] = e
+foldl f e (x:xs) = foldl f (f e x) xs
 
 -- (++) :: [a] -> [a] -> [a]
 [] ++ ys = ys
@@ -152,7 +156,7 @@ map f [] = []
 map f (x:xs) = (f x):(map f xs)
 
 -- concat :: [a] -> [a] -> [a]
---concat = foldl (++) []
+concat = foldl (++) []
 
 -- intercalate :: [a] -> [[a]] -> [a]
 intercalate sep [] = []
@@ -160,7 +164,7 @@ intercalate sep [x] = x
 intercalate sep (x:xs) = x ++ (sep ++ intercalate sep xs)
 
 -- sum :: (Foldable t, Num a) => t a -> a
---sum = foldl (+) 0
+sum = foldl (+) 0
 
 -- const :: a -> b -> a
 const x _ = x
