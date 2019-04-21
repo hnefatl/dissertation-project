@@ -386,33 +386,30 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
     (Just nilName, Just d) -> case M.lookupIndex (jvmSanitise nilName) $ branches d of
         Nothing -> throwTextError $ "No branch " <> showt (jvmSanitise nilName)
         Just nilIndex -> do
+            listCls <- list
+            charCls <- char
+            heapObjectCls <- heapObject
+            enterMeth <- enter
+            boxedDataDataField <- boxedDataData
             let stringBuilder = "java/lang/StringBuilder"
                 sbAppend = NameType "append" $ MethodSignature [CharByte] (Returns $ ObjectType $ unpack $ fromLazyByteString stringBuilder)
             -- Store the top-of-stack haskell-land string
-            checkCast =<< list
             listVar <- storeUnnamedLocal
             -- Create a new stringbuilder, store it
             new stringBuilder
             dup
             invokeSpecial stringBuilder Java.Lang.objectInit
             builderVar <- storeUnnamedLocal
-            listCls <- list
-            charCls <- char
-            heapObjectCls <- heapObject
-            enterMeth <- enter
-            boxedDataDataField <- boxedDataData
             let body = do
                     loadLocal builderVar
                     loadLocal listVar
+                    invokeVirtual heapObjectCls enterMeth
+                    checkCast listCls
                     getField listCls boxedDataDataField
                     dup
                     -- Load the rest of the list, overwrite our reference
                     iconst_1
                     aaload
-                    -- Evaluate the tail
-                    invokeVirtual heapObjectCls clone
-                    invokeVirtual heapObjectCls enterMeth
-                    checkCast listCls
                     storeSpecificUnnamedLocal listVar
                     -- Load the head char, append to the builder, pop the returned reference
                     iconst_0
@@ -428,11 +425,13 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             let bodyLength = fromIntegral bodyLength' + 3 -- Adding goto offset
             -- Head of the loop
             loadLocal listVar
+            invokeVirtual heapObjectCls enterMeth
+            checkCast listCls
             getField listCls boxedDataBranch
             pushInt nilIndex
             i0 $ IF_ICMP C_EQ (bodyLength + 3) -- We're at the end of the list, jump past the body
             Converter $ lift body
-            goto $ -(bodyLength + 5) -- Jump to the head
+            goto $ -(bodyLength + 11) -- Jump to the head
             -- Out of the loop, load the stringbuilder and get our final string
             loadLocal builderVar
             invokeVirtual stringBuilder toString

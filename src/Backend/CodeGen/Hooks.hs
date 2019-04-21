@@ -53,6 +53,13 @@ compilerGeneratedHooks :: M.Map VariableName VariableName -> M.Map (S.Set Variab
 compilerGeneratedHooks renamings = M.fromList
     [ makeSimpleHook renamings "compilerError" 0 $ throwRuntimeException "Compiler error :("
     , makeSimpleHook renamings "undefined" 0 $ throwRuntimeException "undefined"
+    , makeSimpleHook renamings "error" 1 $ do
+        -- Load the first argument, convert it to a Java string, throw it
+        aload_ I0
+        iconst_0
+        aaload
+        makeUnboxedString
+        throwRuntimeExceptionFromStack
     , makeSimpleHook renamings "primNumIntAdd" 2 $ invokeClassStaticMethod int "add" [int, int] (Returns <$> intClass)
     , makeSimpleHook renamings "primNumIntSub" 2 $ invokeClassStaticMethod int "sub" [int, int] (Returns <$> intClass)
     , makeSimpleHook renamings "primNumIntMult" 2 $ invokeClassStaticMethod int "mult" [int, int] (Returns <$> intClass)
@@ -96,6 +103,15 @@ throwRuntimeException s = do
     invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
     throw
 
+throwRuntimeExceptionFromStack :: Converter ()
+throwRuntimeExceptionFromStack = do
+    -- Create a new exception and throw it
+    var <- storeUnnamedLocal
+    new runtimeException
+    dup
+    loadLocal var
+    invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
+    throw
 
 makeEq :: M.Map VariableName VariableName -> VariableName -> Converter ByteString -> (S.Set VariableName, Text -> Converter ())
 makeEq renamings implName cls = makeSimpleHook renamings implName 2 $ do

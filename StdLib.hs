@@ -157,7 +157,7 @@ all f (x:xs) = f x && all f xs
 
 -- take :: Int -> [a] -> [a]
 take 0 _ = []
-take _ [] = undefined
+take _ [] = error "take called on empty list"
 take n (x:xs) = x:take (n-1 :: Int) xs
 
 -- map :: (a -> b) -> [a] -> [b]
@@ -183,3 +183,4 @@ f . g = \x -> f (g x)
 
 undefined :: a
 compilerError :: a
+error :: [Char] -> a
