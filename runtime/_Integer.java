@@ -22,14 +22,17 @@ public class _Integer extends Data {
     public static _Integer mult(_Integer x, _Integer y) {
         return _make_Integer(x.value.multiply(y.value));
     }
-    public static _Integer div(_Integer x, _Integer y) {
-        return _make_Integer(x.value.divide(y.value));
-    }
     public static _Integer negate(_Integer x) {
         return _make_Integer(x.value.negate());
     }
     public static boolean eq(_Integer x, _Integer y) {
         return x.value.equals(y.value);
+    }
+    public static _Integer div(_Integer x, _Integer y) {
+        return _make_Integer(x.value.divide(y.value));
+    }
+    public static _Integer mod(_Integer x, _Integer y) {
+        return _make_Integer(x.value.remainder(y.value));
     }
 
     public static String show(_Integer x) {

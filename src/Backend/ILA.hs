@@ -417,11 +417,15 @@ expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type 
 --        processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
 --    foldrM processBinding body bs
 expToIla (HsIf cond e1 e2) = do
+    rs <- asks topLevelRenames
     condExp <- expToIla cond
     e1Exp   <- expToIla e1
     e2Exp   <- expToIla e2
-    let alts = [ Alt (DataCon "True" []) e1Exp , Alt (DataCon "False" []) e2Exp ]
-    return $ Case condExp [] alts
+    case (M.lookup "True" rs, M.lookup "False" rs) of
+        (Nothing, _) -> throwError "True constructor not found in ILA lowering"
+        (_, Nothing) -> throwError "False constructor not found in ILA lowering"
+        (Just trueName, Just falseName) -> do
+            return $ Case condExp [] [ Alt (DataCon trueName []) e1Exp , Alt (DataCon falseName []) e2Exp ]
 expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseType) = do
     -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
     scrutBinder <- freshVarName
@@ -555,14 +559,14 @@ patToIla ((v, varType):vs) cs def = do
             (_, _, Nothing) -> throwError "(==) function not found in ILA lowering"
             (Just trueName, Just falseName, Just equals) -> do
                 equalsType <- T.makeFun [eqDictType, varType, varType] T.typeBool
-                let trueCon = DataCon trueName []
-                    falseCon = DataCon falseName []
-                    equalsFun = Var equals equalsType
+                let equalsFun = Var equals equalsType
                     customFoldM d xs f = foldrM f d xs
                 customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
                     HsPLit l:pl' -> do
                         l' <- litToIlaExpr l varType
-                        let cond = foldl App equalsFun [eqDict, Var v varType, l']
+                        let trueCon = applySub sub $ DataCon trueName []
+                            falseCon = applySub sub $ DataCon falseName []
+                            cond = foldl App equalsFun [eqDict, Var v varType, l']
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
                         expr <- patToIla vs [(pl', rhs, t, sub)] def
@@ -666,6 +670,9 @@ instance Substitutable VariableName VariableName Expr where
     applySub _ t@Type{}                   = t
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)
+instance Substitutable VariableName VariableName AltConstructor where
+    applySub _ Default = Default
+    applySub sub (DataCon v vs) = DataCon (applySub sub v) (applySub sub vs)
 
 instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where
     alphaEq' (NonRec v1 e1) (NonRec v2 e2) = alphaEq' v1 v2 >> alphaEq' e1 e2

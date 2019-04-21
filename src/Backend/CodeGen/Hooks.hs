@@ -73,6 +73,10 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntegerMult" 2 $ invokeClassStaticMethod integer "mult" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primNumIntegerDiv" 2 $ invokeClassStaticMethod integer "div" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primNumIntegerNegate" 1 $ invokeClassStaticMethod integer "negate" [integer] (Returns <$> integerClass)
+    , makeSimpleHook renamings "primIntegralIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns <$> intClass)
+    , makeSimpleHook renamings "primIntegralIntMod" 2 $ invokeClassStaticMethod int "mod" [int, int] (Returns <$> intClass)
+    , makeSimpleHook renamings "primIntegralIntegerDiv" 2 $ invokeClassStaticMethod integer "div" [integer, integer] (Returns <$> integerClass)
+    , makeSimpleHook renamings "primIntegralIntegerMod" 2 $ invokeClassStaticMethod integer "mod" [integer, integer] (Returns <$> integerClass)
     , makeEq renamings "primEqIntegerEq" integer
     , makeEq renamings "primEqCharEq" char
     , makeShow renamings "primShowIntShow" int

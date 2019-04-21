@@ -82,17 +82,34 @@ primShowIntegerShow :: Integer -> [Char]
 
 -- These are hacky ways to work around not having support for instance superclasses (Show a => Show [a])
 instance Show [Int] where
-    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
 instance Show [Integer] where
-    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
 instance Show [Char] where
     show = concat . map show
 instance Show [Bool] where
-    show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
 instance Show (Maybe Int) where
     show Nothing = "Nothing"
     show (Just x) = "Just " ++ show x
 
+class Integral a where
+    div :: a -> a -> a
+    mod :: a -> a -> a
+instance Integral Int where
+    div = primIntegralIntDiv
+    mod = primIntegralIntMod
+instance Integral Integer where
+    div = primIntegralIntegerDiv
+    mod = primIntegralIntegerMod
+
+primIntegralIntDiv :: Int -> Int -> Int
+primIntegralIntMod :: Int -> Int -> Int
+primIntegralIntegerDiv :: Integer -> Integer -> Integer
+primIntegralIntegerMod :: Integer -> Integer -> Integer
+
+even x = x `mod` 2 == 0
+odd = not . even
 
 class Functor f where
     fmap :: (a -> b) -> f a -> f b

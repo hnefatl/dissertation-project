@@ -226,13 +226,6 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                 ce <- getClassEnvironment
                 -- Reconstruct the type predicate, apply the substitution, find which constraints it implies
                 predicate <- applySub sub <$> (IsInstance classInstance <$> nameToType old)
-                writeLog ""
-                writeLog ""
-                writeLog ""
-                writeLog ""
-                writeLog ""
-                writeLog ""
-                writeLog $ "Looking for predicate " <> showt predicate
                 newPreds <- ifPThenByInstance ce predicate >>= \case
                     Nothing -> do
                         writeLog "Not found"
@@ -240,9 +233,7 @@ updateTypeConstraints sub@(Substitution mapping) = forM_ (M.toList mapping) (unc
                         -- declarations we've not yet processed
                         synType <- typeToSyn =<< applyCurrentSubstitution t
                         let key = (UnQual $ HsIdent $ unpack $ convertName classInstance, [synType])
-                        writeLog $ "Finding typeclass for " <> showt key
                         insts <- gets typeclassInstances
-                        writeLog $ "Typeclass instances: " <> showt insts
                         case M.lookup key insts of
                             Just d -> do
                                 -- We've got a typeclass declaration for the instance we want: remove it, process it,
@@ -293,12 +284,9 @@ getQualifiedType name = do
     ce <- getClassEnvironment
     t <- getSimpleType name
     let types = map TypeVar (S.toList $ getTypeVars t)
-    writeLog "foo"
-    writeLog $ showt name
     predicates <- simplify ce =<< S.unions <$> mapM getTypePredicates types
-    writeLog "bar"
     let qt = Qualified predicates t
-    writeLog $ showt name <> " has qualified type " <> showt qt
+    --writeLog $ showt name <> " has qualified type " <> showt qt
     return qt
 qualToQuant :: Bool -> QualifiedType -> TypeInferrer QuantifiedType
 qualToQuant freshen qt = do
@@ -728,14 +716,14 @@ inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     -- be processed
     decls'' <- (<>) <$> inferDeclGroup decls' <*> mapM inferDecl instanceDecls
     mapM_ addTypeclassInstanceFromDecl . M.elems =<< gets typeclassInstances
-    writeLog "after all decls"
-    writeLog "---------------------------------------"
-    writeLog "---------------------------------------"
-    writeLog "---------------------------------------"
-    writeLog . showt =<< gets classEnvironment
-    writeLog "---------------------------------------"
-    writeLog "---------------------------------------"
-    writeLog "---------------------------------------"
+    --writeLog "after all decls"
+    --writeLog "---------------------------------------"
+    --writeLog "---------------------------------------"
+    --writeLog "---------------------------------------"
+    --writeLog . showt =<< gets classEnvironment
+    --writeLog "---------------------------------------"
+    --writeLog "---------------------------------------"
+    --writeLog "---------------------------------------"
     let m' = HsModule p1 p2 p3 p4 decls''
     writeLog "Inferred module types"
     ts <- gets bindings
