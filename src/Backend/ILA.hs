@@ -559,15 +559,15 @@ patToIla ((v, varType):vs) cs def = do
                     falseCon = DataCon falseName []
                     equalsFun = Var equals equalsType
                     customFoldM d xs f = foldrM f d xs
-                customFoldM def pats $ \(pl, rhs, _, sub) body -> case pl of
-                    [HsPLit l] -> do
+                customFoldM def pats $ \(pl, rhs, t, sub) body -> case pl of
+                    HsPLit l:pl' -> do
                         l' <- litToIlaExpr l varType
                         let cond = foldl App equalsFun [eqDict, Var v varType, l']
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
-                        expr <- rhsToIla rhs
-                        return $ Case cond [] [ Alt trueCon (applySub sub expr), Alt falseCon body ]
-                    p -> throwError $ "Expected single literal in ILA lowering, got: " <> showt p
+                        expr <- patToIla vs [(pl', rhs, t, sub)] def
+                        return $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
+                    p -> throwError $ "Expected literal list in patToIla, got: " <> showt p
     else if allCon then do
         conGroups <- groupPatCons getPat pats
         alts <- forM conGroups $ \(con, es) -> do

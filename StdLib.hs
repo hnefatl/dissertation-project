@@ -80,6 +80,7 @@ instance Show Bool where
 primShowIntShow :: Int -> [Char]
 primShowIntegerShow :: Integer -> [Char]
 
+-- These are hacky ways to work around not having support for instance superclasses (Show a => Show [a])
 instance Show [Int] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
 instance Show [Integer] where
@@ -88,6 +89,9 @@ instance Show [Char] where
     show = concat . map show
 instance Show [Bool] where
     show xs = "[" ++ ((intercalate ", " (map show xs)) ++ "]")
+instance Show (Maybe Int) where
+    show Nothing = "Nothing"
+    show (Just x) = "Just " ++ show x
 
 
 class Functor f where
@@ -150,6 +154,11 @@ not False = True
 -- all :: (a -> Bool) -> [a] -> Bool
 all f [] = True
 all f (x:xs) = f x && all f xs
+
+-- take :: Int -> [a] -> [a]
+take 0 _ = []
+take _ [] = undefined
+take n (x:xs) = x:take (n-1 :: Int) xs
 
 -- map :: (a -> b) -> [a] -> [b]
 map f [] = []
