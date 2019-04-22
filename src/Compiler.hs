@@ -41,6 +41,7 @@ import           Optimisations.UnreachableCodeElim (elimUnreachableCode)
 import           Preprocessor.Info                 (getClassInfo, getModuleKinds)
 import           Preprocessor.Renamer              (evalRenamer, renameModule)
 import           Typechecker.Typechecker           (evalTypeInferrer, getClassEnvironment, inferModule)
+import qualified Typechecker.Types                 as T
 
 data Flags = Flags
     { verbose         :: Bool
@@ -48,6 +49,7 @@ data Flags = Flags
     , dedupe          :: Bool
     , unreachableElim :: Bool
     , noStdImport     :: Bool
+    , dumpTypes       :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -62,6 +64,7 @@ instance Default Flags where
         , dedupe = True
         , unreachableElim = True
         , noStdImport = False
+        , dumpTypes = False
         , buildDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -105,8 +108,19 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             m <- if noStdImport flags then return originalModule else mergePreludeModule originalModule
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
-                moduleClassInfo = getClassInfo renamedModule
+            moduleClassInfo <- getClassInfo renamedModule
             ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
+
+            -- Check main has the right type
+            mainRenamed <- case M.lookup "main" topLevelRenames of
+                Just renamed -> return renamed
+                Nothing -> throwError "Definition of main found"
+            expectedType <- T.Quantified S.empty . T.Qualified S.empty <$> T.makeList T.typeChar
+            case M.lookup mainRenamed types of
+                Nothing -> throwError $ "No type found for main (" <> showt mainRenamed <> ")"
+                Just mainType -> unless (mainType == expectedType) $
+                    throwError $ unwords ["Expected main to have type", showt expectedType, "got", showt mainType]
+
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
             deoverloadedModule <- liftEither $ runExcept deoverloadResult
@@ -120,6 +134,10 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
+            when (dumpTypes flags) $ forM_ (M.toList topLevelRenames) $ \(origName, renamed) ->
+                case M.lookup renamed types' of
+                    Nothing -> return ()
+                    Just t -> putStrLn $ showt origName <> " :: " <> showt t
             mainName <- case M.lookup "main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n
@@ -140,7 +158,6 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
             lift $ compileRuntimeFiles flags
             lift $ lift $ lift $ makeJar flags
-
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do

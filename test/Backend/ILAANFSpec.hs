@@ -42,7 +42,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             _ -> return ()
     where foo = do
             m <- parse input
-            let moduleClassInfo = getClassInfo m
+            moduleClassInfo <- getClassInfo m
             (m', ts) <- evalTypeInferrer (inferModuleWithBuiltins m)
             (dResult, dState) <- lift $ runDeoverload (deoverloadModule moduleClassInfo m') ts builtinKinds builtinClasses
             m'' <- liftEither $ runExcept dResult

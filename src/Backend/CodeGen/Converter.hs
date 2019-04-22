@@ -25,7 +25,7 @@ import           Backend.CodeGen.JVMSanitisable (jvmSanitise)
 import           Backend.ILA                    (Datatype(..), Literal(..))
 import           Backend.ILB
 import           ExtraDefs                      (fromLazyByteString, liftJoin2, toLazyByteString)
-import           Logger                         (LoggerT, MonadLogger, writeLog)
+import           Logger                         (LoggerT, MonadLogger)
 import           NameGenerator
 import           Names                          (TypeVariableName, VariableName(..), convertName)
 
@@ -95,12 +95,12 @@ getFreshLocalVar = do
 -- |Record that the given variable is in the given local variable index
 addLocalVariable :: VariableName -> LocalVar -> Converter ()
 addLocalVariable v i = do
-    writeLog $ "Local variable " <> showt v <> " stored with index " <> showt i
+    --writeLog $ "Local variable " <> showt v <> " stored with index " <> showt i
     addComplexLocalVariable v (void $ loadLocal i)
 -- |Same as addLocalVariable but with a user-defined action to push the variable onto the stack
 addComplexLocalVariable :: VariableName -> Converter () -> Converter ()
 addComplexLocalVariable v action = do
-    writeLog $ "Local variable " <> showt v <> " stored with custom pusher"
+    --writeLog $ "Local variable " <> showt v <> " stored with custom pusher"
     modify (\s -> s { localSymbols = M.insert v action (localSymbols s) } )
 pushSymbol :: VariableName -> Converter ()
 pushSymbol v = do
@@ -113,13 +113,13 @@ pushSymbol v = do
         (Nothing, True)  -> pushLocalSymbol v
 pushGlobalSymbol :: VariableName -> FieldType -> Converter ()
 pushGlobalSymbol v t = do
-    writeLog $ "Pushing " <> showt v <> " from globals"
+    --writeLog $ "Pushing " <> showt v <> " from globals"
     cname <- gets classname
     getStaticField cname $ NameType { ntName = toLazyByteString $ convertName v, ntSignature = t }
 pushLocalSymbol :: VariableName -> Converter ()
 pushLocalSymbol v = gets (M.lookup v . localSymbols) >>= \case
     Just pusher -> do
-        writeLog $ "Pushing " <> showt v <> " from locals"
+        --writeLog $ "Pushing " <> showt v <> " from locals"
         pusher
     Nothing -> throwTextError $ "No action for local symbol " <> showt v
 
@@ -386,33 +386,30 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
     (Just nilName, Just d) -> case M.lookupIndex (jvmSanitise nilName) $ branches d of
         Nothing -> throwTextError $ "No branch " <> showt (jvmSanitise nilName)
         Just nilIndex -> do
+            listCls <- list
+            charCls <- char
+            heapObjectCls <- heapObject
+            enterMeth <- enter
+            boxedDataDataField <- boxedDataData
             let stringBuilder = "java/lang/StringBuilder"
                 sbAppend = NameType "append" $ MethodSignature [CharByte] (Returns $ ObjectType $ unpack $ fromLazyByteString stringBuilder)
             -- Store the top-of-stack haskell-land string
-            checkCast =<< list
             listVar <- storeUnnamedLocal
             -- Create a new stringbuilder, store it
             new stringBuilder
             dup
             invokeSpecial stringBuilder Java.Lang.objectInit
             builderVar <- storeUnnamedLocal
-            listCls <- list
-            charCls <- char
-            heapObjectCls <- heapObject
-            enterMeth <- enter
-            boxedDataDataField <- boxedDataData
             let body = do
                     loadLocal builderVar
                     loadLocal listVar
+                    invokeVirtual heapObjectCls enterMeth
+                    checkCast listCls
                     getField listCls boxedDataDataField
                     dup
                     -- Load the rest of the list, overwrite our reference
                     iconst_1
                     aaload
-                    -- Evaluate the tail
-                    invokeVirtual heapObjectCls clone
-                    invokeVirtual heapObjectCls enterMeth
-                    checkCast listCls
                     storeSpecificUnnamedLocal listVar
                     -- Load the head char, append to the builder, pop the returned reference
                     iconst_0
@@ -428,11 +425,13 @@ makeUnboxedString = (,) <$> gets (M.lookup "[]" . topLevelRenames) <*> gets (M.l
             let bodyLength = fromIntegral bodyLength' + 3 -- Adding goto offset
             -- Head of the loop
             loadLocal listVar
+            invokeVirtual heapObjectCls enterMeth
+            checkCast listCls
             getField listCls boxedDataBranch
             pushInt nilIndex
             i0 $ IF_ICMP C_EQ (bodyLength + 3) -- We're at the end of the list, jump past the body
             Converter $ lift body
-            goto $ -(bodyLength + 5) -- Jump to the head
+            goto $ -(bodyLength + 11) -- Jump to the head
             -- Out of the loop, load the stringbuilder and get our final string
             loadLocal builderVar
             invokeVirtual stringBuilder toString

@@ -19,9 +19,6 @@ public class _Int extends Data {
     public static _Int mult(_Int x, _Int y) {
         return _make_Int(x.value * y.value);
     }
-    public static _Int div(_Int x, _Int y) {
-        return _make_Int(x.value / y.value);
-    }
     public static _Int negate(_Int x) {
         return _make_Int(-x.value);
     }
@@ -30,6 +27,12 @@ public class _Int extends Data {
         final BigInteger high = new BigInteger("2147483647");
         // Clamp to the range of an int then convert
         return _make_Int(x.value.max(low).min(high).intValue());
+    }
+    public static _Int div(_Int x, _Int y) {
+        return _make_Int((int)Math.floor((float)x.value / (float)y.value));
+    }
+    public static _Int mod(_Int x, _Int y) {
+        return _make_Int(x.value % y.value);
     }
     public static boolean eq(_Int x, _Int y) {
         return x.value == y.value;

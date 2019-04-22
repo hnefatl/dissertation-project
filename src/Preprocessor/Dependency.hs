@@ -59,12 +59,12 @@ dependencyOrder ds = do
         -- be depended on but can depend on others: this is an exceptional case. We generate a fresh unique variable
         -- name and pretend this declaration binds that variable.
         boundVars' <- if S.null boundVars then S.singleton . Left <$> freshVarName else return boundVars
-        writeLog $ "boundVars': " <> showt boundVars'
+        --writeLog $ "boundVars': " <> showt boundVars'
         -- Any variables used in this declaration that are also defined in this binding group
         freeVars <- getDepFreeVariables d
-        writeLog $ "freeVars: " <> showt freeVars
+        --writeLog $ "freeVars: " <> showt freeVars
         let contained = S.intersection declBindings freeVars
-        writeLog $ "contained: " <> showt contained
+        --writeLog $ "contained: " <> showt contained
         -- We make one node for each bound variable: the "node" is the declaration binding that variable, the
         -- key is the variable itself, and the dependencies are all variables used in the declaration along with
         -- all other variables bound by the declaration: otherwise vars bound in the same decl are seen as

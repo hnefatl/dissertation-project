@@ -20,7 +20,7 @@ makeTest (title, source, expected) = map makeTest' (S.toList $ S.powerSet optimi
     where optimisations = S.fromList ["-l", "-t", "-u"]
           makeTest' opts = do
             let optList = S.toList opts
-            testCase (makeTitle title optList) $ do
+            testCase (makeTitle title optList) $
                 withSystemTempDirectory "compiler-test" $ \dir -> do
                     let sourceFile = dir </> "testsrc.hs"
                         outputJar = dir </> "a.jar"
@@ -157,5 +157,37 @@ test = testGroup "Whole Program" $ concatMap makeTest
             |]
         ,
             "30414093201713378043612608166064768844377641568960512000000000000"
+        )
+    ,
+        (
+            "diss-code-1"
+        ,
+            [text|
+                ones = 1:ones
+                summed = sum (take 10 ones :: [Int]) == 10
+
+                main = show summed
+            |]
+        ,
+            "True"
+        )
+    ,
+        (
+            "diss-code-2"
+        ,
+            [text|
+                divide x y = if y == 0 then Nothing else Just (x + y)
+                x = divide (4 :: Int) 0 >>= divide 20
+
+                countdown 0 = []
+                countdown n = n:countdown (n - 1)
+                onlyEven x = if even x then [x] else []
+                y = [1 :: Int,2,3] >>= countdown
+                z = y >>= onlyEven
+
+                main = show x ++ (show y ++ (show z))
+            |]
+        ,
+            "Nothing[1,2,1,3,2,1][2,2]"
         )
     ]

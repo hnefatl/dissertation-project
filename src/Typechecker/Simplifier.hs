@@ -33,7 +33,7 @@ instance HasHnf TypePredicate where
     -- infer it from the environment.
     toHnf ce p | inHnf p = return (S.singleton p)
                | otherwise = ifPThenByInstance ce p >>= \case
-                    Nothing -> throwError "Failed to convert predicate to HNF"
+                    Nothing -> throwError $ "Failed to convert predicate to HNF: " <> showt p <> "\n" <> showt ce
                     Just ps -> toHnf ce ps
 instance HasHnf t => HasHnf (S.Set t) where
     inHnf = all inHnf

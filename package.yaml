@@ -43,6 +43,7 @@ dependencies:
 - template
 - temporary
 - exceptions
+- composition
 
 custom-setup:
   dependencies:

@@ -16,6 +16,7 @@ import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import qualified Data.Text                   as T
+import           Data.Composition            ((.:))
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
@@ -56,7 +57,7 @@ instance Default DeoverloadState where
 runDeoverload :: Deoverload a -> M.Map VariableName QuantifiedType -> M.Map TypeVariableName Kind -> ClassEnvironment -> LoggerT NameGenerator (Except Text a, DeoverloadState)
 runDeoverload action ts ks ce = do
     let ds = M.fromList $ concat $ flip map (M.elems ce) $ \(Class _ instances) ->
-                flip map (S.toList instances) $ \(Qualified _ c) -> (c, typePredToDictionaryName c)
+                map (\(Qualified _ c) -> (c, makeDictName c)) $ (S.toList instances)
         Deoverload inner = addDictionaries ds >> addTypes ts >> addKinds ks >> addClassEnvironment ce >> action
     (x, s) <- runStateT (runExceptT inner) def
     let z = case x of
@@ -69,9 +70,6 @@ evalDeoverload action ts ks ce = do
     (a, _) <- lift $ runDeoverload action ts ks ce
     a' <- liftEither $ runExcept a
     return a'
-
-typePredToDictionaryName :: TypePredicate -> VariableName
-typePredToDictionaryName (IsInstance c t) = VariableName $ "d" <> convertName c <> showt t
 
 addTypes :: M.Map VariableName QuantifiedType -> Deoverload ()
 addTypes ts = modify (\s -> s { types = M.union ts (types s) })
@@ -94,6 +92,10 @@ addKinds :: M.Map TypeVariableName Kind -> Deoverload ()
 addKinds ks = modify (\s -> s { kinds = M.union ks (kinds s) })
 getKinds :: Deoverload (M.Map TypeVariableName Kind)
 getKinds = gets kinds
+getKind :: TypeVariableName -> Deoverload Kind
+getKind v = gets (M.lookup v . kinds) >>= \case
+    Nothing -> throwError $ "No kind found for " <> showt v
+    Just k -> return k
 
 addClassEnvironment :: ClassEnvironment -> Deoverload ()
 addClassEnvironment ce = modify (\s -> s { classEnvironment = M.union ce (classEnvironment s) })
@@ -129,7 +131,15 @@ getDictionaryExp p = do
 
 makeDictName :: TypePredicate -> VariableName
 makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> suffix
-    where suffix = T.filter (/= ' ') $ showt t
+    where suffix = T.filter (/= ' ') $ flattenType t
+
+flattenType :: Type -> Text
+--flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
+-- This might be preventing us from have instances like `instance Show a => Show [a]`, but they're not supported yet
+-- anyway
+flattenType TypeVar{} = ""
+flattenType (TypeCon (TypeConstant (TypeVariableName c) _)) = c
+flattenType (TypeApp t1 t2 _) = flattenType t1 <> flattenType t2
 
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do
@@ -145,6 +155,9 @@ deoverloadModule ci (HsModule a b c d decls) = do
     writeLog "----------------"
     writeLog "- Deoverloader -"
     writeLog "----------------"
+    ts <- gets types
+    writeLog "Got types:"
+    forM_ (M.toList ts) $ \(v,t) -> writeLog $ showt v <> " :: " <> showt t
     modify $ \s -> s { classInfo = ci }
     writeLog $ "Got class information: " <> showt ci
     HsModule a b c d <$> deoverloadDecls decls
@@ -160,17 +173,19 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
     writeLog $ "Deoverloading class declaration " <> showt cname
     unless (null ctx) $ throwError $ "Class contexts not supported: " <> showt ctx
     -- Sort all type bindings like `x, y :: a -> a` into a list of pairs `[(x, a -> a), (y, a -> a)]`
-    methods <- fmap (sortOn fst) $ concatForM ds $ \decl -> case decl of
+    -- Convert them to Texts first as otherwise we compare on HsIdent/HsSym etc first before the actual string...
+    let toName = (convertName :: HsName -> Text) . fst
+    classMethods <- fmap (sortOn toName) $ concatForM ds $ \decl -> case decl of
         HsTypeSig _ names (HsQualType [] t) -> return [ (name, t) | name <- names ]
         HsTypeSig{} -> throwError $ "No support for class methods with constraints: " <> synPrint decl
         _ -> return []
-    let numMethods = length methods
-        dataArgs = map (HsBangedTy . snd) methods
+    let numMethods = length classMethods
+        dataArgs = map (HsBangedTy . snd) classMethods
         -- dataDecl is `data Foo a = Foo (a -> a) (a -> Int)` for `class Foo a { f :: a -> a ; g :: a -> Int }`
         dataDecl = HsDataDecl nullSrcLoc [] cname args [ HsConDecl nullSrcLoc cname dataArgs ] []
     writeLog $ "Generated data declaration " <> synPrint dataDecl
     -- methodDecls are `f (Foo f' _) = f'` and `g (Foo _ g') = g'` for each method `f`/`g` of the class
-    methodDecls <- zipOverM methods [0..] $ \(name, t) i -> do
+    methodDecls <- zipOverM classMethods [0..] $ \(name, t) i -> do
         patVar <- convertName <$> freshVarName
         let pattern = replicate i HsPWildCard ++ [HsPVar patVar] ++ replicate (numMethods - 1 - i) HsPWildCard
             funArgs = [HsPApp (UnQual cname) pattern]
@@ -183,15 +198,22 @@ deoverloadDecl (HsClassDecl _ ctx cname args ds) = do
         writeLog $ "Generated function declaration " <> synPrint decl
         return decl
     -- Add the type and kind of the data constructor to our environment
+    ci <- gets (M.lookup (UnQual cname) . classInfo) >>= \case
+        Nothing -> throwError $ "No class with name " <> showt cname <> " found."
+        Just info -> return info
     let conName = convertName cname
         argNames = map convertName args
-        -- The kind of the datatype is how many class arguments it has
-        conKind = foldr KindFun KindStar (replicate (length args) KindStar)
+        argKinds = map snd $ argVariables ci
+        -- The kind of the datatype is a function between the kinds of its arguments
+        conKind = foldr KindFun KindStar argKinds
     writeLog $ "Added kind " <> showt conKind <> " for constructor " <> showt conName
     addKinds $ M.singleton conName conKind
     ks <- getKinds
-    argTypes <- mapM (synToType ks . snd) methods
-    resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (map (\a -> TypeCon $ TypeConstant a KindStar) argNames)
+    -- Temporary kinds for the type variables in the class
+    let newKinds = M.fromList $ zip argNames argKinds
+        ks' = M.union newKinds ks
+    argTypes <- mapM (synToType ks' . snd) classMethods
+    resultType <- makeApp (TypeCon $ TypeConstant conName conKind) (zipWith (TypeCon .: TypeConstant) argNames argKinds)
     conType <- makeFun argTypes resultType
     conQuantType <- quantifyType $ Qualified S.empty conType
     writeLog $ "Added type " <> showt conQuantType <> " for constructor " <> showt conName
@@ -204,42 +226,60 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         Nothing -> throwError $ "No class with name " <> showt name <> " found."
         Just info -> return info
     paramType <- synToType ks arg
-    let predicate = IsInstance (convertName name) paramType
-    dictName <- gets (M.lookup predicate . dictionaries) >>= \case
-        Nothing -> throwError $ "No dictionary name found for " <> showt predicate
-        Just n -> return n
+    let argVars = argVariables ci
+        meths = M.mapKeys convertName $ methods ci
+        paramKind = kind paramType
+        predicate = IsInstance (convertName name) paramType
+        typeSub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars :: [TypeVariableName]) [paramType]
+    dictName <- getDictionary predicate
+
+    -- Add the kinds of each of the class variables, so the class' method types have the right kinds
+    let argKinds = M.fromList $ map (\(v,k) -> (convertName v,k)) argVars
+        ks' = M.union argKinds ks
+        addMethodTypes renamings = forM_ (M.toList renamings) $ \(methodName, methodRenamed) ->
+            case M.lookup methodName meths of
+                Nothing -> throwError $ unwords
+                    ["Instance decl for", synPrint name, synPrint arg, "missing definition of", convertName methodName]
+                Just t -> do
+                    methodType <- quantifyType . applySub typeSub =<< synToQualType ks' t
+                    addTypes $ M.singleton methodRenamed methodType
+                    writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodRenamed
+
     -- Generate a top-level declaration for each member declaration, bound to a new name
     (methodDecls, declRenames) <- fmap unzip $ forM ds $ \case
         HsPatBind l pat rhs wheres -> do
             (pat', renaming) <- (Deoverload $ lift $ lift $ runExceptT $ renameIsolated pat) >>= \case
                 Left err -> throwError err
                 Right v -> return v
+            writeLog $ "Pattern " <> synPrint pat <> " " <> showt renaming
+            addMethodTypes renaming
             d' <- HsPatBind l pat' <$> deoverloadRhs rhs <*> deoverloadDecls wheres
             return (d', renaming)
         HsFunBind matches -> do
             newName <- freshVarName
+            matchName <- case [ matchName | HsMatch _ matchName _ _ _ <- matches ] of
+                [] -> throwError $ "No matches in function bind"
+                fname:fnames
+                    | all (== fname) fnames -> return fname
+                    | otherwise -> throwError $ "Function name mismatch in deoverloader"
+            let renaming = M.singleton (convertName matchName) newName
+            writeLog $ "Method " <> synPrint matchName <> " " <> showt renaming
+            addMethodTypes renaming
             let synName = convertName newName
-                transform (HsMatch loc fname args rhs wheres) = do
-                    fType <- getType (convertName fname)
-                    argType <- synToType ks arg
+                transform (HsMatch loc _ args rhs wheres) = do
+                    fType <- getType newName
                     -- Change the type of this instance of the function to use the instance argument instead of the
                     -- class variable
                     let sub :: TypeSubstitution
-                        sub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci) [argType]
+                        sub = Substitution $ M.fromList $ zip (map (convertName . fst) argVars) [paramType]
                         fType' = applySub sub fType
-                    match' <- addScopedTypes (M.singleton newName fType') $
+                    addScopedTypes (M.singleton newName fType') $
                         deoverloadMatch (HsMatch loc synName args rhs wheres)
-                    return (match', fname)
-            (matches', fnames) <- unzip <$> mapM transform matches
-            case fnames of
-                [] -> throwError $ "No matches in function bind"
-                fname:_ -> do
-                    unless (all (== fname) fnames) $ throwError $ "Function name mismatch in deoverloader"
-                    return (HsFunBind matches', M.singleton (convertName fname) newName)
+            matches' <- mapM transform matches
+            return (HsFunBind matches', renaming)
         d -> throwError $ unlines ["Unexpected declaration in deoverloadDecl:", synPrint d]
     -- Work out what the constructor type is, so we can construct a type-tagged expression applying the constructor to
     -- the member declarations.
-    let typeSub = Substitution $ M.fromList $ zip (map convertName $ argVariables ci :: [TypeVariableName]) [paramType]
     Quantified _ t' <- deoverloadQuantType =<< getType (convertName name)
     let t'' = applySub typeSub t'
     conType <- HsQualType [] <$> typeToSyn t''
@@ -255,25 +295,17 @@ deoverloadDecl (HsInstDecl _ [] name [arg] ds) = do
         makeConApp e _ = throwError $ "Illegal expression in makeConApp: " <> showt e
     dictRhs <- HsUnGuardedRhs <$> foldlM makeConApp (HsExpTypeSig nullSrcLoc (HsCon name) conType) conArgs
     let dictDecl = HsPatBind nullSrcLoc (HsPVar $ HsIdent $ unpack $ convertName dictName) dictRhs []
+        dictType = TypeApp (TypeCon $ TypeConstant (convertName name) (KindFun paramKind KindStar)) paramType KindStar
     -- Add types for each of the generated decls
-    dictType <- TypeApp (TypeCon $ TypeConstant (convertName name) (KindFun KindStar KindStar)) <$> synToType ks arg <*> pure KindStar
     addTypes . M.singleton dictName =<< quantifyType (Qualified S.empty dictType)
     writeLog $ "Added type " <> showt dictType <> " for dictionary " <> showt dictName
-    forM_ (M.toList $ methods ci) $ \(n, t) -> do
-        methodType <- quantifyType . applySub typeSub =<< synToQualType ks t
-        case M.lookup (convertName n) renamings of
-            Nothing -> throwError $ unwords
-                ["Instance declaration for", synPrint name, synPrint arg, "missing definition of", convertName n]
-            Just methodName -> do
-                addTypes $ M.singleton methodName methodType
-                writeLog $ "Added type " <> showt methodType <> " for method " <> showt methodName
     return $ dictDecl:methodDecls
 deoverloadDecl d = throwError $ unlines ["Unsupported declaration in deoverloader:", synPrint d]
 
 deoverloadMatch :: HsMatch -> Deoverload HsMatch
 deoverloadMatch (HsMatch loc name pats rhs wheres) = do
     -- Replace each constraint with a lambda for a dictionary
-    (Quantified _ (Qualified quals _)) <- getType (convertName name)
+    Quantified _ (Qualified quals _) <- getType $ convertName name
     -- Remove any constraints that we need and are already provided by dictionaries
     dicts <- gets dictionaries
     let quals' = S.difference quals (M.keysSet dicts)
@@ -283,7 +315,7 @@ deoverloadMatch (HsMatch loc name pats rhs wheres) = do
         funArgs = [ HsPVar $ HsIdent $ unpack arg | VariableName arg <- args ]
     writeLog $ "Processing match " <> showt name <> " " <> showt pats
     (wheres', rhs') <- addScopedDictionaries dictArgs $ (,) <$> deoverloadDecls wheres <*> deoverloadRhsWithoutAddingDicts rhs
-    writeLog $ "Finish processing. New args: " <> showt (funArgs <> pats)
+    writeLog $ "Finished processing. New args: " <> showt (funArgs <> pats)
     return $ HsMatch loc name (funArgs <> pats) rhs' wheres'
 
 isTypeSig :: HsDecl -> Bool
@@ -343,7 +375,6 @@ deoverloadExp (HsExpTypeSig l (HsVar n) t@(HsQualType _ origSimpleType)) = do
             -- pull out the superclass types though, which means we need to find a path from the subclass to the
             -- superclass and translate it.
             fmap catMaybes $ forM (S.toList $ applySub sub varQuals) $ \varQual -> do
-                writeLog $ showt varQual
                 -- Using ifPThenBySuper would let us check for superclasses. Using entails lets us also grab any
                 -- instances like `Num Int` which we'd like to keep so we know to pass a dictionary.
                 p <- entails classEnv tagQuals varQual
@@ -398,9 +429,9 @@ deoverloadQuantType :: MonadError Text m => QuantifiedType -> m QuantifiedSimple
 deoverloadQuantType (Quantified qs qt) = Quantified qs <$> deoverloadQualType qt
 deoverloadQualType :: MonadError Text m => QualifiedType -> m Type
 deoverloadQualType (Qualified quals t) = makeFun (map deoverloadTypePredicate $ toList quals) t
-deoverloadTypePredicate :: TypePredicate -> Type -- TODO(kc506): This should use `getKinds`
+deoverloadTypePredicate :: TypePredicate -> Type
 deoverloadTypePredicate (IsInstance c t) = TypeApp base t KindStar
-    where base = TypeCon $ TypeConstant c (KindFun KindStar KindStar)
+    where base = TypeCon $ TypeConstant c (KindFun (kind t) KindStar)
 
 -- |Given eg. `(+) :: Num a -> a -> a -> a` and `[dNuma]`, produce a type-annotated tree for the following:
 -- `((+) :: Num a -> a -> a -> a) (dNuma :: Num a) :: a -> a -> a`
