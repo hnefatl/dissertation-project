@@ -198,9 +198,6 @@ addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
 addRenamings :: M.Map VariableName VariableName -> Converter a -> Converter a
 addRenamings rens action = do
-    writeLog $ "Adding renamings: " <> showt rens
-    ts <- asks types
-    writeLog $ "Current types: " <> showt ts
     -- Permanently add reverse renamings for these, then run the given action with a temporarily modified state
     modify $ \st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) }
     renamedTypes <- fmap M.fromList $ forM (M.toList rens) $ \(k,v) -> (v,) <$> getType k
@@ -412,13 +409,18 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
         patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty, M.empty)] =<< makeError expType
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
---expToIla (HsLet [] e) = expToIla e
---expToIla (HsLet (d:ds) e) = do
---    bs <- declToIla d
---    body <- expToIla (HsLet ds e)
---    let processBinding (NonRec v e') body' = writeLog (showt v <> " " <> showt e') >> Let v <$> getSimpleType v <*> pure e' <*> pure body'
---        processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
---    foldrM processBinding body bs
+-- TODO(kc506): This doesn't allow for recursive let-bound defns....
+expToIla (HsLet [] e) = expToIla e
+expToIla (HsLet (d:ds) e) = do
+    bs <- declToIla d
+    let toTypeMap (NonRec v r) = M.singleton v . Quantified S.empty <$> getExprType r
+        toTypeMap (Rec m) = fmap M.unions $ mapM (toTypeMap . uncurry NonRec) $ M.toList m
+    bindingTypes <- M.unions <$> mapM toTypeMap bs
+    local (addTypes bindingTypes) $ do
+        body <- expToIla (HsLet ds e)
+        let processBinding (NonRec v e') body' = Let v <$> getSimpleType v <*> pure e' <*> pure body'
+            processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
+        foldrM processBinding body bs
 expToIla (HsIf cond e1 e2) = do
     rs <- asks topLevelRenames
     condExp <- expToIla cond
@@ -427,7 +429,7 @@ expToIla (HsIf cond e1 e2) = do
     case (M.lookup "True" rs, M.lookup "False" rs) of
         (Nothing, _) -> throwError "True constructor not found in ILA lowering"
         (_, Nothing) -> throwError "False constructor not found in ILA lowering"
-        (Just trueName, Just falseName) -> do
+        (Just trueName, Just falseName) ->
             return $ Case condExp [] [ Alt (DataCon trueName []) e1Exp , Alt (DataCon falseName []) e2Exp ]
 expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseType) = do
     -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
@@ -497,7 +499,7 @@ patToBindings p e = do
 -- TODO(kc506): Pretty sure we can just bind the expression to a main value then use patToIla to generate
 -- the secondary bindings...
 patToBindings' :: MonadError Text m => HsPat -> m [Expr -> Converter (Binding Expr)]
-patToBindings' (HsPVar v) = return [ \e -> NonRec <$> (getRenamedOrDefault $ convertName v) <*> pure e ]
+patToBindings' (HsPVar v) = return [ \e -> NonRec <$> getRenamedOrDefault (convertName v) <*> pure e ]
 patToBindings' HsPWildCard = return []
 patToBindings' (HsPParen p) = patToBindings' p
 patToBindings' (HsPAsPat n p) = (return . NonRec (convertName n):) <$> patToBindings' p
@@ -572,12 +574,7 @@ patToIla ((v, varType):vs) cs def = do
                             cond = foldl App equalsFun [eqDict, Var v varType, l']
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
-                        writeLog $ showt vs
-                        writeLog $ showt [(pl', rhs, t, sub)]
-                        writeLog $ showt def
                         expr <- patToIla vs [(pl', rhs, t, sub, extraTypes)] def
-                        writeLog "patToIla"
-                        writeLog $ showt $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
                         return $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
                     p -> throwError $ "Expected literal list in patToIla, got: " <> showt p
     else if allCon then do
@@ -636,6 +633,10 @@ makeVarsForCon :: VariableName -> Type -> Converter [(VariableName, Type)]
 makeVarsForCon conName variableType = case T.unmakeApp variableType of
     -- Eg. ("[]", ["t151"])
     (TypeCon (TypeConstant datatypeName _), typeArgs) -> do
+        writeLog $ "grargh" <> showt conName
+        writeLog $ showt datatypeName
+        writeLog $ showt variableType
+        writeLog $ showt typeArgs
         datatype <- gets (M.lookup datatypeName . datatypes) >>= \case
             Nothing -> throwError $ "Unknown datatype " <> showt datatypeName
             Just d -> return d

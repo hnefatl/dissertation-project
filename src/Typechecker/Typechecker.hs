@@ -297,15 +297,15 @@ qualToQuant freshen freeTvs qt = do
         return $ case t' of
             TypeVar (TypeVariable v _) -> Just v
             _ -> Nothing
-    let keepFreeTvs = S.filter (\(TypeVariable v _) -> S.member v freeTvs')
-        quantifiers = keepFreeTvs $ getTypeVars qt
+    let filterFreeTvs = S.filter (\(TypeVariable v _) -> S.notMember v freeTvs')
+        quantifiers = filterFreeTvs $ getTypeVars qt
     writeLog $ "Quantifying " <> showt qt <> " with free tvs " <> showt freeTvs'
     writeLog $ showt quantifiers
     case freshen of
         False -> return $ Quantified quantifiers qt
         True -> do
             qt' <- instantiate $ Quantified quantifiers qt
-            let quantifiers' = keepFreeTvs $ getTypeVars qt'
+            let quantifiers' = filterFreeTvs $ getTypeVars qt'
             return $ Quantified quantifiers' qt'
 getQuantifiedType :: TypeVariableName -> S.Set TypeVariableName -> TypeInferrer QuantifiedType
 getQuantifiedType name freeTvs = do
@@ -406,7 +406,7 @@ inferExpression (HsList es) = do
     let nilCon = HsCon $ UnQual $ HsSymbol "[]"
         consCon = HsCon $ UnQual $ HsSymbol ":"
     inferExpression $ foldr (HsApp . HsApp consCon) nilCon es
-inferExpression (HsLet decls body) = do
+inferExpression l@(HsLet decls body) = do
     -- Process the declarations first (bring into scope any variables etc)
     declExps <- inferDeclGroup decls
     (bodyExp, bodyVar) <- inferExpression body
@@ -587,7 +587,7 @@ inferDecl d@(HsClassDecl _ _ name args decls) = do
             let classPred = (UnQual name, map HsTyVar args)
                 varNames = map convertName names
             qualType <- synToQualType ks' (HsQualType (classPred:quals) t)
-            qt <- qualToQuant True qualType
+            qt <- qualToQuant True S.empty qualType
             forM_ varNames (\v -> writeLog (showt v <> " ::" <> showt qt) >> insertQuantifiedType v qt)
         _ -> throwError "Only support type signature declarations in typeclasses"
     -- Update our running class environment
