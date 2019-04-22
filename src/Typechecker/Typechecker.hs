@@ -700,8 +700,8 @@ inferDeclGroup ds = do
         inferDecls group
     return $ concat declExps
 
-inferModule :: M.Map TypeVariableName Kind -> M.Map HsQName ClassInfo -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
-inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
+inferModule :: M.Map TypeVariableName Kind -> VariableName -> M.Map HsQName ClassInfo -> Syntax.HsModule -> TypeInferrer (Syntax.HsModule, M.Map VariableName QuantifiedType)
+inferModule ks mainRenamed ci (HsModule p1 p2 p3 p4 decls) = do
     writeLog "-----------------"
     writeLog "- Type Inferrer -"
     writeLog "-----------------"
@@ -731,6 +731,10 @@ inferModule ks ci (HsModule p1 p2 p3 p4 decls) = do
     writeLog "Updated explicit type tags"
     checkModuleExpTypes m''
     writeLog "Checked explicit type tags"
+    -- Check main has the right type
+    mainType <- getVariableQuantifiedType mainRenamed
+    expectedType <- Quantified S.empty . Qualified S.empty <$> makeList typeChar
+    unless (mainType == expectedType) $ throwError $ unwords ["Expected main to have type", showt expectedType, "got", showt mainType]
     return (m'', ts)
 
 getTypeclassTypePredicate :: HsDecl -> TypeInferrer (HsQName, [HsType])
@@ -761,7 +765,7 @@ inferModuleWithBuiltins m = do
     setClasses builtinClasses
     forM_ (M.toList builtinConstructors ++ M.toList builtinFunctions) (uncurry insertQuantifiedType)
     ci <- getClassInfo m
-    inferModule (M.union builtinKinds $ getModuleKinds m) ci m
+    inferModule (M.union builtinKinds $ getModuleKinds m) "main" ci m
 
 getAllVariableTypes :: TypeInferrer (M.Map VariableName QuantifiedType)
 getAllVariableTypes = do
