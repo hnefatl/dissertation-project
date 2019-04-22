@@ -41,6 +41,7 @@ import           Optimisations.UnreachableCodeElim (elimUnreachableCode)
 import           Preprocessor.Info                 (getClassInfo, getModuleKinds)
 import           Preprocessor.Renamer              (evalRenamer, renameModule)
 import           Typechecker.Typechecker           (evalTypeInferrer, getClassEnvironment, inferModule)
+import qualified Typechecker.Types                 as T
 
 data Flags = Flags
     { verbose         :: Bool
@@ -108,10 +109,18 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
             moduleClassInfo <- getClassInfo renamedModule
+            ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
+
+            -- Check main has the right type
             mainRenamed <- case M.lookup "main" topLevelRenames of
                 Just renamed -> return renamed
-                Nothing -> throwError "Definitio of main found"
-            ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds mainRenamed moduleClassInfo renamedModule <*> getClassEnvironment
+                Nothing -> throwError "Definition of main found"
+            expectedType <- T.Quantified S.empty . T.Qualified S.empty <$> T.makeList T.typeChar
+            case M.lookup mainRenamed types of
+                Nothing -> throwError $ "No type found for main (" <> showt mainRenamed <> ")"
+                Just mainType -> unless (mainType == expectedType) $
+                    throwError $ unwords ["Expected main to have type", showt expectedType, "got", showt mainType]
+
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
             deoverloadedModule <- liftEither $ runExcept deoverloadResult
