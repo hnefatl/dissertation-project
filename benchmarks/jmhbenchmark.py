@@ -3,6 +3,7 @@ import string
 import subprocess
 import shutil
 import pathlib
+import results
 
 import benchmark
 
@@ -70,10 +71,9 @@ class JMHBenchmark(benchmark.Benchmark):
                 "benchmark.Main",
             ]
             output = subprocess.check_output(args)
+            self._results.update(results.parse_results(output.decode()))
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
         finally:
             os.chdir(original_dir)
-
-        self._write_output(output)

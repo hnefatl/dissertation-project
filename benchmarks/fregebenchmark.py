@@ -20,7 +20,7 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
         self._temp_dir = None
         self._frege_jar_path = pathlib.Path.cwd() / "fregec.jar"
 
-    def run(self):
+    def _run(self):
         with tempfile.TemporaryDirectory() as d:
             self._temp_dir = pathlib.Path(d)
             self._compile()
@@ -36,6 +36,9 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
 
     def _run_frege_compiler(self):
         original_dir = pathlib.Path.cwd()
+        output_class = str(
+            (self._temp_dir / self._package_name.replace(".", "/") / self._class_name).with_suffix(".class")
+        )
         # Build the source program
         args = (
             [
@@ -51,6 +54,11 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
         )
         try:
             subprocess.check_output(args)
+            # TODO(kc506): This includes the size of the compiler as well. Ideally just want the class files in the
+            # run8/ directory?
+            jar_size = os.path.getsize(self._frege_jar_path)
+            class_size = os.path.getsize(output_class)
+            self._results["size"] = str(jar_size + class_size)
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise

@@ -2,6 +2,7 @@ import tempfile
 import pathlib
 import shutil
 import os
+import os.path
 import subprocess
 
 import jmhbenchmark
@@ -13,7 +14,7 @@ class JavaBenchmark(jmhbenchmark.JMHBenchmark):
         
         self._source_path = pathlib.Path(source_path)
 
-    def run(self):
+    def _run(self):
         with tempfile.TemporaryDirectory() as d:
             self._temp_dir = pathlib.Path(d)
             self._compile_source()
@@ -30,8 +31,10 @@ class JavaBenchmark(jmhbenchmark.JMHBenchmark):
         try:
             os.makedirs(self._package_name, exist_ok=True)
             dest_file = (pathlib.Path(self._package_name) / self._class_name).with_suffix(".java")
+            compiled_file = (pathlib.Path(self._package_name) / self._class_name).with_suffix(".class")
             shutil.copyfile(original_dir / self._source_path, dest_file)
             subprocess.check_output(["javac", dest_file])
+            self._results["size"] = str(os.path.getsize(compiled_file))
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
