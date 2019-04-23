@@ -66,7 +66,7 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntDiv" 2 $ invokeClassStaticMethod int "div" [int, int] (Returns <$> intClass)
     , makeSimpleHook renamings "primNumIntNegate" 1 $ invokeClassStaticMethod int "negate" [int] (Returns <$> intClass)
     , makeSimpleHook renamings "primNumIntFromInteger" 1 $ invokeClassStaticMethod int "fromInteger" [integer] (Returns <$> intClass)
-    , makeEq renamings "primEqIntEq" int
+    , makeSimpleHook renamings "primEqIntEq" 2 $ invokeClassStaticMethodWith int "eq" [int, int] (pure $ Returns BoolType) makeBoxedBool
     , makeSimpleHook renamings "primOrdIntLess" 2 $ invokeClassStaticMethodWith int "less" [int, int] (pure $ Returns BoolType) makeBoxedBool
     , makeSimpleHook renamings "primNumIntegerAdd" 2 $ invokeClassStaticMethod integer "add" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primNumIntegerSub" 2 $ invokeClassStaticMethod integer "sub" [integer, integer] (Returns <$> integerClass)
@@ -77,10 +77,10 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primIntegralIntMod" 2 $ invokeClassStaticMethod int "mod" [int, int] (Returns <$> intClass)
     , makeSimpleHook renamings "primIntegralIntegerDiv" 2 $ invokeClassStaticMethod integer "div" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primIntegralIntegerMod" 2 $ invokeClassStaticMethod integer "mod" [integer, integer] (Returns <$> integerClass)
-    , makeEq renamings "primEqIntegerEq" integer
-    , makeEq renamings "primEqCharEq" char
-    , makeShow renamings "primShowIntShow" int
-    , makeShow renamings "primShowIntegerShow" integer
+    , makeSimpleHook renamings "primEqIntegerEq" 2 $ invokeClassStaticMethodWith integer "eq" [integer, integer] (pure $ Returns BoolType) makeBoxedBool
+    , makeSimpleHook renamings "primEqCharEq" 2 $ invokeClassStaticMethodWith char "eq" [char, char] (pure $ Returns BoolType) makeBoxedBool
+    , makeSimpleHook renamings "primShowIntShow" 1 $ invokeClassStaticMethodWith int "show" [int] (pure $ Returns Java.Lang.stringClass) makeBoxedString
+    , makeSimpleHook renamings "primShowIntegerShow" 1 $ invokeClassStaticMethodWith integer "show" [integer] (pure $ Returns Java.Lang.stringClass) makeBoxedString
     ]
 
 invokeClassStaticMethod :: Converter ByteString -> ByteString -> [Converter ByteString] -> Converter ReturnSignature -> Converter ()
@@ -120,33 +120,3 @@ throwRuntimeExceptionFromStack = do
     loadLocal var
     invokeSpecial runtimeException $ NameType "<init>" $ MethodSignature [stringClass] ReturnsVoid
     throw
-
-makeEq :: M.Map VariableName VariableName -> VariableName -> Converter ByteString -> (S.Set VariableName, Text -> Converter ())
-makeEq renamings implName cls = makeSimpleHook renamings implName 2 $ do
-    cls' <- cls
-    -- Load and evaluate the arguments to Ints
-    forM_ [0, 1] $ \arg -> do
-        loadLocal 0
-        pushInt arg
-        aaload
-        liftJoin2 invokeVirtual heapObject enter
-        checkCast cls'
-    let arg = ObjectType $ unpack $ fromLazyByteString cls'
-    invokeStatic cls' $ NameType "eq" $ MethodSignature [arg, arg] (Returns BoolType)
-    -- Convert the Java Boolean to a Haskell Bool
-    makeBoxedBool
-    i0 ARETURN
-
-makeShow :: M.Map VariableName VariableName -> VariableName -> Converter ByteString -> (S.Set VariableName, Text -> Converter ())
-makeShow renamings implName cls = makeSimpleHook renamings implName 1 $ do
-    -- Load the argument and call `show` on it.
-    cls' <- cls
-    loadLocal 0
-    pushInt 0
-    aaload
-    liftJoin2 invokeVirtual heapObject enter
-    checkCast cls'
-    let arg = ObjectType $ unpack $ fromLazyByteString cls'
-    invokeStatic cls' $ NameType "show" $ MethodSignature [arg] (Returns Java.Lang.stringClass)
-    makeBoxedString
-    i0 ARETURN

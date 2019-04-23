@@ -50,7 +50,7 @@ makeTest input expected = testCase (unpack $ deline input) $
             dets <- mapM deoverloadQuantType ts
             -- Run the ILA conversion on the deoverloaded module+types
             let dictNames = S.map convertName $ M.keysSet moduleClassInfo
-            evalConverter (toIla m'') M.empty dets builtinKinds (Deoverload.dictionaries dState) dictNames
+            evalConverter (toIla m'') M.empty M.empty dets builtinKinds (Deoverload.dictionaries dState) dictNames
 
 
 test :: TestTree
