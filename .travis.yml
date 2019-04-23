@@ -24,4 +24,4 @@ install:
 
 script:
 # Run tests
-- stack --no-terminal test --haddock --coverage --no-haddock-deps
+- stack --no-terminal test --no-haddock-deps
