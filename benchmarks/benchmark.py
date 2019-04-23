@@ -8,6 +8,10 @@ class Benchmark:
     def name(self):
         return self._name
 
+    @property
+    def description(self):
+        return self.name
+
     def run(self):
         raise NotImplementedError
 

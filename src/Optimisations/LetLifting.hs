@@ -39,7 +39,7 @@ reorderLets bound e = do
     let (graph, getNode) = graphFromEdges' edges
         nodeOrder = map getNode $ topSort graph
         (removeable, nonRemoveable) = getRemovableLets S.empty nodeOrder
-    writeLog $ unlines [unwords ["nodeOrder", showt nodeOrder], unwords ["removeable", showt removeable], unwords ["nonRemoveable", showt nonRemoveable], ""]
+    --writeLog $ unlines [unwords ["nodeOrder", showt nodeOrder], unwords ["removeable", showt removeable], unwords ["nonRemoveable", showt nonRemoveable], ""]
     return (foldr (uncurry ExpLet . fst3) base nonRemoveable, removeable)
 reorderAltLets :: LetLifter m => S.Set VariableName -> Alt Exp -> m (Alt Exp, [Node])
 reorderAltLets bound (Alt c e) = first (Alt c) <$> reorderLets (S.union (getBound c) bound) e

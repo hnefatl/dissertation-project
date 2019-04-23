@@ -200,9 +200,7 @@ addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
 addRenamings :: M.Map VariableName VariableName -> Converter a -> Converter a
 addRenamings rens action = do
-    writeLog $ "Adding renamings: " <> showt rens
     ts <- asks types
-    writeLog $ "Current types: " <> showt ts
     -- Permanently add reverse renamings for these, then run the given action with a temporarily modified state
     modify $ \st -> st { reverseRenamings = M.union (inverseMap rens) (reverseRenamings st) }
     renamedTypes <- fmap M.fromList $ forM (M.toList rens) $ \(k,v) -> (v,) <$> getType k
@@ -583,12 +581,7 @@ patToIla ((v, varType):vs) cs def = do
                             cond = foldl App equalsFun [eqDict, Var v varType, l']
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
-                        writeLog $ showt vs
-                        writeLog $ showt [(pl', rhs, t, sub)]
-                        writeLog $ showt def
                         expr <- patToIla vs [(pl', rhs, t, sub, extraTypes)] def
-                        writeLog "patToIla"
-                        writeLog $ showt $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
                         return $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
                     p -> throwError $ "Expected literal list in patToIla, got: " <> showt p
     else if allCon then do
