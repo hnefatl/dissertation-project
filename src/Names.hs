@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 
@@ -42,6 +43,9 @@ instance IsString TypeVariableName where
 
 class NameConvertible n1 n2 where
     convertName :: n1 -> n2
+
+instance NameConvertible a Text => NameConvertible a String where
+    convertName = unpack . convertName
 
 instance NameConvertible Syntax.HsSpecialCon Text where
     convertName HsUnitCon      = "()"

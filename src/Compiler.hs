@@ -131,7 +131,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             writeLog $ unlines ["Deoverloaded module:", synPrint deoverloadedModule]
             writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             deoverloadedTypes <- mapM deoverloadQuantType types'
-            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames deoverloadedTypes kinds' dicts dictNames
+            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames reverseRenames1 deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (dumpTypes flags) $ forM_ (M.toList topLevelRenames) $ \(origName, renamed) ->

@@ -4,6 +4,7 @@ data Char
 data [] a = [] | a : [a]
 data (,) a b = (,) a b
 data (,,) a b c = (,,) a b c
+data (,,,) a b c d = (,,,) a b c d
 data Bool = False | True
 data Maybe a = Nothing | Just a
 
@@ -130,6 +131,9 @@ instance Monad [] where
     xs >>= f = concat (map f xs)
     return x = [x]
 
+
+-- both :: (a -> c) -> (b -> d) -> (a,b) -> (c,d)
+both f g (x, y) = (f x, g y)
 
 --class Foldable t where
 --    foldr :: (a -> b -> b) -> b -> t a -> b

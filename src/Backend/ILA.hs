@@ -33,6 +33,7 @@ import           Backend.Deoverload          (makeDictName)
 import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
 import           NameGenerator
+import           Tuples                      (makeTupleName, isTupleName)
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
                                               getBoundVariablesAndConflicts, getFreeVariables)
@@ -40,6 +41,7 @@ import           Typechecker.Substitution    (NameSubstitution, Substitutable, S
                                               subEmpty, subSingle)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypeConstant(..), TypePredicate(..))
+import           Typechecker.Typechecker     (instantiate)
 import qualified Typechecker.Types           as T
 
 
@@ -186,13 +188,14 @@ instance TextShow ConverterState where
 newtype Converter a = Converter (ReaderT ConverterReadableState (StateT ConverterState (ExceptT Text (LoggerT NameGenerator))) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
-runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter x rs ts ks ds dNames = runStateT (runReaderT inner rState) Default.def
+runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
+runConverter x rs rrs ts ks ds dNames = runStateT (runReaderT inner rState) state
     where Converter inner = addKinds ks >> x
           rState = ConverterReadableState
             { renamings = M.empty, topLevelRenames = rs, types = ts, dictionaryNames = dNames, dictionaries = ds }
-evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) a
-evalConverter x rs ts ks ds dNames = fst <$> runConverter x rs ts ks ds dNames
+          state = Default.def { reverseRenamings = rrs }
+evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) a
+evalConverter x rs rrs ts ks ds dNames = fst <$> runConverter x rs rrs ts ks ds dNames
 
 addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
@@ -224,9 +227,13 @@ getRenamed :: VariableName -> Converter VariableName
 getRenamed name = asks (M.lookup name . renamings) >>= \case
     Nothing -> throwError $ "Variable " <> showt name <> " not in renamings."
     Just renamed -> return renamed
-
 getRenamedOrDefault :: VariableName -> Converter VariableName
 getRenamedOrDefault name = asks (M.findWithDefault name name . renamings)
+
+getReverseRenamed :: VariableName -> Converter VariableName
+getReverseRenamed name = gets (M.lookup name . reverseRenamings) >>= \case
+    Nothing -> throwError $ "Variable " <> showt name <> " not in reverse renamings."
+    Just original -> return original
 
 getType :: VariableName -> Converter QuantifiedSimpleType
 getType name = asks (M.lookup name . types) >>= \case
@@ -241,8 +248,12 @@ getSimpleFromSynType t = do
     unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
     return t'
 
-getTupleName :: Converter VariableName
-getTupleName = maybe (throwError "No top-level rename found for \"(,)\"") return =<< asks (M.lookup "(,)" . topLevelRenames)
+getTupleName :: Int -> Converter VariableName
+getTupleName numElems = do
+    let name = VariableName $ makeTupleName numElems
+    asks (M.lookup name . topLevelRenames) >>= \case
+        Nothing -> throwError $ "No top-level rename found for " <> showt name
+        Just renamed -> return renamed
 
 -- |Construct an expression representing a tuple given the expressions and types of each element
 makeTuple :: [(Expr, Type)] -> Converter Expr
@@ -255,7 +266,7 @@ makeTuple ps = do
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the function
 -- constructing the tuple
 makeTuple' :: [Expr] -> Type -> Converter Expr
-makeTuple' es t = foldl' App <$> (Con <$> getTupleName <*> pure t) <*> pure es
+makeTuple' es t = foldl' App <$> (Con <$> getTupleName (length es) <*> pure t) <*> pure es
 
 getListNilName :: Converter VariableName
 getListNilName = maybe (throwError "No top-level rename found for \"[]\"") return =<< asks (M.lookup "[]" . topLevelRenames)
@@ -483,46 +494,72 @@ litToIlaExpr (HsInt i) t = asks (M.lookup "fromInteger" . topLevelRenames) >>= \
 litToIlaExpr l _ = throwError $ "Unboxed primitives not supported: " <> synPrint l
 
 
--- |Wrapper around patToBindings' that ensures we don't generate two bindings for simple variable bindings.
+-- |Generates bindings of values to variables from the given pattern and expression. Essentially convert an arbitrary
+-- `pat = e` to `x = case e of { pat -> (a,b,c,...) }` where a,b,c are variables bound by pat, then generate separate
+-- bindings for each variable bound by pat so they can be accessed in a single evaluation.
+-- Big issue with overloaded rhs's to patterns: `let (x,y) = foo in x` might deoverload to `let (x,y) = \dNumt -> foo in
+-- x`, and then we're assigning a function to a tuple...
+-- TODO(kc506): Bug: we need to add an `HsExpTypeSig` around all the haskell terms produced...
 patToBindings :: HsPat -> Expr -> Converter [Binding Expr]
-patToBindings p@HsPVar{} e = mapM ($ e) =<< patToBindings' p
-patToBindings p e = do
-    -- We're going to generate more than one binding: avoid duplicating the head expression in each by binding it to a
-    -- main variable
-    v <- freshVarName
-    eType <- getExprType e
-    fmap (NonRec v e:) . mapM ($ Var v eType) =<< patToBindings' p
+patToBindings (HsPVar v) e = return [NonRec (convertName v) e]
+patToBindings pat@(HsPApp con args) e = do
+    originalConName <- getReverseRenamed $ convertName con
+    let isSimpleArg HsPVar{} = True
+        isSimpleArg _ = False
+    (v, mainBinding) <- if isTupleName (convertName originalConName) && all isSimpleArg args then do
+            -- If we're already matching a simple tuple (like (x,y) not (x,True)), just bind it directly
+            v <- freshVarName
+            return (v, NonRec v e)
+        else
+            -- Otherwise bind it to a top-level tuple like any other pattern
+            patToBindingsMakeTopBinding pat e
+    -- Make bindings for each variable in the tuple
+    exprType <- getExprType e
+    decomposeBindings <- patToBindingsDecomposeBinding pat v exprType
+    return $ mainBinding:decomposeBindings
+patToBindings pat e = do
+    (v, mainBinding) <- patToBindingsMakeTopBinding pat e
+    exprType <- getExprType e
+    decomposeBindings <- patToBindingsDecomposeBinding pat v exprType
+    return $ mainBinding:decomposeBindings
 
--- |Generates bindings of values to variables from the given pattern and expression. Essentially traverse the pattern
--- tree looking for bound variables, then creates a binding that unwraps the given expression down to the value bound to
--- the pattern.
--- TODO(kc506): Pretty sure we can just bind the expression to a main value then use patToIla to generate
--- the secondary bindings...
-patToBindings' :: MonadError Text m => HsPat -> m [Expr -> Converter (Binding Expr)]
-patToBindings' (HsPVar v) = return [ \e -> NonRec <$> getRenamedOrDefault (convertName v) <*> pure e ]
-patToBindings' HsPWildCard = return []
-patToBindings' (HsPParen p) = patToBindings' p
-patToBindings' (HsPAsPat n p) = (return . NonRec (convertName n):) <$> patToBindings' p
-patToBindings' (HsPApp con ps) = do
-    newBindingConts <- concat . zipWith (\i -> map (i,)) [0..] <$> mapM patToBindings' ps
-    let wrapInCase :: (Int, Expr -> Converter (Binding Expr)) -> Expr -> Converter (Binding Expr)
-        wrapInCase (i, c) e = do
-            -- TODO(kc506): rather than generating loads of new variable names, use Nothing/Just.
-            vs <- replicateM (length ps) freshVarName
-            let v = vs !! i
-            eType <- getExprType e
-            err <- makeError eType
-            c (Var v eType) >>= \case
-              NonRec b e' -> return $ NonRec b $ Case e [] [ Alt (DataCon (convertName con) vs) e', Alt Default err ]
-              Rec{} -> throwError "Recursive bindings not supported in patToBindings'"
-    return $ map wrapInCase newBindingConts
-patToBindings' (HsPInfixApp p1 c p2) = patToBindings' $ HsPApp c [p1, p2]
-patToBindings' HsPTuple{} = throwError "HsPTuple should've been replaced already"
-patToBindings' HsPList{} = throwError "HsPList should've been replaced already"
-patToBindings' HsPLit{} = throwError "HsPLit in decl patterns not yet supported"
-patToBindings' HsPNeg{} = throwError "HsPNeg in decl patterns not yet supported"
-patToBindings' HsPRec{} = throwError "HsPRec in decl patterns not yet supported"
-patToBindings' HsPIrrPat{} = throwError "HsPIrrPat in decl patterns not yet supported"
+-- Construct a binding that takes the expression and binds a tuple containing all the bound names to a fresh variable
+-- name
+patToBindingsMakeTopBinding :: HsPat -> Expr -> Converter (VariableName, Binding Expr)
+patToBindingsMakeTopBinding pat e = do
+    bindingVar <- freshVarName
+    eType <- getExprType e
+    boundNames <- S.toAscList <$> getBoundVariables pat
+    boundNameTypes <- mapM getType boundNames
+    renamedNames <- replicateM (length boundNames) freshVarName
+    -- Generate renamings for all the bound variables
+    let sub = Substitution $ M.fromList $ zip boundNames renamedNames
+        pat' = applySub sub pat
+    -- Construct a tuple of the renamed bound variables
+    tupleCon <- HsCon . UnQual . HsSymbol . convertName <$> getTupleName (length boundNames)
+    let rhs = HsUnGuardedRhs $ foldl HsApp tupleCon $ map (HsVar . UnQual . HsIdent . convertName) renamedNames
+    rhsType <- T.makeTuple =<< mapM instantiate boundNameTypes
+    err <- makeError rhsType
+    body <- patToIla [(bindingVar, eType)] [([pat'], rhs, rhsType, subEmpty, M.empty)] err
+    return (bindingVar, NonRec bindingVar $ Let bindingVar eType e body)
+
+-- Given a binding as made by `patToBindingsMakeTopBinding`, a tuple containing each variable bound by the expression,
+-- generate a binding for each variable bound by the pattern to extract that variable
+patToBindingsDecomposeBinding :: HsPat -> VariableName -> Type -> Converter [Binding Expr]
+patToBindingsDecomposeBinding pat mainBinding mainBindingType = do
+    boundNames <- S.toAscList <$> getBoundVariables pat
+    boundNameTypes <- mapM getType boundNames
+    tupleCon <- UnQual . HsSymbol . convertName <$> getTupleName (length boundNames)
+    forM (zip3 boundNames boundNameTypes [0..]) $ \(n, Quantified _ t, i) -> do
+        tmpVar <- HsIdent . convertName <$> freshVarName
+        let suffixLength = length boundNames - i - 1
+            conArgs = replicate i HsPWildCard <> [HsPVar tmpVar] <> replicate suffixLength HsPWildCard
+            extractorPat = HsPApp tupleCon conArgs
+            extractorRhs = HsUnGuardedRhs $ HsVar $ UnQual tmpVar
+        err <- makeError t
+        e <- patToIla [(mainBinding, mainBindingType)] [([extractorPat], extractorRhs, t, subEmpty, M.empty)] err
+        return $ NonRec n e
+
 
 -- Implemented as in "The Implementation of Functional Programming Languages"
 patToIla :: [(VariableName, Type)] -> [([HsPat], HsRhs, Type, NameSubstitution, M.Map VariableName T.QuantifiedSimpleType)] -> Expr -> Converter Expr
@@ -633,10 +670,6 @@ makeVarsForCon :: VariableName -> Type -> Converter [(VariableName, Type)]
 makeVarsForCon conName variableType = case T.unmakeApp variableType of
     -- Eg. ("[]", ["t151"])
     (TypeCon (TypeConstant datatypeName _), typeArgs) -> do
-        writeLog $ "grargh" <> showt conName
-        writeLog $ showt datatypeName
-        writeLog $ showt variableType
-        writeLog $ showt typeArgs
         datatype <- gets (M.lookup datatypeName . datatypes) >>= \case
             Nothing -> throwError $ "Unknown datatype " <> showt datatypeName
             Just d -> return d

@@ -180,13 +180,13 @@ instantiateToVar qt = do
     unify vt t
     return v
 
-instantiate :: MonadNameGenerator m => QuantifiedType -> m QualifiedType
-instantiate (Quantified quants ql) = do
+instantiate :: (TypeSubstitutable t, MonadNameGenerator m) => Quantified t -> m t
+instantiate (Quantified quants t) = do
     let giveNewName (TypeVariable oldName k) = do
             newName <- freshTypeVarName
             return (oldName, TypeVar $ TypeVariable newName k)
     sub <- Substitution . M.fromList <$> mapM giveNewName (S.toList quants)
-    return $ applySub sub ql
+    return $ applySub sub t
 
 
 addTypeConstraint :: Type -> ClassName -> TypeInferrer ()
@@ -406,7 +406,7 @@ inferExpression (HsList es) = do
     let nilCon = HsCon $ UnQual $ HsSymbol "[]"
         consCon = HsCon $ UnQual $ HsSymbol ":"
     inferExpression $ foldr (HsApp . HsApp consCon) nilCon es
-inferExpression l@(HsLet decls body) = do
+inferExpression (HsLet decls body) = do
     -- Process the declarations first (bring into scope any variables etc)
     declExps <- inferDeclGroup decls
     (bodyExp, bodyVar) <- inferExpression body
