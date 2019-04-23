@@ -32,6 +32,7 @@ import           AlphaEq                     (AlphaEq, alphaEq')
 import           Backend.Deoverload          (makeDictName)
 import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
+import Tuples (makeTupleName)
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
@@ -186,13 +187,14 @@ instance TextShow ConverterState where
 newtype Converter a = Converter (ReaderT ConverterReadableState (StateT ConverterState (ExceptT Text (LoggerT NameGenerator))) a)
     deriving (Functor, Applicative, Monad, MonadReader ConverterReadableState, MonadState ConverterState, MonadError Text, MonadLogger, MonadNameGenerator)
 
-runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
-runConverter x rs ts ks ds dNames = runStateT (runReaderT inner rState) Default.def
+runConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) (a, ConverterState)
+runConverter x rs rrs ts ks ds dNames = runStateT (runReaderT inner rState) state
     where Converter inner = addKinds ks >> x
           rState = ConverterReadableState
             { renamings = M.empty, topLevelRenames = rs, types = ts, dictionaryNames = dNames, dictionaries = ds }
-evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) a
-evalConverter x rs ts ks ds dNames = fst <$> runConverter x rs ts ks ds dNames
+          state = Default.def { reverseRenamings = rrs }
+evalConverter :: Converter a -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map VariableName QuantifiedSimpleType -> M.Map TypeVariableName Kind -> M.Map TypePredicate VariableName -> S.Set TypeVariableName -> ExceptT Text (LoggerT NameGenerator) a
+evalConverter x rs rrs ts ks ds dNames = fst <$> runConverter x rs rrs ts ks ds dNames
 
 addRenaming :: VariableName -> VariableName -> Converter a -> Converter a
 addRenaming v r = addRenamings (M.singleton v r)
@@ -244,8 +246,12 @@ getSimpleFromSynType t = do
     unless (null s) $ throwError "Non deoverloaded function found in ILA type bindings"
     return t'
 
-getTupleName :: Converter VariableName
-getTupleName = maybe (throwError "No top-level rename found for \"(,)\"") return =<< asks (M.lookup "(,)" . topLevelRenames)
+getTupleName :: Int -> Converter VariableName
+getTupleName numElems = do
+    let name = VariableName $ makeTupleName numElems
+    asks (M.lookup name . topLevelRenames) >>= \case
+        Nothing -> throwError $ "No top-level rename found for " <> showt name
+        Just renamed -> return renamed
 
 -- |Construct an expression representing a tuple given the expressions and types of each element
 makeTuple :: [(Expr, Type)] -> Converter Expr
@@ -258,7 +264,7 @@ makeTuple ps = do
 -- |Construct an expression representing a tuple given the expressions of each element and the type of the function
 -- constructing the tuple
 makeTuple' :: [Expr] -> Type -> Converter Expr
-makeTuple' es t = foldl' App <$> (Con <$> getTupleName <*> pure t) <*> pure es
+makeTuple' es t = foldl' App <$> (Con <$> getTupleName (length es) <*> pure t) <*> pure es
 
 getListNilName :: Converter VariableName
 getListNilName = maybe (throwError "No top-level rename found for \"[]\"") return =<< asks (M.lookup "[]" . topLevelRenames)
@@ -412,13 +418,18 @@ expToIla (HsExpTypeSig _ (HsLambda _ pats e) t) = do
         patToIla (zip argNames argTypes) [(pats, HsUnGuardedRhs e, expType, subEmpty, M.empty)] =<< makeError expType
     return $ foldr (uncurry Lam) body (zip argNames argTypes)
 expToIla HsLambda{} = throwError "Lambda with body not wrapped in explicit type signature"
---expToIla (HsLet [] e) = expToIla e
---expToIla (HsLet (d:ds) e) = do
---    bs <- declToIla d
---    body <- expToIla (HsLet ds e)
---    let processBinding (NonRec v e') body' = writeLog (showt v <> " " <> showt e') >> Let v <$> getSimpleType v <*> pure e' <*> pure body'
---        processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
---    foldrM processBinding body bs
+--- TODO(kc506): This doesn't allow for recursive let-bound defns....
+expToIla (HsLet [] e) = expToIla e
+expToIla (HsLet (d:ds) e) = do
+    bs <- declToIla d
+    let toTypeMap (NonRec v r) = M.singleton v . Quantified S.empty <$> getExprType r
+        toTypeMap (Rec m) = fmap M.unions $ mapM (toTypeMap . uncurry NonRec) $ M.toList m
+    bindingTypes <- M.unions <$> mapM toTypeMap bs
+    local (addTypes bindingTypes) $ do
+        body <- expToIla (HsLet ds e)
+        let processBinding (NonRec v e') body' = Let v <$> getSimpleType v <*> pure e' <*> pure body'
+            processBinding (Rec m) body' = foldrM (\(k,v) body'' -> processBinding (NonRec k v) body'') body' (M.toList m)
+        foldrM processBinding body bs
 expToIla (HsIf cond e1 e2) = do
     rs <- asks topLevelRenames
     condExp <- expToIla cond

@@ -67,7 +67,7 @@ compilerGeneratedHooks renamings = M.fromList
     , makeSimpleHook renamings "primNumIntNegate" 1 $ invokeClassStaticMethod int "negate" [int] (Returns <$> intClass)
     , makeSimpleHook renamings "primNumIntFromInteger" 1 $ invokeClassStaticMethod int "fromInteger" [integer] (Returns <$> intClass)
     , makeEq renamings "primEqIntEq" int
-    , makeSimpleHook renamings "primOrdIntLess" 2 $ invokeClassStaticMethod int "less" [int, int] (pure $ Returns BoolType)
+    , makeSimpleHook renamings "primOrdIntLess" 2 $ invokeClassStaticMethodWith int "less" [int, int] (pure $ Returns BoolType) makeBoxedBool
     , makeSimpleHook renamings "primNumIntegerAdd" 2 $ invokeClassStaticMethod integer "add" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primNumIntegerSub" 2 $ invokeClassStaticMethod integer "sub" [integer, integer] (Returns <$> integerClass)
     , makeSimpleHook renamings "primNumIntegerMult" 2 $ invokeClassStaticMethod integer "mult" [integer, integer] (Returns <$> integerClass)
@@ -84,7 +84,10 @@ compilerGeneratedHooks renamings = M.fromList
     ]
 
 invokeClassStaticMethod :: Converter ByteString -> ByteString -> [Converter ByteString] -> Converter ReturnSignature -> Converter ()
-invokeClassStaticMethod clsName methName args ret = do
+invokeClassStaticMethod a b c d = invokeClassStaticMethodWith a b c d (return ())
+
+invokeClassStaticMethodWith :: Converter ByteString -> ByteString -> [Converter ByteString] -> Converter ReturnSignature -> Converter () -> Converter ()
+invokeClassStaticMethodWith clsName methName args ret action = do
     clsName' <- clsName
     args' <- sequence args
     ret' <- ret
@@ -96,6 +99,7 @@ invokeClassStaticMethod clsName methName args ret = do
         liftJoin2 invokeVirtual heapObject enter
         checkCast arg
     invokeStatic clsName' $ NameType methName $ MethodSignature (map (ObjectType . unpack . fromLazyByteString) args') ret'
+    action
     i0 ARETURN
 
 throwRuntimeException :: Text -> Converter ()

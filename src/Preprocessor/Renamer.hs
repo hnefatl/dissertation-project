@@ -251,8 +251,15 @@ instance Renameable HsExp where
             consCon = HsCon $ UnQual $ HsSymbol ":"
         rename $ foldr (HsApp . HsApp consCon) nilCon es
     rename (HsParen e) = HsParen <$> rename e
+    -- Convert sections into lambdas to infix applications
+    rename (HsLeftSection e op) = rename =<< makeLambda (\n -> HsInfixApp e op (HsVar $ UnQual n))
+    rename (HsRightSection op e) = rename =<< makeLambda (\n -> HsInfixApp (HsVar $ UnQual n) op e)
     rename (HsExpTypeSig l e t) = HsExpTypeSig l <$> rename e <*> rename t
     rename e = throwError $ unlines ["Renaming expression not supported:", synPrint e]
+makeLambda :: (HsName -> HsExp) -> Renamer HsExp
+makeLambda f = do
+    argName <- HsIdent . unpack . convertName <$> freshVarName
+    return $ HsLambda (SrcLoc "" 0 0) [HsPVar argName] (f argName)
 instance Renameable HsAlt where
     rename (HsAlt loc pat alts wheres) = do
         names <- getBoundVariables pat

@@ -134,10 +134,10 @@ makeDictName (IsInstance (TypeVariableName cl) t) = VariableName $ "d" <> cl <> 
     where suffix = T.filter (/= ' ') $ flattenType t
 
 flattenType :: Type -> Text
---flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
+flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
 -- This might be preventing us from have instances like `instance Show a => Show [a]`, but they're not supported yet
 -- anyway
-flattenType TypeVar{} = ""
+--flattenType TypeVar{} = ""
 flattenType (TypeCon (TypeConstant (TypeVariableName c) _)) = c
 flattenType (TypeApp t1 t2 _) = flattenType t1 <> flattenType t2
 
