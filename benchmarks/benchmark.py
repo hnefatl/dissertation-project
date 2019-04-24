@@ -53,4 +53,4 @@ class Benchmark:
     def _benchmark_compilation(self, iterations=10):
         number = 1
         times = timeit.repeat(stmt=self._compile, number=number, repeat=iterations)
-        self._results["times"] = [t / number for t in times]
+        self._results["times"] = [1000 * t / number for t in times]

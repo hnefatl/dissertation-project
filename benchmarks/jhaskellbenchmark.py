@@ -17,15 +17,23 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         self._source_path = source_path
         self._compiler_args = compiler_args
 
+    def __enter__(self):
+        ret = super().__enter__()
+        self._output_jar = (self._temp_dir / self._name).with_suffix(".jar")
+        return ret
+
     def _compile(self):
         self._run_jhaskell_compiler()
+
+    def _post_compile(self):
+        self._results["size"] = os.path.getsize(self._output_jar)
+        return super()._post_compile()
 
     def _get_classpath(self):
         return [f"{self._name}.jar"]
 
     def _run_jhaskell_compiler(self):
         original_dir = pathlib.Path.cwd()
-        output_jar = f"{self._temp_dir / self._name}.jar"
         # Build the source program
         args = (
             [
@@ -33,7 +41,7 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
                 "--build-dir",
                 f"{self._temp_dir / 'out'}",
                 "--output-jar",
-                output_jar,
+                str(self._output_jar),
                 "--output-class",
                 self._class_name,
                 "--runtime-file-dir",
@@ -44,7 +52,6 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         )
         try:
             subprocess.check_output(args)
-            self._results["size"] = str(os.path.getsize(output_jar))
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
