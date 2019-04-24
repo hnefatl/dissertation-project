@@ -8,6 +8,8 @@ from javabenchmark import JavaBenchmark
 from fregebenchmark import FregeBenchmark
 
 benchmarks = {}
+
+
 def add_benchmark(b):
     if b.name in benchmarks:
         raise ValueError(f"Duplicate benchmark name: {b.name}")

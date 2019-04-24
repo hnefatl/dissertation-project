@@ -10,7 +10,7 @@ import jmhbenchmark
 class JavaBenchmark(jmhbenchmark.JMHBenchmark):
     def __init__(self, name, package, source_path):
         super().__init__(name, package, package.capitalize())
-        
+
         self._source_path = pathlib.Path(source_path)
 
     def _compile(self):

@@ -13,9 +13,9 @@ plt.rc("font", family="serif")
 
 # Bar charts of benchmark performance using different languages, grouped by benchmark
 benches = {
-    "factorial": {"Mine": "results/factorial", "Frege": "results/factorial_frege", "Java": "results/factorial_java" },
-    "fibonacci": {"Mine": "results/fibonacci", "Frege": "results/fibonacci_frege", "Java": "results/fibonacci_java" },
-    "mergesort": {"Mine": "results/mergesort", "Frege": "results/mergesort_frege" },
+    "factorial": {"Mine": "results/factorial", "Frege": "results/factorial_frege", "Java": "results/factorial_java"},
+    "fibonacci": {"Mine": "results/fibonacci", "Frege": "results/fibonacci_frege", "Java": "results/fibonacci_java"},
+    "mergesort": {"Mine": "results/mergesort", "Frege": "results/mergesort_frege"},
 }
 compiler_results = collections.defaultdict(dict)
 for bench, impls in benches.items():
@@ -25,12 +25,14 @@ for bench, impls in benches.items():
 
 COLOURS = ["blue", "red", "green", "yellow"]
 
+
 def render_fig(name):
     save = True
     if save:
         plt.savefig(fname="plots/" + name, format="pdf")
     else:
         plt.show()
+
 
 def perf_by_compiler():
     width = 0.15
@@ -53,6 +55,7 @@ def perf_by_compiler():
         render_fig("perf_{}_{}".format(benchmark, impl).lower())
         plt.close(fig)
 
+
 def executable_size_by_compiler():
     width = 0.15
 
@@ -71,6 +74,7 @@ def executable_size_by_compiler():
         plt.ylabel("Compiled size (bytes)")
         render_fig("size_{}_{}".format(benchmark, impl).lower())
         plt.close(fig)
+
 
 def compilation_time_by_compiler():
     width = 0.15
