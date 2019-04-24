@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.7
 
 import sys
+import re
 
 import benchmark
 from jhaskellbenchmark import JHaskellBenchmark
@@ -25,9 +26,10 @@ add_benchmark(FregeBenchmark("mergesort_frege", "programs/mergesort.fr"))
 add_benchmark(JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 add_benchmark(JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 
-to_run = sys.argv[1:]
-if to_run == []:
-    to_run = benchmarks.keys()
+if len(sys.argv) > 1:
+    to_run = [b for b in benchmarks.keys() if any(re.fullmatch(pat, b) for pat in sys.argv[1:])]
+else:
+    to_run = list(benchmarks.keys())
 
 for bench_name in to_run:
     with benchmarks[bench_name] as benchmark:
