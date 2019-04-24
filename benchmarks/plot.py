@@ -13,9 +13,17 @@ plt.rc("font", family="serif")
 
 # Bar charts of benchmark performance using different languages, grouped by benchmark
 benches = {
-    "factorial": {"Mine": "results/factorial", "Frege": "results/factorial_frege", "Java": "results/factorial_java"},
-    "fibonacci": {"Mine": "results/fibonacci", "Frege": "results/fibonacci_frege", "Java": "results/fibonacci_java"},
-    "mergesort": {"Mine": "results/mergesort", "Frege": "results/mergesort_frege"},
+    "factorial": {
+        "Mine": "results/factorial_mine",
+        "Frege": "results/factorial_frege",
+        "Java": "results/factorial_java",
+    },
+    "fibonacci": {
+        "Mine": "results/fibonacci_mine",
+        "Frege": "results/fibonacci_frege",
+        "Java": "results/fibonacci_java",
+    },
+    "mergesort": {"Mine": "results/mergesort_mine", "Frege": "results/mergesort_frege"},
 }
 compiler_results = collections.defaultdict(dict)
 for bench, impls in benches.items():
