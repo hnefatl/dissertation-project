@@ -1,15 +1,9 @@
 import re
 import collections
-
-def parse_result_line(line):
-    match = re.match(r"(.+): (.+)", line)
-    if match is None:
-        raise RuntimeError("Invalid result line: " + line)
-    return { match.group(1): match.group(2) }
+import json
 
 def parse_results(output):
-    results = [parse_result_line(l) for l in output.splitlines()]
-    return dict(collections.ChainMap(*results))
+    return json.loads(output)
 
 def show_results(results):
-    return "\n".join(f"{key}: {value}" for key, value in results.items())
+    return json.dumps(results)

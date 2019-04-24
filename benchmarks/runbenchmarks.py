@@ -28,6 +28,6 @@ if to_run == []:
     to_run = benchmarks.keys()
 
 for bench_name in to_run:
-    benchmark = benchmarks[bench_name]
-    print(benchmark.description)
-    benchmark.run()
+    with benchmarks[bench_name] as benchmark:
+        print(benchmark.description)
+        benchmark.execute()

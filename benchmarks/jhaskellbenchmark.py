@@ -2,7 +2,6 @@ import os
 import shutil
 import subprocess
 import string
-import tempfile
 import pathlib
 
 import jmhbenchmark
@@ -12,23 +11,14 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
     def __init__(self, name, source_path, compiler_args=None):
         if compiler_args is None:
             compiler_args = []
-
         source_path = pathlib.Path(source_path)
+
         super().__init__(name, source_path.stem.lower(), source_path.stem.capitalize())
         self._source_path = source_path
         self._compiler_args = compiler_args
-        self._temp_dir = None
-
-    def _run(self):
-        with tempfile.TemporaryDirectory() as d:
-            self._temp_dir = pathlib.Path(d)
-            self._compile()
-            self._execute_bench(self._temp_dir)
 
     def _compile(self):
         self._run_jhaskell_compiler()
-        self._write_benchmark_main(self._temp_dir)
-        self._build_benchmark(self._temp_dir)
 
     def _get_classpath(self):
         return [f"{self._name}.jar"]

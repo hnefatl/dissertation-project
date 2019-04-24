@@ -1,4 +1,3 @@
-import tempfile
 import pathlib
 import shutil
 import os
@@ -14,13 +13,8 @@ class JavaBenchmark(jmhbenchmark.JMHBenchmark):
         
         self._source_path = pathlib.Path(source_path)
 
-    def _run(self):
-        with tempfile.TemporaryDirectory() as d:
-            self._temp_dir = pathlib.Path(d)
-            self._compile_source()
-            self._write_benchmark_main(self._temp_dir)
-            self._build_benchmark(self._temp_dir)
-            self._execute_bench(self._temp_dir)
+    def _compile(self):
+        self._compile_source()
 
     def _get_classpath(self):
         return ["."]
