@@ -499,7 +499,6 @@ litToIlaExpr l _ = throwError $ "Unboxed primitives not supported: " <> synPrint
 -- bindings for each variable bound by pat so they can be accessed in a single evaluation.
 -- Big issue with overloaded rhs's to patterns: `let (x,y) = foo in x` might deoverload to `let (x,y) = \dNumt -> foo in
 -- x`, and then we're assigning a function to a tuple...
--- TODO(kc506): Bug: we need to add an `HsExpTypeSig` around all the haskell terms produced...
 patToBindings :: HsPat -> Expr -> Converter [Binding Expr]
 patToBindings (HsPVar v) e = return [NonRec (convertName v) e]
 patToBindings pat@(HsPApp con args) e = do
@@ -531,16 +530,24 @@ patToBindingsMakeTopBinding pat e = do
     eType <- getExprType e
     boundNames <- S.toAscList <$> getBoundVariables pat
     boundNameTypes <- mapM getType boundNames
+    boundNameInstantiatedTypes <- mapM instantiate boundNameTypes
+    boundNameSynTypes <- mapM T.typeToSyn boundNameInstantiatedTypes
     renamedNames <- replicateM (length boundNames) freshVarName
+    let renamedSynNames = map (HsVar . UnQual . HsIdent . convertName) renamedNames
     -- Generate renamings for all the bound variables
     let sub = Substitution $ M.fromList $ zip boundNames renamedNames
         pat' = applySub sub pat
     -- Construct a tuple of the renamed bound variables
     tupleCon <- HsCon . UnQual . HsSymbol . convertName <$> getTupleName (length boundNames)
-    let rhs = HsUnGuardedRhs $ foldl HsApp tupleCon $ map (HsVar . UnQual . HsIdent . convertName) renamedNames
-    rhsType <- T.makeTuple =<< mapM instantiate boundNameTypes
-    err <- makeError rhsType
-    body <- patToIla [(bindingVar, eType)] [([pat'], rhs, rhsType, subEmpty, M.empty)] err
+    tupleType <- T.makeTuple boundNameInstantiatedTypes
+    -- Construct the types that each node in the type-tagged tree will have
+    tupleAppSynTypes <- mapM (T.typeToSyn <=< flip T.makeFun tupleType) (tails boundNameInstantiatedTypes)
+    let nullSrcLoc = SrcLoc "" 0 0
+        makeAppLayer base (n, argType, appType) = HsExpTypeSig nullSrcLoc (HsApp base var) (HsQualType [] appType)
+            where var = HsExpTypeSig nullSrcLoc n (HsQualType [] argType)
+        rhs = HsUnGuardedRhs $ foldl makeAppLayer tupleCon $ zip3 renamedSynNames boundNameSynTypes tupleAppSynTypes
+    err <- makeError tupleType
+    body <- patToIla [(bindingVar, eType)] [([pat'], rhs, tupleType, subEmpty, M.empty)] err
     return (bindingVar, NonRec bindingVar $ Let bindingVar eType e body)
 
 -- Given a binding as made by `patToBindingsMakeTopBinding`, a tuple containing each variable bound by the expression,
@@ -548,14 +555,16 @@ patToBindingsMakeTopBinding pat e = do
 patToBindingsDecomposeBinding :: HsPat -> VariableName -> Type -> Converter [Binding Expr]
 patToBindingsDecomposeBinding pat mainBinding mainBindingType = do
     boundNames <- S.toAscList <$> getBoundVariables pat
-    boundNameTypes <- mapM getType boundNames
+    boundNameTypes <- mapM (instantiate <=< getType) boundNames
     tupleCon <- UnQual . HsSymbol . convertName <$> getTupleName (length boundNames)
-    forM (zip3 boundNames boundNameTypes [0..]) $ \(n, Quantified _ t, i) -> do
+    forM (zip3 boundNames boundNameTypes [0..]) $ \(n, t, i) -> do
+        synType <- T.typeToSyn t
         tmpVar <- HsIdent . convertName <$> freshVarName
-        let suffixLength = length boundNames - i - 1
+        let nullSrcLoc = SrcLoc "" 0 0
+            suffixLength = length boundNames - i - 1
             conArgs = replicate i HsPWildCard <> [HsPVar tmpVar] <> replicate suffixLength HsPWildCard
             extractorPat = HsPApp tupleCon conArgs
-            extractorRhs = HsUnGuardedRhs $ HsVar $ UnQual tmpVar
+            extractorRhs = HsUnGuardedRhs $ HsExpTypeSig nullSrcLoc (HsVar $ UnQual tmpVar) (HsQualType [] synType)
         err <- makeError t
         e <- patToIla [(mainBinding, mainBindingType)] [([extractorPat], extractorRhs, t, subEmpty, M.empty)] err
         return $ NonRec n e

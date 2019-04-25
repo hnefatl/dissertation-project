@@ -299,8 +299,6 @@ qualToQuant freshen freeTvs qt = do
             _ -> Nothing
     let filterFreeTvs = S.filter (\(TypeVariable v _) -> S.notMember v freeTvs')
         quantifiers = filterFreeTvs $ getTypeVars qt
-    writeLog $ "Quantifying " <> showt qt <> " with free tvs " <> showt freeTvs'
-    writeLog $ showt quantifiers
     case freshen of
         False -> return $ Quantified quantifiers qt
         True -> do
@@ -660,14 +658,10 @@ inferMatch (HsMatch loc name args rhs wheres) = do
     retType <- nameToType retVar
     argVars <- inferPatterns args
     argTypes <- mapM nameToType argVars
-    writeLog $ "RHS before: " <> showt rhs
     (rhs', rhsVar) <- inferRhs rhs
-    writeLog $ "RHS after: " <> showt rhs'
     rhsType <- nameToType rhsVar
     targetType <- makeFun argTypes rhsType
     unify targetType retType
-    retInferred <- getQualifiedType retVar
-    writeLog $ "Got match type " <> showt retInferred
     return (HsMatch loc name args rhs' wheres, retVar)
 
 inferConDecl :: HsType -> Syntax.HsConDecl -> TypeInferrer Syntax.HsConDecl
