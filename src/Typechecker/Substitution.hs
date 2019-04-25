@@ -7,13 +7,13 @@
 module Typechecker.Substitution where
 
 import           BasicPrelude
-import           Control.Monad.Except (MonadError, throwError)
-import           Data.Default         (Default, def)
-import qualified Data.Map.Strict      as M
-import qualified Data.Set             as S
-import           Data.Text            (unpack, pack)
-import           TextShow             (TextShow, showb, showt)
+import           Control.Monad.Except    (MonadError, throwError)
+import           Data.Default            (Default, def)
+import qualified Data.Map.Strict         as M
+import qualified Data.Set                as S
+import           Data.Text               (pack, unpack)
 import           Language.Haskell.Syntax
+import           TextShow                (TextShow, showb, showt)
 
 import           Names
 import           Typechecker.Types
@@ -104,22 +104,22 @@ subMerges = foldM subMerge subEmpty
 
 
 instance Substitutable VariableName VariableName HsName where
-    applySub sub (HsIdent s) = HsIdent $ convertName $ applySub sub (VariableName $ pack s)
+    applySub sub (HsIdent s)  = HsIdent $ convertName $ applySub sub (VariableName $ pack s)
     applySub sub (HsSymbol s) = HsSymbol $ convertName $ applySub sub (VariableName $ pack s)
-    applySub _ (HsSpecial s) = HsSpecial s
+    applySub _ (HsSpecial s)  = HsSpecial s
 instance Substitutable VariableName VariableName HsQName where
     applySub sub (Qual m s) = Qual m (applySub sub s)
     applySub sub (UnQual s) = UnQual (applySub sub s)
-    applySub _ (Special s) = Special s
+    applySub _ (Special s)  = Special s
 instance Substitutable VariableName VariableName HsPat where
-    applySub sub (HsPVar n) = HsPVar (applySub sub n)
-    applySub _ l@HsPLit{} = l
-    applySub sub (HsPNeg p) = HsPNeg (applySub sub p)
+    applySub sub (HsPVar n)              = HsPVar (applySub sub n)
+    applySub _ l@HsPLit{}                = l
+    applySub sub (HsPNeg p)              = HsPNeg (applySub sub p)
     applySub sub (HsPInfixApp p1 con p2) = HsPInfixApp (applySub sub p1) (applySub sub con) (applySub sub p2)
-    applySub sub (HsPApp con ps) = HsPApp (applySub sub con) (map (applySub sub) ps)
-    applySub sub (HsPTuple ps) = HsPTuple (map (applySub sub) ps)
-    applySub sub (HsPList ps) = HsPList (map (applySub sub) ps)
-    applySub sub (HsPParen p) = HsPParen (applySub sub p)
-    applySub sub (HsPAsPat n p) = HsPAsPat (applySub sub n) (applySub sub p)
-    applySub _ HsPWildCard = HsPWildCard
-    applySub _ p = error $ "Pattern not support in applySub: " <> show p
+    applySub sub (HsPApp con ps)         = HsPApp (applySub sub con) (map (applySub sub) ps)
+    applySub sub (HsPTuple ps)           = HsPTuple (map (applySub sub) ps)
+    applySub sub (HsPList ps)            = HsPList (map (applySub sub) ps)
+    applySub sub (HsPParen p)            = HsPParen (applySub sub p)
+    applySub sub (HsPAsPat n p)          = HsPAsPat (applySub sub n) (applySub sub p)
+    applySub _ HsPWildCard               = HsPWildCard
+    applySub _ p                         = error $ "Pattern not support in applySub: " <> show p

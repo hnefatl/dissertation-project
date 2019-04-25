@@ -3,10 +3,10 @@
 module Preprocessor.Info where
 
 import           BasicPrelude
+import           Control.Monad.Except    (MonadError, throwError)
+import           Data.Foldable           (foldlM)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
-import           Data.Foldable           (foldlM)
-import           Control.Monad.Except    (MonadError, throwError)
 import           Language.Haskell.Syntax
 import           Names                   (TypeVariableName, convertName)
 import           TextShow                (TextShow, showb)
@@ -27,7 +27,7 @@ getDeclClassInfo (HsClassDecl _ _ name args ds) = do
     argKinds <- foldlM (\m d -> disjointKindUnion m =<< getClassArgKinds d) M.empty ds
     argVars <- forM args $ \arg -> case M.lookup arg argKinds of
         Nothing -> throwError $ "Class " <> convertName name <> " argument unused in signatures: " <> convertName arg
-        Just k -> return (arg, k)
+        Just k  -> return (arg, k)
     let methodTypes = M.unions $ map getDeclTypes ds
         ci = ClassInfo { methods = methodTypes, argVariables = argVars }
     return $ M.singleton (UnQual name) ci
@@ -39,7 +39,7 @@ getDeclTypes _                     = M.empty
 
 getClassArgKinds :: MonadError Text m => HsDecl -> m (M.Map HsName Kind)
 getClassArgKinds (HsTypeSig _ _ (HsQualType _ t)) = getTypeArgKinds t
-getClassArgKinds _ = return M.empty
+getClassArgKinds _                                = return M.empty
 
 getTypeArgKinds :: MonadError Text m => HsType -> m (M.Map HsName Kind)
 getTypeArgKinds (HsTyVar v) = return $ M.singleton v KindStar

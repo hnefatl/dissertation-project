@@ -33,15 +33,15 @@ import           Backend.Deoverload          (makeDictName)
 import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
 import           NameGenerator
-import           Tuples                      (makeTupleName, isTupleName)
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
                                               getBoundVariablesAndConflicts, getFreeVariables)
+import           Tuples                      (isTupleName, makeTupleName)
 import           Typechecker.Substitution    (NameSubstitution, Substitutable, Substitution(..), applySub, subCompose,
                                               subEmpty, subSingle)
+import           Typechecker.Typechecker     (instantiate)
 import           Typechecker.Types           (Kind(..), Qualified(..), Quantified(..), QuantifiedSimpleType, Type(..),
                                               TypeConstant(..), TypePredicate(..))
-import           Typechecker.Typechecker     (instantiate)
 import qualified Typechecker.Types           as T
 
 
@@ -362,9 +362,9 @@ declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
         writeLog $ "Processing datatype " <> showt name'
         ks <- getKinds
         argKinds <- case M.lookup name' ks of
-            Nothing -> throwError $ "Missing kind for datatype " <> showt name'
+            Nothing       -> throwError $ "Missing kind for datatype " <> showt name'
             Just KindStar -> return []
-            Just k -> fst <$> T.unmakeKindFun k
+            Just k        -> fst <$> T.unmakeKindFun k
         let newKinds = M.fromList $ zip (map convertName args) argKinds
             ks' = M.union newKinds ks
         bs' <- M.fromList <$> mapM (conDeclToBranch ks') bs
@@ -425,7 +425,7 @@ expToIla (HsLet [] e) = expToIla e
 expToIla (HsLet (d:ds) e) = do
     bs <- declToIla d
     let toTypeMap (NonRec v r) = M.singleton v . Quantified S.empty <$> getExprType r
-        toTypeMap (Rec m) = fmap M.unions $ mapM (toTypeMap . uncurry NonRec) $ M.toList m
+        toTypeMap (Rec m)      = fmap M.unions $ mapM (toTypeMap . uncurry NonRec) $ M.toList m
     bindingTypes <- M.unions <$> mapM toTypeMap bs
     local (addTypes bindingTypes) $ do
         body <- expToIla (HsLet ds e)
@@ -504,7 +504,7 @@ patToBindings (HsPVar v) e = return [NonRec (convertName v) e]
 patToBindings pat@(HsPApp con args) e = do
     originalConName <- getReverseRenamed $ convertName con
     let isSimpleArg HsPVar{} = True
-        isSimpleArg _ = False
+        isSimpleArg _        = False
     (v, mainBinding) <- if isTupleName (convertName originalConName) && all isSimpleArg args then do
             -- If we're already matching a simple tuple (like (x,y) not (x,True)), just bind it directly
             v <- freshVarName
@@ -724,7 +724,7 @@ instance Substitutable VariableName VariableName Expr where
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)
 instance Substitutable VariableName VariableName AltConstructor where
-    applySub _ Default = Default
+    applySub _ Default          = Default
     applySub sub (DataCon v vs) = DataCon (applySub sub v) (applySub sub vs)
 
 instance (AlphaEq a, Ord a) => AlphaEq (Binding a) where

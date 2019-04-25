@@ -10,13 +10,13 @@ import           Control.Monad.Except        (Except, ExceptT, MonadError, liftE
                                               throwError)
 import           Control.Monad.Extra         (concatForM, concatMapM)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
+import           Data.Composition            ((.:))
 import           Data.Default                (Default, def)
 import           Data.Foldable               (foldlM, null, toList)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
 import           Data.Text                   (unpack)
 import qualified Data.Text                   as T
-import           Data.Composition            ((.:))
 import           Language.Haskell.Syntax
 import           TextShow                    (TextShow, showb, showt)
 
@@ -139,7 +139,7 @@ flattenType (TypeVar (TypeVariable (TypeVariableName v) _)) = v
 -- anyway
 --flattenType TypeVar{} = ""
 flattenType (TypeCon (TypeConstant (TypeVariableName c) _)) = c
-flattenType (TypeApp t1 t2 _) = flattenType t1 <> flattenType t2
+flattenType (TypeApp t1 t2 _)                               = flattenType t1 <> flattenType t2
 
 quantifyType :: HasFreeTypeVariables a => a -> Deoverload (Quantified a)
 quantifyType t = do

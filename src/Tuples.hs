@@ -1,7 +1,7 @@
 module Tuples where
 
-import BasicPrelude hiding (replicate)
-import Data.Text    (replicate, unpack)
+import BasicPrelude    hiding (replicate)
+import Data.Text       (replicate, unpack)
 import Text.Regex.TDFA
 
 makeTupleName :: Int -> Text

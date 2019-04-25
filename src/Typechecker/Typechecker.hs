@@ -24,7 +24,7 @@ import           ExtraDefs
 import           Logger
 import           NameGenerator
 import           Names
-import           Preprocessor.ContainedNames (HasFreeVariables, getFreeVariables, getBoundVariables)
+import           Preprocessor.ContainedNames (HasFreeVariables, getBoundVariables, getFreeVariables)
 import           Preprocessor.Dependency
 import           Preprocessor.Info           (ClassInfo(..), getClassInfo, getModuleKinds)
 import           Tuples                      (makeTupleName)
@@ -296,7 +296,7 @@ qualToQuant freshen freeTvs qt = do
         t' <- applyCurrentSubstitution t
         return $ case t' of
             TypeVar (TypeVariable v _) -> Just v
-            _ -> Nothing
+            _                          -> Nothing
     let filterFreeTvs = S.filter (\(TypeVariable v _) -> S.notMember v freeTvs')
         quantifiers = filterFreeTvs $ getTypeVars qt
     case freshen of

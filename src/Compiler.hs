@@ -114,7 +114,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             -- Check main has the right type
             mainRenamed <- case M.lookup "main" topLevelRenames of
                 Just renamed -> return renamed
-                Nothing -> throwError "Definition of main found"
+                Nothing      -> throwError "Definition of main found"
             expectedType <- T.Quantified S.empty . T.Qualified S.empty <$> T.makeList T.typeChar
             case M.lookup mainRenamed types of
                 Nothing -> throwError $ "No type found for main (" <> showt mainRenamed <> ")"
@@ -137,7 +137,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             when (dumpTypes flags) $ forM_ (M.toList topLevelRenames) $ \(origName, renamed) ->
                 case M.lookup renamed types' of
                     Nothing -> return ()
-                    Just t -> putStrLn $ showt origName <> " :: " <> showt t
+                    Just t  -> putStrLn $ showt origName <> " :: " <> showt t
             mainName <- case M.lookup "main" (inverseMap reverseRenames) of
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n

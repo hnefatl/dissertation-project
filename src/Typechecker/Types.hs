@@ -1,29 +1,29 @@
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables   #-}
 {-# LANGUAGE TupleSections         #-}
-{-# LANGUAGE LambdaCase            #-}
 
 module Typechecker.Types where
 
-import           BasicPrelude            hiding (intercalate)
-import           Control.Monad.Except    (MonadError, throwError)
-import           Control.Monad.State.Strict    (MonadState, evalStateT, gets, modify)
-import           Data.Foldable           (foldlM, foldrM)
-import           Data.Hashable           (Hashable)
-import qualified Data.Map.Strict         as M
-import qualified Data.Set                as S
-import           Data.Text               (unpack)
-import           GHC.Generics            (Generic)
-import           Language.Haskell.Syntax as Syntax
-import           TextShow                (TextShow, fromText, showb, showt)
+import           BasicPrelude               hiding (intercalate)
+import           Control.Monad.Except       (MonadError, throwError)
+import           Control.Monad.State.Strict (MonadState, evalStateT, gets, modify)
+import           Data.Foldable              (foldlM, foldrM)
+import           Data.Hashable              (Hashable)
+import qualified Data.Map.Strict            as M
+import qualified Data.Set                   as S
+import           Data.Text                  (unpack)
+import           GHC.Generics               (Generic)
+import           Language.Haskell.Syntax    as Syntax
+import           TextShow                   (TextShow, fromText, showb, showt)
 
-import           ExtraDefs               (synPrint)
+import           ExtraDefs                  (synPrint)
 import           NameGenerator
 import           Names
-import           Tuples                  (makeTupleName)
+import           Tuples                     (makeTupleName)
 
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
@@ -108,10 +108,10 @@ instance TextShow Kind where
         assocShow True k                = "(" <> assocShow False k <> ")"
 instance TextShow TypeVariable where
     showb (TypeVariable name KindStar) = showb name
-    showb (TypeVariable name k) = "(" <> showb name <> " :: " <> showb k <> ")"
+    showb (TypeVariable name k)        = "(" <> showb name <> " :: " <> showb k <> ")"
 instance TextShow TypeConstant where
     showb (TypeConstant name KindStar) = showb name
-    showb (TypeConstant name k) = "(" <> showb name <> " :: " <> showb k <> ")"
+    showb (TypeConstant name k)        = "(" <> showb name <> " :: " <> showb k <> ")"
 instance TextShow Type where
     showb (TypeVar v) = showb v
     showb (TypeCon c) = showb c
@@ -279,10 +279,10 @@ synToType' t@HsTyApp{} = do
         (base'', extraKinds) = case base' of
             TypeVar (TypeVariable v KindStar) -> (TypeVar $ TypeVariable v minKind, M.singleton v minKind)
             TypeCon (TypeConstant c KindStar) -> (TypeCon $ TypeConstant c minKind, M.singleton c minKind)
-            _ -> (base', M.empty)
+            _                                 -> (base', M.empty)
     (argKinds, _) <- unmakeKindFun $ kind base''
     let setKind (HsTyVar v) k = M.singleton (convertName v) k
-        setKind _ _ = M.empty
+        setKind _ _           = M.empty
         newKinds = M.unions $ extraKinds:zipWith setKind args argKinds
     modify (M.union newKinds)
     args' <- mapM synToType' args
@@ -303,9 +303,9 @@ synToQualType ks (HsQualType quals t) = do
     quals' <- mapM (synToTypePred ks) quals
     -- Using the type constraints, infer the constraints of some of the type variables
     let makeKind (IsInstance c (TypeVar (TypeVariable v _))) = case M.lookup c ks of
-            Nothing -> throwError $ "Missing kind for class " <> showt c
+            Nothing                  -> throwError $ "Missing kind for class " <> showt c
             Just (KindFun argKind _) -> return $ M.singleton v argKind
-            Just k -> throwError $ "Invalid kind for class " <> showt c <> ": " <> showt k
+            Just k                   -> throwError $ "Invalid kind for class " <> showt c <> ": " <> showt k
         makeKind _ = return M.empty -- This should possibly handle adding kinds for constraints like `Functor [a]`?
     newKinds <- M.unions <$> mapM makeKind quals'
     Qualified (S.fromList quals') <$> synToType (M.union newKinds ks) t
