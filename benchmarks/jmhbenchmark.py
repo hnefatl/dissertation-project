@@ -3,6 +3,7 @@ import string
 import subprocess
 import shutil
 import pathlib
+import results
 
 import benchmark
 
@@ -13,8 +14,15 @@ class JMHBenchmark(benchmark.Benchmark):
         self._package_name = package_name
         self._class_name = class_name
 
-    def _write_benchmark_main(self, temp_dir):
-        temp_benchmark_package_dir = temp_dir / "benchmark"
+    def _post_compile(self):
+        self._write_benchmark_main()
+        self._build_benchmark()
+
+    def _run(self):
+        self._execute_bench()
+
+    def _write_benchmark_main(self):
+        temp_benchmark_package_dir = self._temp_dir / "benchmark"
         temp_benchmark_main = temp_benchmark_package_dir / "Main.java"
         substitutions = {"imports": self._get_import(), "benchmark_functions": self._get_bench_function()}
 
@@ -38,10 +46,10 @@ class JMHBenchmark(benchmark.Benchmark):
         {self._package_name}.{self._class_name}.main(args);
     }}"""
 
-    def _build_benchmark(self, temp_dir):
+    def _build_benchmark(self):
         # Build the benchmark program
         original_dir = pathlib.Path.cwd()
-        os.chdir(temp_dir)
+        os.chdir(self._temp_dir)
         args = ["javac", "-cp", ":".join(self._get_classpath() + [str(original_dir / "deps/*")]), "benchmark/Main.java"]
 
         try:
@@ -58,9 +66,9 @@ class JMHBenchmark(benchmark.Benchmark):
     def _get_classpath(self):
         raise NotImplementedError
 
-    def _execute_bench(self, temp_dir):
+    def _execute_bench(self):
         original_dir = pathlib.Path.cwd()
-        os.chdir(temp_dir)
+        os.chdir(self._temp_dir)
         try:
             args = [
                 "java",
@@ -70,10 +78,9 @@ class JMHBenchmark(benchmark.Benchmark):
                 "benchmark.Main",
             ]
             output = subprocess.check_output(args)
+            self._results.update(results.parse_results(output.decode()))
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
         finally:
             os.chdir(original_dir)
-
-        self._write_output(output)

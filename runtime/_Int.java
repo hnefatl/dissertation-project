@@ -37,7 +37,7 @@ public class _Int extends Data {
     public static boolean eq(_Int x, _Int y) {
         return x.value == y.value;
     }
-    public static boolean lessj(_Int x, _Int y) {
+    public static boolean less(_Int x, _Int y) {
         return x.value < y.value;
     }
 

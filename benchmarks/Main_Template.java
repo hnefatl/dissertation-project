@@ -47,10 +47,11 @@ public class Main {
             // http://javadox.com/org.openjdk.jmh/jmh-core/1.12/org/openjdk/jmh/util/Statistics.html
 
             // Display the 25th, 50th, 75th percentiles
-            for (int x = 1; x <= 3; x++) {
-                double p = 25.0 * x;
-                System.out.println(stats.getPercentile(p));
-            }
+            System.out.print("{");
+            System.out.print("\"lower_quartile\": " + stats.getPercentile(25.0) + ",");
+            System.out.print("\"mid_quartile\": " + stats.getPercentile(50.0) + ",");
+            System.out.print("\"upper_quartile\": " + stats.getPercentile(75.0));
+            System.out.println("}");
         }
         catch (RunnerException e) {
             e.printStackTrace();

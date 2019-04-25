@@ -1,7 +1,7 @@
-import tempfile
 import pathlib
 import shutil
 import os
+import os.path
 import subprocess
 
 import jmhbenchmark
@@ -10,16 +10,17 @@ import jmhbenchmark
 class JavaBenchmark(jmhbenchmark.JMHBenchmark):
     def __init__(self, name, package, source_path):
         super().__init__(name, package, package.capitalize())
-        
+
         self._source_path = pathlib.Path(source_path)
 
-    def run(self):
-        with tempfile.TemporaryDirectory() as d:
-            self._temp_dir = pathlib.Path(d)
-            self._compile_source()
-            self._write_benchmark_main(self._temp_dir)
-            self._build_benchmark(self._temp_dir)
-            self._execute_bench(self._temp_dir)
+    def _compile(self):
+        self._compile_source()
+
+    def _post_compile(self):
+        # Record the compiled file size
+        compiled_file = (pathlib.Path(self._package_name) / self._class_name).with_suffix(".class")
+        self._results["size"] = os.path.getsize(compiled_file)
+        return super()._post_compile()
 
     def _get_classpath(self):
         return ["."]

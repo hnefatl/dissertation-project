@@ -32,6 +32,7 @@ import           AlphaEq                     (AlphaEq, alphaEq')
 import           Backend.Deoverload          (makeDictName)
 import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
+import Tuples (makeTupleName)
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
