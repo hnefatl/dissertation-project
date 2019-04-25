@@ -249,7 +249,7 @@ test = let
         let s = "x = if False then 1 else True"
         in testBindingsFail s
     ,
-        let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (x - 1)) } in even 10"
+        let s = "_ = let { even = (\\x -> if x == 0 then True else odd (x - 1)) ; odd = (\\y -> if y == 0 then False else even (y - 1)) } in even 10"
             helper t = makeFunUnsafe [t] typeBool
         in testBindings s
             [ ("even", Quantified (S.singleton a) $ Qualified (S.singleton $ IsInstance num ta) (helper ta))
