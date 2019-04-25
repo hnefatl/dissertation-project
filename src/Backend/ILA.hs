@@ -32,7 +32,6 @@ import           AlphaEq                     (AlphaEq, alphaEq')
 import           Backend.Deoverload          (makeDictName)
 import           ExtraDefs                   (allM, inverseMap, middleText, synPrint)
 import           Logger
-import Tuples (makeTupleName)
 import           NameGenerator
 import           Names
 import           Preprocessor.ContainedNames (ConflictInfo(..), HasBoundVariables, HasFreeVariables, getBoundVariables,
@@ -331,7 +330,30 @@ toIla (HsModule _ _ _ _ decls) = do
     writeLog "-------"
     ts <- asks types
     forM_ (M.toList ts) $ \(v,t) -> writeLog $ showt v <> " :: " <> showt t
+    mapM_ dataDeclsToIla decls
     concat <$> mapM declToIla decls
+
+-- Preprocess the bindings to capture all data declarations
+dataDeclsToIla :: HsDecl -> Converter ()
+dataDeclsToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
+    ([], []) -> do
+        let name' = convertName name
+        writeLog $ "Processing datatype " <> showt name'
+        ks <- getKinds
+        argKinds <- case M.lookup name' ks of
+            Nothing       -> throwError $ "Missing kind for datatype " <> showt name'
+            Just KindStar -> return []
+            Just k        -> fst <$> T.unmakeKindFun k
+        let newKinds = M.fromList $ zip (map convertName args) argKinds
+            ks' = M.union newKinds ks
+        bs' <- M.fromList <$> mapM (conDeclToBranch ks') bs
+        addDatatype $ Datatype
+            { typeName = name'
+            , parameters = map convertName args
+            , branches = bs' }
+    (_, []) -> throwError $ "Datatype contexts not supported:\n" <> showt d
+    (_, _) -> throwError $ "Deriving clauses not supported:\n" <> showt d
+dataDeclsToIla _ = return ()
 
 declToIla :: HsDecl -> Converter [Binding Expr]
 declToIla (HsPatBind _ pat rhs _) = do
@@ -357,25 +379,7 @@ declToIla (HsFunBind (m:ms)) = do
         body <- patToIla args (map matchToArg (m:ms)) =<< makeError retType
         return [NonRec (convertName funName) $ foldr (uncurry Lam) body args]
 declToIla d@HsClassDecl{} = throwError $ "Class declaration should've been removed by the deoverloader:\n" <> synPrint d
-declToIla d@(HsDataDecl _ ctx name args bs derivings) = case (ctx, derivings) of
-    ([], []) -> do
-        let name' = convertName name
-        writeLog $ "Processing datatype " <> showt name'
-        ks <- getKinds
-        argKinds <- case M.lookup name' ks of
-            Nothing       -> throwError $ "Missing kind for datatype " <> showt name'
-            Just KindStar -> return []
-            Just k        -> fst <$> T.unmakeKindFun k
-        let newKinds = M.fromList $ zip (map convertName args) argKinds
-            ks' = M.union newKinds ks
-        bs' <- M.fromList <$> mapM (conDeclToBranch ks') bs
-        addDatatype $ Datatype
-            { typeName = name'
-            , parameters = map convertName args
-            , branches = bs' }
-        return []
-    (_, []) -> throwError $ "Datatype contexts not supported:\n" <> showt d
-    (_, _) -> throwError $ "Deriving clauses not supported:\n" <> showt d
+declToIla HsDataDecl{} = return []  -- Already processed by dataDeclsToIla
 declToIla HsTypeSig{} = return []
 declToIla d = throwError $ "Unsupported declaration\n" <> showt d
 
@@ -514,13 +518,17 @@ patToBindings pat@(HsPApp con args) e = do
             -- Otherwise bind it to a top-level tuple like any other pattern
             patToBindingsMakeTopBinding pat e
     -- Make bindings for each variable in the tuple
-    exprType <- getExprType e
-    decomposeBindings <- patToBindingsDecomposeBinding pat v exprType
+    bindingType <- case mainBinding of
+        NonRec _ r -> getExprType r
+        _ -> throwError "Expected non-recursive main binding"
+    decomposeBindings <- patToBindingsDecomposeBinding pat v bindingType
     return $ mainBinding:decomposeBindings
 patToBindings pat e = do
     (v, mainBinding) <- patToBindingsMakeTopBinding pat e
-    exprType <- getExprType e
-    decomposeBindings <- patToBindingsDecomposeBinding pat v exprType
+    bindingType <- case mainBinding of
+        NonRec _ r -> getExprType r
+        _ -> throwError "Expected non-recursive main binding"
+    decomposeBindings <- patToBindingsDecomposeBinding pat v bindingType
     return $ mainBinding:decomposeBindings
 
 -- Construct a binding that takes the expression and binds a tuple containing all the bound names to a fresh variable
@@ -542,14 +550,19 @@ patToBindingsMakeTopBinding pat e = do
     tupleCon <- HsCon . UnQual . HsSymbol . convertName <$> getTupleName (length boundNames)
     tupleType <- T.makeTuple boundNameInstantiatedTypes
     -- Construct the types that each node in the type-tagged tree will have
-    tupleAppSynTypes <- mapM (T.typeToSyn <=< flip T.makeFun tupleType) (tails boundNameInstantiatedTypes)
+    tupleFunTypes <- mapM (T.typeToSyn <=< flip T.makeFun tupleType) (tails boundNameInstantiatedTypes)
+    (tupleBaseSynType, tupleAppSynTypes) <- case tupleFunTypes of
+        base:args -> return (base, args)
+        _ -> throwError "0-argument tuple"
     let nullSrcLoc = SrcLoc "" 0 0
+        tupleBase = HsExpTypeSig nullSrcLoc tupleCon (HsQualType [] tupleBaseSynType)
         makeAppLayer base (n, argType, appType) = HsExpTypeSig nullSrcLoc (HsApp base var) (HsQualType [] appType)
             where var = HsExpTypeSig nullSrcLoc n (HsQualType [] argType)
-        rhs = HsUnGuardedRhs $ foldl makeAppLayer tupleCon $ zip3 renamedSynNames boundNameSynTypes tupleAppSynTypes
+        rhs = HsUnGuardedRhs $ foldl makeAppLayer tupleBase $ zip3 renamedSynNames boundNameSynTypes tupleAppSynTypes
     err <- makeError tupleType
     body <- patToIla [(bindingVar, eType)] [([pat'], rhs, tupleType, subEmpty, M.empty)] err
-    return (bindingVar, NonRec bindingVar $ Let bindingVar eType e body)
+    topVar <- freshVarName
+    return (topVar, NonRec topVar $ Let bindingVar eType e body)
 
 -- Given a binding as made by `patToBindingsMakeTopBinding`, a tuple containing each variable bound by the expression,
 -- generate a binding for each variable bound by the pattern to extract that variable
@@ -680,14 +693,15 @@ makeVarsForCon :: VariableName -> Type -> Converter [(VariableName, Type)]
 makeVarsForCon conName variableType = case T.unmakeApp variableType of
     -- Eg. ("[]", ["t151"])
     (TypeCon (TypeConstant datatypeName _), typeArgs) -> do
-        datatype <- gets (M.lookup datatypeName . datatypes) >>= \case
-            Nothing -> throwError $ "Unknown datatype " <> showt datatypeName
+        ds <- gets datatypes
+        datatype <- case M.lookup datatypeName ds of
+            Nothing -> throwError $ unwords ["Unknown datatype", showt datatypeName, showt (M.keys ds)]
             Just d -> return d
         -- Make a mapping from the placeholder datatype type variables (eg. "a") to the real type variables (eg. "t151")
         let sub = Substitution $ M.fromList $ zip (parameters datatype) typeArgs
         -- Get the arguments for the constructor use we're looking at
         branchArgTypes <- case M.lookup conName (branches datatype) of
-            Nothing -> throwError $ "Unknown branch " <> showt conName <> " of datatype " <> showt datatypeName
+            Nothing -> throwError $ unwords ["Unknown branch", showt conName, "of datatype", showt datatypeName <> ":", showt $ branches datatype]
             Just ba -> return $ map fst ba
         -- Apply the substitution to fill in the type variables we're actually using
         let branchArgTypes' = applySub sub branchArgTypes
