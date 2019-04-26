@@ -31,10 +31,14 @@ class Benchmark:
 
     def execute(self):
         self._benchmark_compilation()
+        self._pre_compile()
         self._compile()
         self._post_compile()
         self._run()
         self._write_results()
+
+    def _pre_compile(self):
+        pass
 
     def _compile(self):
         pass
@@ -52,5 +56,5 @@ class Benchmark:
 
     def _benchmark_compilation(self, iterations=10):
         number = 1
-        times = timeit.repeat(stmt=self._compile, number=number, repeat=iterations)
+        times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
         self._results["times"] = [1000 * t / number for t in times]

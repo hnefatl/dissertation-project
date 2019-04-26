@@ -8,6 +8,7 @@ import benchmark
 from jhaskellbenchmark import JHaskellBenchmark
 from javabenchmark import JavaBenchmark
 from fregebenchmark import FregeBenchmark
+from etabenchmark import EtaBenchmark
 
 
 def powerset(s):
@@ -33,6 +34,10 @@ for opts in powerset(["l", "t", "u"]):
 add_benchmark(FregeBenchmark("fibonacci_frege", "programs/fibonacci.fr"))
 add_benchmark(FregeBenchmark("factorial_frege", "programs/factorial.fr"))
 add_benchmark(FregeBenchmark("mergesort_frege", "programs/mergesort.fr"))
+for suffix, args in [("", []), ("_opt", ["-O3"])]:
+    add_benchmark(EtaBenchmark(f"fibonacci_eta{suffix}", "programs/fibonacci.eta", compiler_args=args))
+    add_benchmark(EtaBenchmark(f"factorial_eta{suffix}", "programs/factorial.eta", compiler_args=args))
+    add_benchmark(EtaBenchmark(f"mergesort_eta{suffix}", "programs/mergesort.eta", compiler_args=args))
 add_benchmark(JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 add_benchmark(JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 
