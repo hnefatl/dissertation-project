@@ -45,6 +45,7 @@ dependencies:
 - exceptions
 - composition
 - regex-tdfa
+- deepseq
 
 custom-setup:
   dependencies:

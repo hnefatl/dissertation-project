@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import string
 import pathlib
+import timeit
 
 import jmhbenchmark
 
@@ -15,7 +16,7 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
 
         super().__init__(name, source_path.stem.lower(), source_path.stem.capitalize())
         self._source_path = source_path
-        self._compiler_args = compiler_args
+        self._compiler_args = compiler_args.copy()
 
     def __enter__(self):
         ret = super().__enter__()
@@ -55,3 +56,17 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
+
+    # For JHaskell, time both writing jar and without
+    def _benchmark_compilation(self, iterations=10):
+        # Time with writing the jar
+        original_args = self._compiler_args.copy()
+        number = 1
+        times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
+        self._results["times"] = [1000 * t / number for t in times]
+        # Time without writing the jar
+        self._compiler_args.append("-j")
+        times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
+        self._results["times_no_jar"] = [1000 * t / number for t in times]
+        # Reset args
+        self._compiler_args = original_args

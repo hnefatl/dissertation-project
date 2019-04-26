@@ -15,7 +15,7 @@ class EtaBenchmark(jmhbenchmark.JMHBenchmark):
 
         super().__init__(name, "eta", "main")
         self._source_path = source_path
-        self._compiler_args = compiler_args
+        self._compiler_args = compiler_args.copy()
         self._output_jar = None
 
     def __enter__(self, *args):

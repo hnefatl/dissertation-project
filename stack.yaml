@@ -29,7 +29,7 @@ extra-deps:
 - text-show-instances-3.7
 - template-0.2.0.10
 - github: hnefatl/hs-java
-  commit: 19d897bd094ef6161c3f89a7fb00d131ae0ad608
+  commit: 8a76b63531df6b78d0ad5867e6b384764de2f5ff
 - github: hnefatl/haskell-src
   commit: 14e8e3227b0555f72a7ab61f153ad2613f3ffda6
 

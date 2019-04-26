@@ -3,6 +3,7 @@
 import sys
 import re
 import itertools
+import argparse
 
 import benchmark
 from jhaskellbenchmark import JHaskellBenchmark
@@ -41,10 +42,16 @@ for suffix, args in [("", []), ("_opt", ["-O3"])]:
 add_benchmark(JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 add_benchmark(JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 
-if len(sys.argv) > 1:
-    to_run = [b for b in benchmarks.keys() if any(re.fullmatch(pat, b) for pat in sys.argv[1:])]
-else:
-    to_run = list(benchmarks.keys())
+parser = argparse.ArgumentParser()
+parser.add_argument("patterns", nargs="*", help="Regex patterns to select benchmarks to perform")
+parser.add_argument("--list-benchmarks", action="store_true", help="List all available benchmarks")
+args = parser.parse_args()
+
+if args.list_benchmarks:
+    for b in benchmarks.keys():
+        print(b)
+
+to_run = [b for b in benchmarks.keys() if any(re.fullmatch(pat, b) for pat in args.patterns)]
 
 for bench_name in to_run:
     with benchmarks[bench_name] as benchmark:
