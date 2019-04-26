@@ -50,6 +50,11 @@ parseFlags = Flags
        <> help "Don't import the standard library"
        <> showDefault)
     <*> switch
+        ( long "no-write-jar"
+       <> short 'j'
+       <> help "Don't write any compiled data to disk"
+       <> showDefault)
+    <*> switch
         ( long "dump-types"
        <> help "Display all types after compiling"
        <> showDefault)

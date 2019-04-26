@@ -49,6 +49,7 @@ data Flags = Flags
     , dedupe          :: Bool
     , unreachableElim :: Bool
     , noStdImport     :: Bool
+    , noWriteJar      :: Bool
     , dumpTypes       :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
@@ -64,6 +65,7 @@ instance Default Flags where
         , dedupe = True
         , unreachableElim = True
         , noStdImport = False
+        , noWriteJar = False
         , dumpTypes = False
         , buildDir = "out"
         , outputJar = "a.jar"
@@ -153,11 +155,12 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
             compiled <- CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
-            let classDir = buildDir flags </> package flags
-            lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
-            lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
-            lift $ compileRuntimeFiles flags
-            lift $ lift $ lift $ makeJar flags
+            unless (noWriteJar flags) $ do
+                let classDir = buildDir flags </> package flags
+                lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
+                lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled
+                lift $ compileRuntimeFiles flags
+                lift $ lift $ lift $ makeJar flags
 
 mergePreludeModule :: (MonadIO m, MonadError Text m) => HsModule -> m HsModule
 mergePreludeModule (HsModule a b c d decls) = do
