@@ -10,11 +10,10 @@ import           Control.Monad.Reader        (MonadReader, local, runReaderT)
 import           Data.Graph                  (graphFromEdges', topSort)
 import qualified Data.Set                    as S
 import           Data.Tuple.Extra            (fst3)
-import           TextShow                    (showt)
 
 import           Backend.ILA                 (Alt(..), AltConstructor(..), Binding(..))
 import           Backend.ILB
-import           Logger                      (MonadLogger, writeLog)
+import           Logger                      (MonadLogger)
 import           Names                       (VariableName(..))
 import           Preprocessor.ContainedNames (getFreeVariables)
 

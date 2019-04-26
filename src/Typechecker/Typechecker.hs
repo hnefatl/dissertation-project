@@ -9,7 +9,6 @@ module Typechecker.Typechecker where
 import           BasicPrelude                hiding (group)
 import           Control.Applicative         (Alternative)
 import           Control.Monad.Except        (Except, ExceptT, MonadError, catchError, runExceptT, throwError)
-import           Control.Monad.Extra         (whenJust)
 import           Control.Monad.State.Strict  (MonadState, StateT, evalStateT, get, gets, modify, put, runStateT)
 import           Data.Default                (Default, def)
 import qualified Data.Map                    as M
@@ -205,9 +204,20 @@ insertQuantifiedType :: VariableName -> QuantifiedType -> TypeInferrer ()
 insertQuantifiedType name t = do
     bs <- gets bindings
     writeLog $ "Inserting qualified type " <> showt name <> " :: " <> showt t
-    whenJust (M.lookup name bs) $
-        \t' -> throwError $ "Overwriting binding " <> showt name <> " :: " <> showt t' <> " with " <> showt t
-    modify (\s -> s { bindings = M.insert name t bs })
+    t' <- case M.lookup name bs of
+        Nothing -> return t -- This is the only type we have for this symbol
+        Just existingType -> do -- We've got an existing type: if we can match the types, we're good
+            existingQualType <- instantiate existingType
+            qualT <- instantiate t
+            maybeSub <- tryM (mgu qualT existingQualType)
+            case maybeSub of
+                Right sub -> qualToQuant True S.empty $ applySub sub existingQualType
+                Left err -> throwError $ unlines
+                    [ "Can't match existing type with new type for " <> showt name
+                    , "Existing: " <> showt existingQualType
+                    , "New: " <> showt qualT
+                    , "Error: " <> err ]
+    modify (\s -> s { bindings = M.insert name t' bs })
 
 -- |Given a substitution, propagate constraints on the "from" of the substitution to the "to" of the substitution: eg.
 -- if we have `Num t1` and `[t2/t1]` we add a constraint `Num t2`, and if we have `instance (Foo a, Bar b) => Baz (Maybe
@@ -311,8 +321,8 @@ getQuantifiedType name freeTvs = do
     quant <- qualToQuant False freeTvs qual
     writeLog $ showt name <> " has quantified type " <> showt quant
     return quant
-getVariableQuantifiedType :: VariableName -> TypeInferrer QuantifiedType
-getVariableQuantifiedType name = flip getQuantifiedType S.empty =<< getVariableTypeVariable name
+getVariableQuantifiedType :: VariableName -> S.Set TypeVariableName -> TypeInferrer QuantifiedType
+getVariableQuantifiedType name freeTvs = flip getQuantifiedType freeTvs =<< getVariableTypeVariable name
 
 getFreeTypeVariableNames :: HasFreeVariables a => a -> TypeInferrer (S.Set TypeVariableName)
 getFreeTypeVariableNames x = do
@@ -451,7 +461,7 @@ inferPattern (HsPAsPat name pat) = do
 inferPattern (HsPParen pat) = inferPattern pat
 inferPattern (HsPInfixApp p1 con p2) = inferPattern $ HsPApp con [p1, p2]
 inferPattern (HsPApp con pats) = do
-    t <- instantiateToVar =<< getVariableQuantifiedType (convertName con)
+    t <- instantiateToVar =<< getVariableQuantifiedType (convertName con) S.empty
     conType <- applyCurrentSubstitution =<< nameToType t
     -- Check the data constructor's been fully applied
     let (args, _) = unmakeCon conType
@@ -561,13 +571,6 @@ inferDecl (HsFunBind matches) = do
     writeLog $ "Function bind " <> showt funName <> ": commonVar = " <> showt commonVar <> " vs = " <> showt vs
     mapM_ (unify commonType) =<< mapM nameToType vs
     return $ HsFunBind matches'
-inferDecl d@(HsTypeSig _ names t) = do
-    ks <- getKinds
-    t' <- synToQualType ks t
-    qt <- qualToQuant True S.empty t'
-    let varNames = map convertName names
-    forM_ varNames (\v -> insertQuantifiedType v qt)
-    return d
 inferDecl d@(HsClassDecl _ _ name args decls) = do
     let className = convertName name
     writeLog $ unwords ["Processing class decl for", showt className, unwords $ map showt args]
@@ -600,6 +603,14 @@ inferDecl (HsDataDecl loc ctx name args decls derivings) = do
     let resultType = makeSynApp (HsTyCon $ UnQual name) (map HsTyVar args)
     decls' <- mapM (inferConDecl resultType) decls
     return $ HsDataDecl loc ctx name args decls' derivings
+inferDecl d@(HsTypeSig _ names t) = do
+    ks <- getKinds
+    t' <- synToQualType ks t
+    forM_ (map convertName names) $ \v -> do
+        -- Freshen variables for each bound name so we don't duplicate type variables between names
+        qt <- qualToQuant True S.empty t'
+        insertQuantifiedType v qt
+    return d
 inferDecl _ = throwError "Declaration not yet supported"
 
 -- |For typeclass instance "top-level" declarations, we don't need to infer the type: it's easily obtained by
@@ -829,25 +840,47 @@ updateGuardedAltsTypeTags (HsGuardedAlts as) = HsGuardedAlts <$> mapM updateGuar
 updateGuardedAltTypeTags :: Syntax.HsGuardedAlt -> TypeInferrer Syntax.HsGuardedAlt
 updateGuardedAltTypeTags (HsGuardedAlt loc e1 e2) = HsGuardedAlt loc <$> updateExpTypeTags e1 <*> updateExpTypeTags e2
 
-checkModuleExpTypes :: MonadError Text m => Syntax.HsModule -> m ()
+checkModuleExpTypes :: Syntax.HsModule -> TypeInferrer ()
 checkModuleExpTypes (HsModule _ _ _ _ ds) = checkDeclsExpTypes ds
-checkDeclExpTypes :: MonadError Text m => Syntax.HsDecl -> m ()
+checkDeclsExpTypes :: [Syntax.HsDecl] -> TypeInferrer ()
+checkDeclsExpTypes = mapM_ checkDeclExpTypes
+checkDeclExpTypes :: Syntax.HsDecl -> TypeInferrer ()
 checkDeclExpTypes (HsPatBind _ _ rhs ds) = checkRhsExpTypes rhs >> checkDeclsExpTypes ds
 checkDeclExpTypes (HsFunBind matches) = mapM_ checkMatchExpTypes matches
-checkDeclExpTypes HsTypeSig{}          = return ()
+checkDeclExpTypes (HsTypeSig _ names synType) = return ()
+--checkDeclExpTypes (HsTypeSig _ names synType) = do
+--    ks <- getKinds
+--    expectedType <- synToQualType ks synType
+--    forM_ (map convertName names) $ \n -> do
+--        -- Get fresh type variables in the expected type
+--        writeLog "foo"
+--        freshExpectedType <- qualToQuant True S.empty expectedType
+--        writeLog "bar"
+--        inferredType <- instantiate =<< getVariableQuantifiedType n S.empty
+--        writeLog "baz"
+--        case maybeInferredType of
+--            Left _ -> insertQuantifiedType n freshExpectedType -- If there's only a type sig, no definition
+--            Right inferredType -> do
+--                -- There's a type sig and a definition: if we can't match the inferred type to the sig, error. Otherwise
+--                -- update the type with the "at most as restrictive" annotated type
+--                if hasMatch inferredType expectedType then
+--                    insertQuantifiedType n freshExpectedType
+--                else throwError $ unlines
+--                    [ "Inferred type for " <> convertName n <> " doesn't match explicit type signature: "
+--                    , "Inferred: " <> showt inferredType
+--                    , "Explicit: " <> showt expectedType ]
+
 checkDeclExpTypes HsClassDecl{}          = return ()
 checkDeclExpTypes (HsInstDecl _ _ _ _ ds) = checkDeclsExpTypes ds
 checkDeclExpTypes HsDataDecl{}           = return ()
 checkDeclExpTypes _ = throwError "Unsupported declaration when checking user-defined explicit type signatures."
-checkDeclsExpTypes :: MonadError Text m => [Syntax.HsDecl] -> m ()
-checkDeclsExpTypes = mapM_ checkDeclExpTypes
-checkRhsExpTypes :: MonadError Text m => Syntax.HsRhs -> m ()
+checkRhsExpTypes :: Syntax.HsRhs -> TypeInferrer ()
 checkRhsExpTypes (HsUnGuardedRhs e) = checkExpExpTypes e
 checkRhsExpTypes (HsGuardedRhss _) = throwError "Unsupported RHS when checking user-defined explicit type signatures."
-checkMatchExpTypes :: MonadError Text m => Syntax.HsMatch -> m ()
+checkMatchExpTypes :: Syntax.HsMatch -> TypeInferrer ()
 checkMatchExpTypes (HsMatch _ _ _ rhs wheres) = checkRhsExpTypes rhs >> checkDeclsExpTypes wheres
 
-checkExpExpTypes :: MonadError Text m => Syntax.HsExp -> m ()
+checkExpExpTypes :: Syntax.HsExp -> TypeInferrer ()
 -- We previously wrapped the manual type signature with an automatically added one, treat them differently
 checkExpExpTypes (HsExpTypeSig _ (HsExpTypeSig _ e manualType) autoType)
     | alphaEq manualType autoType = checkExpExpTypes e
@@ -870,10 +903,10 @@ checkExpExpTypes (HsList es) = mapM_ checkExpExpTypes es
 checkExpExpTypes (HsParen e) = checkExpExpTypes e
 checkExpExpTypes e = throwError $ "Unknown expression in checkExpExpTypes: " <> showt e
 
-checkAltExpTypes :: MonadError Text m => Syntax.HsAlt -> m ()
+checkAltExpTypes :: Syntax.HsAlt -> TypeInferrer ()
 checkAltExpTypes (HsAlt _ _ a wheres) = checkGuardedAltsExpTypes a >> checkDeclsExpTypes wheres
-checkGuardedAltsExpTypes :: MonadError Text m => Syntax.HsGuardedAlts -> m ()
+checkGuardedAltsExpTypes :: Syntax.HsGuardedAlts -> TypeInferrer ()
 checkGuardedAltsExpTypes (HsUnGuardedAlt e) = checkExpExpTypes e
 checkGuardedAltsExpTypes (HsGuardedAlts as) = mapM_ checkGuardedAltExpTypes as
-checkGuardedAltExpTypes :: MonadError Text m => Syntax.HsGuardedAlt-> m ()
+checkGuardedAltExpTypes :: Syntax.HsGuardedAlt-> TypeInferrer ()
 checkGuardedAltExpTypes (HsGuardedAlt _ e1 e2) = mapM_ checkExpExpTypes [e1, e2]

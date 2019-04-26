@@ -109,6 +109,7 @@ primIntegralIntMod :: Int -> Int -> Int
 primIntegralIntegerDiv :: Integer -> Integer -> Integer
 primIntegralIntegerMod :: Integer -> Integer -> Integer
 
+even, odd :: (Eq a, Integral a, Num a) => a -> Bool
 even x = x `mod` 2 == 0
 odd = not . even
 
@@ -132,7 +133,7 @@ instance Monad [] where
     return x = [x]
 
 
--- both :: (a -> c) -> (b -> d) -> (a,b) -> (c,d)
+both :: (a -> c) -> (b -> d) -> (a,b) -> (c,d)
 both f g (x, y) = (f x, g y)
 
 --class Foldable t where

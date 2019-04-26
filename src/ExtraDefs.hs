@@ -35,6 +35,9 @@ allM, anyM :: (Foldable f, Monad m) => (a -> m Bool) -> f a -> m Bool
 allM f = foldlM (\x y -> (x &&) <$> f y) True
 anyM f = foldlM (\x y -> (x ||) <$> f y) False
 
+tryM :: MonadError e m => m a -> m (Either e a)
+tryM x = catchError (Right <$> x) (return . Left)
+
 ifJustM :: Monad m => m (Maybe a) -> (a -> m ()) -> m ()
 ifJustM p action = p >>= maybe (return ()) action
 
