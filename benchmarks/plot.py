@@ -141,6 +141,7 @@ def compilation_time_by_compiler():
 
 
 # Not implemented yet as this would require being able to specify order of optimisations: currently not allowed.
+# Heatmap of effects of pairwise optimisations
 #def optimisation_impact():
 #    benchmarks = sorted(list(benches.keys()))
 #    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
