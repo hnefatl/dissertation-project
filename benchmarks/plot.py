@@ -18,18 +18,39 @@ DARKGREY = "#707070"
 benches = {
     "factorial": {
         "Mine": "results/factorial_mine",
+        "Mine_l": "results/factorial_mine_l",
+        "Mine_t": "results/factorial_mine_t",
+        "Mine_u": "results/factorial_mine_u",
+        "Mine_l_t": "results/factorial_mine_l_t",
+        "Mine_l_u": "results/factorial_mine_l_u",
+        "Mine_t_u": "results/factorial_mine_t_u",
+        "Mine_l_t_u": "results/factorial_mine_l_t_u",
         "Mine (opt)": "results/factorial_mine_l_t_u",
         "Frege": "results/factorial_frege",
         "Eta": "results/factorial_eta",
     },
     "fibonacci": {
         "Mine": "results/fibonacci_mine",
+        "Mine_l": "results/fibonacci_mine_l",
+        "Mine_t": "results/fibonacci_mine_t",
+        "Mine_u": "results/fibonacci_mine_u",
+        "Mine_l_t": "results/fibonacci_mine_l_t",
+        "Mine_l_u": "results/fibonacci_mine_l_u",
+        "Mine_t_u": "results/fibonacci_mine_t_u",
+        "Mine_l_t_u": "results/fibonacci_mine_l_t_u",
         "Mine (opt)": "results/fibonacci_mine_l_t_u",
         "Frege": "results/fibonacci_frege",
         "Eta": "results/fibonacci_eta",
     },
     "mergesort": {
         "Mine": "results/mergesort_mine",
+        "Mine_l": "results/mergesort_mine_l",
+        "Mine_t": "results/mergesort_mine_t",
+        "Mine_u": "results/mergesort_mine_u",
+        "Mine_l_t": "results/mergesort_mine_l_t",
+        "Mine_l_u": "results/mergesort_mine_l_u",
+        "Mine_t_u": "results/mergesort_mine_t_u",
+        "Mine_l_t_u": "results/mergesort_mine_l_t_u",
         "Mine (opt)": "results/mergesort_mine_l_t_u",
         "Frege": "results/mergesort_frege",
         "Eta": "results/mergesort_eta",
@@ -46,22 +67,38 @@ for bench, impls in benches.items():
             results[bench][impl] = parse_results(f.read().decode())
 
 
+fst = lambda x: x[0]
+snd = lambda x: x[1]
+
+def texprep(s):
+    if isinstance(s, str):
+        return s.replace("_", "\\_")
+    elif isinstance(s, collections.Iterable):
+        return list(map(texprep, s))
+    else:
+        raise ValueError
+
 
 def render_fig(name, save=True):
     if save:
-        plt.savefig(fname="plots/" + name, format="pdf")
+        plt.savefig(fname="../../dissertation/graphs/" + name, format="pdf")
     else:
         plt.show()
 
 
-def perf_by_compiler():
-    width = 0.05
+# TODO(kc506): Include `min_time` measurement?
+def perf_by_compiler(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
-    xs = 1.25 * width * np.arange(len(impls))
 
-    for benchmark in benchmarks:
-        fig, ax = plt.subplots()
+    if subplot:
+        fig, axes = plt.subplots(1, 3)
+        axes[0].set_ylabel("Runtime (ms)")
+    else:
+        fig, axes = plt.subplots()
+    for plot_num, benchmark in enumerate(benchmarks):
+        ax = axes[plot_num] if subplot else axes
+
         quartiles = []
         for impl in impls:
             result = results[benchmark][impl]
@@ -69,55 +106,77 @@ def perf_by_compiler():
         lows, medians, highs = map(np.array, zip(*quartiles))
         errors = [medians - lows, highs - medians]
 
-        ax.set_title("Performance of \\texttt{" + benchmark + "} by compiler")
-        ax.bar(x=xs, height=medians, width=width, yerr=errors, color=GREY, capsize=3)
-        ax.set_xticks(xs)
-        ax.set_xticklabels(impls)
+        if subplot:
+            ax.set_title("\\texttt{" + benchmark + "}")
+        else:
+            ax.set_title("Performance of \\texttt{" + benchmark + "} by compiler")
+        ax.bar(x=impls, height=medians, yerr=errors, color=GREY, capsize=3)
+        ax.tick_params(axis='x', rotation=40)
         ax.set_ylim(bottom=0)
-        plt.ylabel("Runtime (ms)")
-        render_fig("perf_{}.pdf".format(benchmark).lower())
+        plt.tight_layout()
+        if not subplot:
+            ax.set_ylabel("Runtime (ms)")
+            render_fig("perf_{}.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("perf.pdf")
         plt.close(fig)
 
 
-def executable_size_by_compiler():
-    width = 0.05
+def executable_size_by_compiler(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
-    xs = 1.25 * width * np.arange(len(impls))
 
-    for benchmark in benchmarks:
-        fig, ax = plt.subplots()
+    if subplot:
+        fig, axes = plt.subplots(1, 3)
+        axes[0].set_ylabel("Compiled size (bytes)")
+    else:
+        fig, axes = plt.subplots()
+    for plot_num, benchmark in enumerate(benchmarks):
+        ax = axes[plot_num] if subplot else axes
+
         sizes = []
         for impl in impls:
             result = results[benchmark][impl]
             sizes.append(result["size"])
 
-        ax.set_title("Compiled size of \\texttt{" + benchmark + "} by compiler")
-        ax.bar(x=xs, height=sizes, width=width, color=GREY, capsize=3)
-        ax.set_xticks(xs)
-        ax.set_xticklabels(impls)
+        if subplot:
+            ax.set_title("\\texttt{" + benchmark + "}")
+        else:
+            ax.set_title("Compiled size of \\texttt{" + benchmark + "} by compiler")
+        ax.bar(x=impls, height=sizes, color=GREY)
+        ax.tick_params(axis='x', rotation=40)
         ax.set_ylim(bottom=0)
         plt.ylabel("Compiled size (bytes)")
-        render_fig("size_{}.pdf".format(benchmark).lower())
+        plt.tight_layout()
+        if not subplot:
+            ax.set_ylabel("Compiled size (bytes)")
+            render_fig("size_{}.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("size.pdf")
         plt.close(fig)
 
 
-def compilation_time_by_compiler():
-    width = 0.05
+def compilation_time_by_compiler(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
-    xs = 1.25 * width * np.arange(len(impls))
 
-    for benchmark in benchmarks:
-        fig, ax = plt.subplots()
+    if subplot:
+        fig, axes = plt.subplots(1, 3)
+        axes[0].set_ylabel("Compilation time (ms)")
+    else:
+        fig, axes = plt.subplots()
+    for plot_num, benchmark in enumerate(benchmarks):
+        ax = axes[plot_num] if subplot else axes
+
         times = []
         bottoms = []
         top_colours = []
         bottom_colours = []
         for impl in impls:
             result = results[benchmark][impl]
-            #if impl in {"Mine", "Mine (opt)"}:
-            if impl in {"Mine"}:
+            if impl in {"Mine", "Mine (opt)"}:
                 # We have timing information for with/without disk writes
                 times.append(min(result["times_no_jar"]))
                 bottoms.append(min(result["times"]))
@@ -129,20 +188,49 @@ def compilation_time_by_compiler():
                 top_colours.append(GREY)
                 bottom_colours.append(DARKGREY)
 
-        ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
-        ax.bar(x=xs, height=times, bottom=bottoms, width=width, color=top_colours, capsize=3)
-        ax.bar(x=xs, height=bottoms, width=width, color=bottom_colours, capsize=3)
-        ax.set_xticks(xs)
-        ax.set_xticklabels(impls)
+        if subplot:
+            ax.set_title("\\texttt{" + benchmark + "}")
+        else:
+            ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
+        ax.bar(x=impls, height=times, bottom=bottoms, color=top_colours)
+        ax.bar(x=impls, height=bottoms, color=bottom_colours)
+        ax.tick_params(axis='x', rotation=40)
         ax.set_ylim(bottom=0)
-        plt.ylabel("Compilation time (ms)")
-        render_fig("compiler_perf_{}.pdf".format(benchmark).lower())
+        plt.tight_layout()
+        if not subplot:
+            ax.set_ylabel("Compilation time (ms)")
+            render_fig("compiler_perf_{}.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("compiler_perf.pdf")
+        plt.close(fig)
+
+def optimisation_impact():
+    benchmarks = sorted(list(benches.keys()))
+    impls = ["Mine", "Mine_l", "Mine_t", "Mine_u", "Mine_l_t", "Mine_l_u", "Mine_t_u", "Mine_l_t_u"]
+
+    for benchmark in benchmarks:
+        bar_data = []
+        for impl in impls:
+            result = results[benchmark][impl]
+            bar_data.append((impl, result["min_time"]))
+
+        sorted_bar_data = bar_data.sort(key=snd) # Sort by time
+        heights, labels = zip(*sorted_bar_data)
+
+        fig, ax = plt.subplots()
+        ax.set_title("Runtime of \\texttt{" + benchmark + "} by optimisation")
+        ax.bar(x=impls, height=heights, color=GREY)
+        ax.tick_params(axis='x', rotation=40)
+        ax.set_ylim(bottom=0)
+        plt.ylabel("Runtime (ms)")
+        render_fig("compiler_perf_{}_by_opt.pdf".format(benchmark).lower())
         plt.close(fig)
 
 
 # Not implemented yet as this would require being able to specify order of optimisations: currently not allowed.
 # Heatmap of effects of pairwise optimisations
-#def optimisation_impact():
+# def optimisation_pairwise():
 #    benchmarks = sorted(list(benches.keys()))
 #    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
 #
@@ -158,6 +246,8 @@ def compilation_time_by_compiler():
 #            img_data.append(row)
 #
 
-perf_by_compiler()
-executable_size_by_compiler()
-compilation_time_by_compiler()
+for subplot in [True, False]:
+    perf_by_compiler(subplot)
+    executable_size_by_compiler(subplot)
+    compilation_time_by_compiler(subplot)
+    #optimisation_impact(subplot)

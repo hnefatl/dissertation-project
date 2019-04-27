@@ -54,7 +54,7 @@ class Benchmark:
         with open("results/" + self._name, "wb") as f:
             f.write(results.show_results(self._results).encode())
 
-    def _benchmark_compilation(self, iterations=10):
+    def _benchmark_compilation(self, iterations=50):
         number = 1
         times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
         self._results["times"] = [1000 * t / number for t in times]

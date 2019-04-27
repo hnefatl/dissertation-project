@@ -46,8 +46,9 @@ public class Main {
             // Also stats.getHistogram
             // http://javadox.com/org.openjdk.jmh/jmh-core/1.12/org/openjdk/jmh/util/Statistics.html
 
-            // Display the 25th, 50th, 75th percentiles
+            // Display the 0th, 25th, 50th, 75th percentiles
             System.out.print("{");
+            System.out.print("\"min_time\": " + stats.getPercentile(0.0) + ",");
             System.out.print("\"lower_quartile\": " + stats.getPercentile(25.0) + ",");
             System.out.print("\"mid_quartile\": " + stats.getPercentile(50.0) + ",");
             System.out.print("\"upper_quartile\": " + stats.getPercentile(75.0));

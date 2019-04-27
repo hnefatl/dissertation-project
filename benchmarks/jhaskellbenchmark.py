@@ -58,7 +58,7 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
             raise
 
     # For JHaskell, time both writing jar and without
-    def _benchmark_compilation(self, iterations=10):
+    def _benchmark_compilation(self, iterations=50):
         # Time with writing the jar
         original_args = self._compiler_args.copy()
         number = 1
