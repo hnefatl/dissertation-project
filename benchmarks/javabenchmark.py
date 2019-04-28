@@ -18,7 +18,7 @@ class JavaBenchmark(jmhbenchmark.JMHBenchmark):
 
     def _post_compile(self):
         # Record the compiled file size
-        compiled_file = (pathlib.Path(self._package_name) / self._class_name).with_suffix(".class")
+        compiled_file = (self._temp_dir / self._package_name / self._class_name).with_suffix(".class")
         self._results["size"] = os.path.getsize(compiled_file)
         return super()._post_compile()
 

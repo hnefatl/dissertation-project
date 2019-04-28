@@ -55,17 +55,4 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
             raise
 
     def _get_frege_runtime_size(self):
-        original_dir = pathlib.Path.cwd()
-        runtime_path = "frege/run8"
-        # Extract the java 8 runtime files
-        os.chdir(self._temp_dir)
-        args = ["jar", "xf", self._frege_jar_path, runtime_path]
-        try:
-            subprocess.check_output(args, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            print(e.stdout.decode())
-            raise
-        finally:
-            os.chdir(original_dir)
-        run_dir = self._temp_dir / runtime_path
-        return sum(os.path.getsize(run_dir / f) for f in os.listdir(run_dir))
+        return jmhbenchmark.get_jar_entry_size(self._frege_jar_path, runtime_path)

@@ -4,6 +4,7 @@ import subprocess
 import shutil
 import pathlib
 import results
+import tempfile
 
 import benchmark
 
@@ -72,6 +73,7 @@ class JMHBenchmark(benchmark.Benchmark):
         try:
             args = [
                 "java",
+                "-Xss1024m",  # 1GB of stack space
                 "-noverify",
                 "-cp",
                 ":".join(self._get_classpath() + [".", str(original_dir / "deps/*")]),
@@ -84,3 +86,27 @@ class JMHBenchmark(benchmark.Benchmark):
             raise
         finally:
             os.chdir(original_dir)
+
+def get_jar_entry_size(jar_path, entry_names):
+    if not isinstance(entry_names, list):
+        entry_names = list(entry_names)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        original_dir = pathlib.Path.cwd()
+        # Extract the java 8 runtime files
+        os.chdir(temp_dir)
+        args = ["jar", "xf", jar_path] + entry_names
+        try:
+            subprocess.check_output(args, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            print(e.stdout.decode())
+            raise
+        finally:
+            os.chdir(original_dir)
+        
+        return sum(
+            os.path.getsize(pathlib.Path(p) / f)
+            for extracted_entry in entry_names
+            for p, _, fs in os.walk(pathlib.Path(temp_dir) / extracted_entry)
+            for f in fs
+        )

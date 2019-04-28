@@ -27,7 +27,10 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         self._run_jhaskell_compiler()
 
     def _post_compile(self):
-        self._results["size"] = os.path.getsize(self._output_jar)
+        classes = map(
+            lambda s: f"{self._package_name}/{s}.class", ["Output", "Data", "Function", "BoxedData", "HeapObject"]
+        )
+        self._results["size"] = jmhbenchmark.get_jar_entry_size(self._output_jar, classes)
         return super()._post_compile()
 
     def _get_classpath(self):

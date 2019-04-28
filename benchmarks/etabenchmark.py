@@ -28,7 +28,8 @@ class EtaBenchmark(jmhbenchmark.JMHBenchmark):
 
     def _post_compile(self):
         # Measure the compiled size
-        self._results["size"] = os.path.getsize(self._output_jar)
+        classes = ["main", "eta"]
+        self._results["size"] = jmhbenchmark.get_jar_entry_size(self._output_jar, classes)
         super()._post_compile()
 
     def _get_classpath(self):

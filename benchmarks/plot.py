@@ -55,6 +55,19 @@ benches = {
         "Frege": "results/mergesort_frege",
         "Eta": "results/mergesort_eta",
     },
+    "ackermann": {
+        "Mine": "results/ackermann_mine",
+        "Mine_l": "results/ackermann_mine_l",
+        "Mine_t": "results/ackermann_mine_t",
+        "Mine_u": "results/ackermann_mine_u",
+        "Mine_l_t": "results/ackermann_mine_l_t",
+        "Mine_l_u": "results/ackermann_mine_l_u",
+        "Mine_t_u": "results/ackermann_mine_t_u",
+        "Mine_l_t_u": "results/ackermann_mine_l_t_u",
+        "Mine (opt)": "results/ackermann_mine_l_t_u",
+        "Frege": "results/ackermann_frege",
+        "Eta": "results/ackermann_eta",
+    },
 }
 
 COLOURS = ["blue", "red", "green", "yellow"]
@@ -92,12 +105,12 @@ def perf_by_compiler(subplot=True):
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
 
     if subplot:
-        fig, axes = plt.subplots(1, 3)
-        axes[0].set_ylabel("Runtime (ms)")
+        fig, axes = plt.subplots(2, 3)
+        axes[0][0].set_ylabel("Runtime (ms)")
     else:
         fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num] if subplot else axes
+        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
 
         quartiles = []
         for impl in impls:
@@ -128,12 +141,12 @@ def executable_size_by_compiler(subplot=True):
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
 
     if subplot:
-        fig, axes = plt.subplots(1, 3)
-        axes[0].set_ylabel("Compiled size (bytes)")
+        fig, axes = plt.subplots(2, 3)
+        axes[0][0].set_ylabel("Compiled size (bytes)")
     else:
         fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num] if subplot else axes
+        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
 
         sizes = []
         for impl in impls:
@@ -163,12 +176,12 @@ def compilation_time_by_compiler(subplot=True):
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
 
     if subplot:
-        fig, axes = plt.subplots(1, 3)
-        axes[0].set_ylabel("Compilation time (ms)")
+        fig, axes = plt.subplots(2, 3)
+        axes[0][0].set_ylabel("Compilation time (ms)")
     else:
         fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num] if subplot else axes
+        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
 
         times = []
         bottoms = []
@@ -178,8 +191,11 @@ def compilation_time_by_compiler(subplot=True):
             result = results[benchmark][impl]
             if impl in {"Mine", "Mine (opt)"}:
                 # We have timing information for with/without disk writes
-                times.append(min(result["times_no_jar"]))
-                bottoms.append(min(result["times"]))
+                # Pick the pair of entries with minimum sum time. Don't take min of each list as then we might get times
+                # from different runs
+                time, bottom = min(zip(result["times_no_jar"], result["times"]), key=lambda x: x[0]+x[1])
+                times.append(time)
+                bottoms.append(bottom)
                 top_colours.append(DARKGREY)
                 bottom_colours.append(GREY)
             else:
