@@ -58,6 +58,10 @@ parseFlags = Flags
         ( long "dump-types"
        <> help "Display all types after compiling"
        <> showDefault)
+    <*> switch
+        ( long "wait-on-start"
+       <> help "Wait for enter to be pressed before beginning execution. Useful for profiling"
+       <> showDefault)
     <*> strOption
         ( long "build-dir"
        <> short 'd'

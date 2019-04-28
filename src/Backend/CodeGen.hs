@@ -56,8 +56,8 @@ freeVariables name args x = do
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces class files
-convert :: Text -> Text -> FilePath -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname package primitiveClassDir bs main revRenames topRenames ds = do
+convert :: Text -> Text -> FilePath -> Bool -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname package primitiveClassDir waitBeforeStart bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let heapObjectCls = ObjectType $ unpack package <> "/HeapObject"
         cname' = package <> "/" <> cname
@@ -80,7 +80,7 @@ convert cname package primitiveClassDir bs main revRenames topRenames ds = do
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
-                addMainMethod
+                addMainMethod waitBeforeStart
             return $ NamedClass cname compiled
         processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
         processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
@@ -97,12 +97,14 @@ loadPrimitiveClasses :: MonadIO m => FilePath -> m [Tree CPEntry]
 loadPrimitiveClasses dirPath = liftIO $ execClassPath (mapM_ (loadClass . (dirPath </>)) classes)
     where classes = ["HeapObject", "Function"]
 
-addMainMethod :: Converter ()
-addMainMethod = do
+addMainMethod :: Bool -> Converter ()
+addMainMethod waitBeforeStart = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
-        --getStaticField Java.Lang.system $ NameType "in" $ ObjectType "java/io/InputStream"
-        --invokeVirtual "java/io/InputStream" $ NameType "read" $ MethodSignature [] (Returns IntType)
+        when waitBeforeStart $ do
+            getStaticField Java.Lang.system $ NameType "in" $ ObjectType "java/io/InputStream"
+            invokeVirtual "java/io/InputStream" $ NameType "read" $ MethodSignature [] (Returns IntType)
+            pop
         -- Perform any initialisation actions
         performInitialisers
         getStaticField Java.Lang.system Java.IO.out
