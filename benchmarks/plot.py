@@ -221,26 +221,39 @@ def compilation_time_by_compiler(subplot=True):
         render_fig("compiler_perf.pdf")
         plt.close(fig)
 
-def optimisation_impact():
+def optimisation_impact(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     impls = ["Mine", "Mine_l", "Mine_t", "Mine_u", "Mine_l_t", "Mine_l_u", "Mine_t_u", "Mine_l_t_u"]
 
-    for benchmark in benchmarks:
+    if subplot:
+        fig, axes = plt.subplots(2, 3)
+        axes[0][0].set_ylabel("Runtime (ms)")
+    else:
+        fig, axes = plt.subplots()
+    for plot_num, benchmark in enumerate(benchmarks):
+        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
         bar_data = []
         for impl in impls:
             result = results[benchmark][impl]
             bar_data.append((impl, result["min_time"]))
 
-        sorted_bar_data = bar_data.sort(key=snd) # Sort by time
-        heights, labels = zip(*sorted_bar_data)
+        sorted_bar_data = sorted(bar_data, key=snd) # Sort by time
+        labels, heights = zip(*sorted_bar_data)
 
-        fig, ax = plt.subplots()
-        ax.set_title("Runtime of \\texttt{" + benchmark + "} by optimisation")
-        ax.bar(x=impls, height=heights, color=GREY)
+        if subplot:
+            ax.set_title("\\texttt{" + benchmark + "}")
+        else:
+            ax.set_title("Runtime of \\texttt{" + benchmark + "} by optimisation")
+        ax.bar(x=texprep(labels), height=heights, color=GREY)
         ax.tick_params(axis='x', rotation=40)
         ax.set_ylim(bottom=0)
-        plt.ylabel("Runtime (ms)")
-        render_fig("compiler_perf_{}_by_opt.pdf".format(benchmark).lower())
+        plt.tight_layout()
+        if not subplot:
+            ax.set_ylabel("Runtime (ms)")
+            render_fig("compiler_perf_{}_by_opt.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("compiler_perf_by_opt.pdf")
         plt.close(fig)
 
 
@@ -265,5 +278,5 @@ def optimisation_impact():
 for subplot in [True, False]:
     perf_by_compiler(subplot)
     executable_size_by_compiler(subplot)
-    compilation_time_by_compiler(subplot)
-    #optimisation_impact(subplot)
+    #compilation_time_by_compiler(subplot)
+    optimisation_impact(subplot)
