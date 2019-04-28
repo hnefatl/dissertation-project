@@ -83,6 +83,7 @@ for bench, impls in benches.items():
 fst = lambda x: x[0]
 snd = lambda x: x[1]
 
+
 def texprep(s):
     if isinstance(s, str):
         return s.replace("_", "\\_")
@@ -124,7 +125,7 @@ def perf_by_compiler(subplot=True):
         else:
             ax.set_title("Performance of \\texttt{" + benchmark + "} by compiler")
         ax.bar(x=impls, height=medians, yerr=errors, color=GREY, capsize=3)
-        ax.tick_params(axis='x', rotation=40)
+        ax.tick_params(axis="x", rotation=40)
         ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
@@ -158,7 +159,7 @@ def executable_size_by_compiler(subplot=True):
         else:
             ax.set_title("Compiled size of \\texttt{" + benchmark + "} by compiler")
         ax.bar(x=impls, height=sizes, color=GREY)
-        ax.tick_params(axis='x', rotation=40)
+        ax.tick_params(axis="x", rotation=40)
         ax.set_ylim(bottom=0)
         plt.ylabel("Compiled size (bytes)")
         plt.tight_layout()
@@ -193,7 +194,7 @@ def compilation_time_by_compiler(subplot=True):
                 # We have timing information for with/without disk writes
                 # Pick the pair of entries with minimum sum time. Don't take min of each list as then we might get times
                 # from different runs
-                time, bottom = min(zip(result["times_no_jar"], result["times"]), key=lambda x: x[0]+x[1])
+                time, bottom = min(zip(result["times_no_jar"], result["times"]), key=lambda x: x[0] + x[1])
                 times.append(time)
                 bottoms.append(bottom)
                 top_colours.append(DARKGREY)
@@ -210,7 +211,7 @@ def compilation_time_by_compiler(subplot=True):
             ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
         ax.bar(x=impls, height=times, bottom=bottoms, color=top_colours)
         ax.bar(x=impls, height=bottoms, color=bottom_colours)
-        ax.tick_params(axis='x', rotation=40)
+        ax.tick_params(axis="x", rotation=40)
         ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
@@ -221,9 +222,19 @@ def compilation_time_by_compiler(subplot=True):
         render_fig("compiler_perf.pdf")
         plt.close(fig)
 
+
 def optimisation_impact(subplot=True):
     benchmarks = sorted(list(benches.keys()))
-    impls = ["Mine", "Mine_l", "Mine_t", "Mine_u", "Mine_l_t", "Mine_l_u", "Mine_t_u", "Mine_l_t_u"]
+    readable_impls = {
+        "Mine": "None",
+        "Mine_l": "L",
+        "Mine_t": "D",
+        "Mine_u": "U",
+        "Mine_l_t": "LD",
+        "Mine_l_u": "LU",
+        "Mine_t_u": "DU",
+        "Mine_l_t_u": "LDU",
+    }
 
     if subplot:
         fig, axes = plt.subplots(2, 3)
@@ -233,11 +244,12 @@ def optimisation_impact(subplot=True):
     for plot_num, benchmark in enumerate(benchmarks):
         ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
         bar_data = []
-        for impl in impls:
+        for impl, readable in readable_impls.items():
             result = results[benchmark][impl]
-            bar_data.append((impl, result["min_time"]))
+            #bar_data.append((readable, result["min_time"]))
+            bar_data.append((readable, result["min_time"]))
 
-        sorted_bar_data = sorted(bar_data, key=snd) # Sort by time
+        sorted_bar_data = sorted(bar_data, key=snd)  # Sort by time
         labels, heights = zip(*sorted_bar_data)
 
         if subplot:
@@ -245,15 +257,15 @@ def optimisation_impact(subplot=True):
         else:
             ax.set_title("Runtime of \\texttt{" + benchmark + "} by optimisation")
         ax.bar(x=texprep(labels), height=heights, color=GREY)
-        ax.tick_params(axis='x', rotation=40)
-        ax.set_ylim(bottom=0)
+        ax.tick_params(axis="x", rotation=50)
+        ax.set_ylim(bottom=0.95 * min(heights))
         plt.tight_layout()
         if not subplot:
             ax.set_ylabel("Runtime (ms)")
-            render_fig("compiler_perf_{}_by_opt.pdf".format(benchmark).lower())
+            render_fig("perf_{}_by_opt.pdf".format(benchmark).lower())
             plt.close(fig)
     if subplot:
-        render_fig("compiler_perf_by_opt.pdf")
+        render_fig("perf_by_opt.pdf")
         plt.close(fig)
 
 
@@ -278,5 +290,5 @@ def optimisation_impact(subplot=True):
 for subplot in [True, False]:
     perf_by_compiler(subplot)
     executable_size_by_compiler(subplot)
-    #compilation_time_by_compiler(subplot)
+    compilation_time_by_compiler(subplot)
     optimisation_impact(subplot)
