@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import re
 import numpy as np
 import collections
+import xml.etree.ElementTree as ET
 
 from results import parse_results
 
@@ -86,7 +87,9 @@ snd = lambda x: x[1]
 
 def texprep(s):
     if isinstance(s, str):
-        return s.replace("_", "\\_")
+        return s.replace("_", "\\_").replace("<", "\\(<\\)").replace(">", "\\(>\\)")
+    elif isinstance(s, list):
+        return list(map(texprep, s))
     elif isinstance(s, collections.Iterable):
         return list(map(texprep, s))
     else:
@@ -108,10 +111,12 @@ def perf_by_compiler(subplot=True):
     if subplot:
         fig, axes = plt.subplots(2, 3)
         axes[0][0].set_ylabel("Runtime (ms)")
-    else:
-        fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots()
+            ax.set_ylabel("Runtime (ms)")
 
         quartiles = []
         for impl in impls:
@@ -144,10 +149,12 @@ def executable_size_by_compiler(subplot=True):
     if subplot:
         fig, axes = plt.subplots(2, 3)
         axes[0][0].set_ylabel("Compiled size (bytes)")
-    else:
-        fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots()
+            ax.set_ylabel("Compiled size (bytes)")
 
         sizes = []
         for impl in impls:
@@ -179,10 +186,12 @@ def compilation_time_by_compiler(subplot=True):
     if subplot:
         fig, axes = plt.subplots(2, 3)
         axes[0][0].set_ylabel("Compilation time (ms)")
-    else:
-        fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots()
+            ax.set_ylabel("Compilation time (ms)")
 
         times = []
         bottoms = []
@@ -239,14 +248,16 @@ def optimisation_impact(subplot=True):
     if subplot:
         fig, axes = plt.subplots(2, 3)
         axes[0][0].set_ylabel("Runtime (ms)")
-    else:
-        fig, axes = plt.subplots()
     for plot_num, benchmark in enumerate(benchmarks):
-        ax = axes[plot_num // 3][plot_num % 3] if subplot else axes
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots()
+            ax.set_ylabel("Runtime (ms)")
+
         bar_data = []
         for impl, readable in readable_impls.items():
             result = results[benchmark][impl]
-            #bar_data.append((readable, result["min_time"]))
             bar_data.append((readable, result["min_time"]))
 
         sorted_bar_data = sorted(bar_data, key=snd)  # Sort by time
@@ -287,8 +298,54 @@ def optimisation_impact(subplot=True):
 #            img_data.append(row)
 #
 
+
+def executable_profile(subplot=True):
+    results = {
+        "factorial": "results/factorial.xml",
+        "fibonacci": "results/fibonacci.xml",
+        "mergesort": "results/mergesort.xml",
+        "ackermann": "results/ackermann.xml",
+    }
+
+    if subplot:
+        fig, axes = plt.subplots(2, 3)
+    for plot_num, (benchmark, result_path) in enumerate(results.items()):
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots(figsize=(9, 4.5))
+            # plt.subplots_adjust(left=0.2)
+
+        tree = ET.parse(result_path)
+
+        results = []
+        for row in tree.getroot().find("TableData").find("TableBody").findall("TableRow"):
+            label = "\\texttt{" + row[0].text.replace("tmp.", "") + "}\nInvocations: " + row[4].text
+            results.append((label, float(row[1].text.strip("%")) / 100))
+
+        results.sort(key=lambda r: r[1], reverse=True)
+        # Trim down to just the functions making up a percentage of total time inside themselves
+        results = [x for x in results if x[1] > 0.03]
+
+        labels, percentages = map(list, zip(*results))
+
+        # Add a wedge without a special font to make up the remainder of percentages
+        labels.append("Other")
+        percentages.append(1 - sum(percentages))
+
+        ax.pie(x=percentages, labels=texprep(labels))
+        plt.tight_layout()
+        if not subplot:
+            render_fig("perf_profile_{}.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("perf_profile.pdf")
+        plt.close(fig)
+
+
 for subplot in [True, False]:
     perf_by_compiler(subplot)
     executable_size_by_compiler(subplot)
     compilation_time_by_compiler(subplot)
     optimisation_impact(subplot)
+    executable_profile(subplot)
