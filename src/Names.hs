@@ -1,16 +1,16 @@
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 
 module Names where
 
 import BasicPrelude
-import GHC.Generics            (Generic)
 import Control.DeepSeq         (NFData)
 import Data.Semigroup          (Semigroup)
 import Data.Text               (pack, unpack)
+import GHC.Generics            (Generic)
 import Language.Haskell.Syntax as Syntax
 import TextShow                (TextShow, fromText, showb)
 import Tuples                  (makeTupleName)

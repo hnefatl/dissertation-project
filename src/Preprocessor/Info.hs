@@ -1,15 +1,15 @@
+{-# LANGUAGE DeriveGeneric    #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 module Preprocessor.Info where
 
 import           BasicPrelude
+import           Control.DeepSeq         (NFData)
 import           Control.Monad.Except    (MonadError, throwError)
 import           Data.Foldable           (foldlM)
-import Control.DeepSeq (NFData)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
-import GHC.Generics (Generic)
+import           GHC.Generics            (Generic)
 import           Language.Haskell.Syntax
 import           Names                   (TypeVariableName, convertName)
 import           TextShow                (TextShow, showb)

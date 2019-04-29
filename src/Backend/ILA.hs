@@ -10,10 +10,10 @@
 module Backend.ILA where
 
 import           BasicPrelude                hiding (exp, head)
+import           Control.DeepSeq             (NFData)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
-import           Control.DeepSeq             (NFData)
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
@@ -529,14 +529,14 @@ patToBindings pat@(HsPApp con args) e = do
     -- Make bindings for each variable in the tuple
     bindingType <- case mainBinding of
         NonRec _ r -> getExprType r
-        _ -> throwError "Expected non-recursive main binding"
+        _          -> throwError "Expected non-recursive main binding"
     decomposeBindings <- patToBindingsDecomposeBinding pat v bindingType
     return $ mainBinding:decomposeBindings
 patToBindings pat e = do
     (v, mainBinding) <- patToBindingsMakeTopBinding pat e
     bindingType <- case mainBinding of
         NonRec _ r -> getExprType r
-        _ -> throwError "Expected non-recursive main binding"
+        _          -> throwError "Expected non-recursive main binding"
     decomposeBindings <- patToBindingsDecomposeBinding pat v bindingType
     return $ mainBinding:decomposeBindings
 
@@ -562,7 +562,7 @@ patToBindingsMakeTopBinding pat e = do
     tupleFunTypes <- mapM (T.typeToSyn <=< flip T.makeFun tupleType) (tails boundNameInstantiatedTypes)
     (tupleBaseSynType, tupleAppSynTypes) <- case tupleFunTypes of
         base:args -> return (base, args)
-        _ -> throwError "0-argument tuple"
+        _         -> throwError "0-argument tuple"
     let nullSrcLoc = SrcLoc "" 0 0
         tupleBase = HsExpTypeSig nullSrcLoc tupleCon (HsQualType [] tupleBaseSynType)
         makeAppLayer base (n, argType, appType) = HsExpTypeSig nullSrcLoc (HsApp base var) (HsQualType [] appType)
@@ -705,7 +705,7 @@ makeVarsForCon conName variableType = case T.unmakeApp variableType of
         ds <- gets datatypes
         datatype <- case M.lookup datatypeName ds of
             Nothing -> throwError $ unwords ["Unknown datatype", showt datatypeName, showt (M.keys ds)]
-            Just d -> return d
+            Just d  -> return d
         -- Make a mapping from the placeholder datatype type variables (eg. "a") to the real type variables (eg. "t151")
         let sub = Substitution $ M.fromList $ zip (parameters datatype) typeArgs
         -- Get the arguments for the constructor use we're looking at

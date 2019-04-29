@@ -4,9 +4,9 @@
 module Backend.CodeGen.Converter where
 
 import           BasicPrelude                   hiding (bool, encodeUtf8, head, init, inits, swap)
+import           Control.DeepSeq                (NFData, rnf)
 import           Control.Monad.Except           (Except, ExceptT, runExcept, throwError)
 import           Control.Monad.State.Strict     (MonadState, StateT, get, gets, modify)
-import           Control.DeepSeq                (NFData, rnf)
 import qualified Data.ByteString.Lazy           as B
 import           Data.Functor                   (void, (<&>))
 import qualified Data.Map.Strict                as M

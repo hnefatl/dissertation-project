@@ -5,10 +5,10 @@
 module Compiler where
 
 import           BasicPrelude                      hiding (pred)
+import           Control.DeepSeq                   (NFData, force, rnf)
 import           Control.Exception                 (try)
 import           Control.Monad.Except              (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
                                                     throwError)
-import           Control.DeepSeq                   (NFData, rnf, force)
 import           Data.Default                      (Default, def)
 import qualified Data.Map                          as M
 import qualified Data.Set                          as S
@@ -169,7 +169,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 unreachOpt = makeOptimisation unreachableElim "Unreachable Code" (pure . elimUnreachableCode mainName) flags
             ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
             compiled <- time flags "CodeGen" $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
-            pure $ rnf compiled -- Fully evaluate the compiled class thunks, as we only don't write jars if 
+            pure $ rnf compiled -- Fully evaluate the compiled class thunks, as we only don't write jars if
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
             unless (noWriteJar flags) $ time flags "WriteJar" $ do
                 let classDir = buildDir flags </> package flags

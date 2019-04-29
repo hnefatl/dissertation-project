@@ -1,16 +1,16 @@
+{-# LANGUAGE DeriveGeneric    #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
-{-# LANGUAGE DeriveGeneric    #-}
 
 module Typechecker.Typeclasses where
 
 import           BasicPrelude
+import           Control.DeepSeq          (NFData)
 import           Control.Monad.Except     (MonadError, throwError)
-import Control.DeepSeq (NFData)
-import GHC.Generics (Generic)
 import           Data.Either              (isRight)
 import qualified Data.Map.Strict          as M
 import qualified Data.Set                 as S
+import           GHC.Generics             (Generic)
 import           TextShow                 (TextShow, showb, showt)
 
 import           ExtraDefs

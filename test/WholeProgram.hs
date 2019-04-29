@@ -199,17 +199,17 @@ test = testGroup "Whole Program" $ concatMap makeTest
                 mergesort [x] = [x]
                 mergesort [x, y] = if x < y then [x, y] else [y, x]
                 mergesort zs = let (xs, ys) = split zs in merge (mergesort xs) (mergesort ys)
-                
+
                 split [] = ([], []) :: ([Int], [Int])
                 split [x] = ([x], [])
                 split (x:(y:zs)) = let (xs, ys) = split zs in (x:xs, y:ys)
-                
+
                 merge [] ys = ys
                 merge xs [] = xs
                 merge (x:xs) (y:ys) = if x < y then x:merge xs (y:ys) else y:merge (x:xs) ys
-                
+
                 list = [7,3,5,6,2,10,4,1,8,9] :: [Int]
-                
+
                 main = show (mergesort list)
             |]
         ,

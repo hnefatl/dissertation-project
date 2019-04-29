@@ -9,9 +9,9 @@
 module Typechecker.Types where
 
 import           BasicPrelude               hiding (intercalate)
+import           Control.DeepSeq            (NFData)
 import           Control.Monad.Except       (MonadError, throwError)
 import           Control.Monad.State.Strict (MonadState, evalStateT, gets, modify)
-import           Control.DeepSeq            (NFData)
 import           Data.Foldable              (foldlM, foldrM)
 import           Data.Hashable              (Hashable)
 import qualified Data.Map.Strict            as M

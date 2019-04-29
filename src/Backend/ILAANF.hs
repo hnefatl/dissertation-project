@@ -9,11 +9,11 @@ import           AlphaEq              (AlphaEq, alphaEq')
 import           Backend.ILA          (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILA          as ILA
 import           BasicPrelude
-import           GHC.Generics         (Generic)
+import           Control.DeepSeq      (NFData)
 import           Control.Monad.Except (MonadError, throwError)
-import           Control.DeepSeq             (NFData)
 import qualified Data.Map.Strict      as M
 import           ExtraDefs            (secondM)
+import           GHC.Generics         (Generic)
 import           Logger               (MonadLogger, writeLog)
 import           NameGenerator        (MonadNameGenerator, freshVarName)
 import           Names

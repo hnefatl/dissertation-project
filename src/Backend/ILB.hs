@@ -8,8 +8,8 @@ module Backend.ILB where
 import           Backend.ILA                 (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILAANF              as ANF
 import           BasicPrelude
-import           Control.Monad.Except        (MonadError, throwError)
 import           Control.DeepSeq             (NFData)
+import           Control.Monad.Except        (MonadError, throwError)
 import           Data.Hashable               (Hashable)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
