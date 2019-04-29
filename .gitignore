@@ -1,5 +1,6 @@
 .ghci
 .stack-work/
+.stack-work-profile/
 .vscode/
 hs_err_pid*.log
 compiler.cabal
