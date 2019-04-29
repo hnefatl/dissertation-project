@@ -1,23 +1,26 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 
 module Names where
 
 import BasicPrelude
+import GHC.Generics            (Generic)
+import Control.DeepSeq         (NFData)
 import Data.Semigroup          (Semigroup)
 import Data.Text               (pack, unpack)
 import Language.Haskell.Syntax as Syntax
 import TextShow                (TextShow, fromText, showb)
 import Tuples                  (makeTupleName)
 
-newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
-newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
+newtype VariableName = VariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid, Generic, NFData)
+newtype TypeVariableName = TypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid, Generic, NFData)
 type ClassName = TypeVariableName
 -- Unique variants are only used within the renamer
-newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
-newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid)
+newtype UniqueVariableName = UniqueVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid, Generic, NFData)
+newtype UniqueTypeVariableName = UniqueTypeVariableName Text deriving (Eq, Ord, Hashable, Semigroup, Monoid, Generic, NFData)
 instance TextShow VariableName where
     showb (VariableName s) = fromText s
 instance TextShow TypeVariableName where

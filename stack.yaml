@@ -31,7 +31,7 @@ extra-deps:
 - github: hnefatl/hs-java
   commit: 8a76b63531df6b78d0ad5867e6b384764de2f5ff
 - github: hnefatl/haskell-src
-  commit: 14e8e3227b0555f72a7ab61f153ad2613f3ffda6
+  commit: d25299bc94ac982dd340ec236f34763575e2ba1b
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

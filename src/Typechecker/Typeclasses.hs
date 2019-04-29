@@ -1,10 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
+{-# LANGUAGE DeriveGeneric    #-}
 
 module Typechecker.Typeclasses where
 
 import           BasicPrelude
 import           Control.Monad.Except     (MonadError, throwError)
+import Control.DeepSeq (NFData)
+import GHC.Generics (Generic)
 import           Data.Either              (isRight)
 import qualified Data.Map.Strict          as M
 import qualified Data.Set                 as S
@@ -18,7 +21,8 @@ import           Typechecker.Unifier
 
 -- |A typeclass is described as a set of superclasses and a set of instances
 -- A typeclass superclass is eg. `Eq` in `class Eq a => Ord a`
-data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show)
+data TypeClass = Class (S.Set ClassName) (S.Set ClassInstance) deriving (Eq, Show, Generic)
+instance NFData TypeClass
 instance TextShow TypeClass where
     showb = fromString . show
 

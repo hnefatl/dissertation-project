@@ -46,6 +46,7 @@ dependencies:
 - composition
 - regex-tdfa
 - deepseq
+- timeit
 
 custom-setup:
   dependencies:

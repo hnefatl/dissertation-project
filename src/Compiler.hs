@@ -8,7 +8,7 @@ import           BasicPrelude                      hiding (pred)
 import           Control.Exception                 (try)
 import           Control.Monad.Except              (Except, ExceptT, MonadError, liftEither, runExcept, runExceptT,
                                                     throwError)
-import           Control.DeepSeq                   (rnf)
+import           Control.DeepSeq                   (NFData, rnf, force)
 import           Data.Default                      (Default, def)
 import qualified Data.Map                          as M
 import qualified Data.Set                          as S
@@ -19,6 +19,7 @@ import           System.Directory                  (copyFile, createDirectoryIfM
 import           System.Exit                       (exitFailure)
 import           System.IO.Temp                    (withSystemTempDirectory)
 import           System.Process                    (callProcess, readCreateProcess, shell)
+import           System.TimeIt                     (timeItT)
 import           TextShow                          (showt)
 
 import           ExtraDefs                         (endsWith, inverseMap, pretty, synPrint)
@@ -52,6 +53,7 @@ data Flags = Flags
     , noStdImport     :: Bool
     , noWriteJar      :: Bool
     , dumpTypes       :: Bool
+    , timeStages      :: Bool
     , waitOnStart     :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
@@ -69,6 +71,7 @@ instance Default Flags where
         , noStdImport = False
         , noWriteJar = False
         , dumpTypes = False
+        , timeStages = False
         , waitOnStart = False
         , buildDir = "out"
         , outputJar = "a.jar"
@@ -91,13 +94,22 @@ parseContents contents = case parseModule contents of
 printLogsIfVerbose :: Flags -> [Text] -> IO ()
 printLogsIfVerbose flags = when (verbose flags) . putStrLn . unlines
 
-makeOptimisation :: MonadLogger m => (Flags -> Bool) -> Text -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs]) -> Flags -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs])
+makeOptimisation :: (MonadIO m , MonadLogger m) => (Flags -> Bool) -> Text -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs]) -> Flags -> ([Binding ILB.Rhs] -> m [Binding ILB.Rhs])
 makeOptimisation pred name opt flags prog
     | not (pred flags) = return prog -- Optimisation not enabled
     | otherwise = do
-        prog' <- opt prog
+        prog' <- time flags name $ opt prog
         writeLog $ unlines [name, pretty prog', unlines $ map showt prog', ""]
         return prog'
+
+time :: (NFData a, MonadIO m) => Flags -> Text -> m a -> m a
+time flags name action
+    | timeStages flags = do
+        (duration, ret) <- timeItT (force <$> action)
+        putStrLn $ name <> ": " <> showt (duration * 1000) <> "ms"
+        return ret
+    | otherwise = action
+
 
 compile :: Flags -> FilePath -> IO ()
 compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
@@ -109,12 +121,12 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
     where
         x :: ExceptT Text (LoggerT (NameGeneratorT IO)) ()
         x = do
-            originalModule <- embedExceptIOIntoResult $ parse f
+            originalModule <- time flags "Parser" $ embedExceptIOIntoResult $ parse f
             m <- if noStdImport flags then return originalModule else mergePreludeModule originalModule
-            (renamedModule, topLevelRenames, reverseRenames1) <- embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
+            (renamedModule, topLevelRenames, reverseRenames1) <- time flags "Renamer" $ embedExceptLoggerNGIntoResult $ evalRenamer $ renameModule m
             let kinds = getModuleKinds renamedModule
-            moduleClassInfo <- getClassInfo renamedModule
-            ((taggedModule, types), classEnvironment) <- embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
+            moduleClassInfo <- time flags "ClassInfo" $ getClassInfo renamedModule
+            ((taggedModule, types), classEnvironment) <- time flags "TypeInference" $ embedExceptLoggerNGIntoResult $ evalTypeInferrer $ (,) <$> inferModule kinds moduleClassInfo renamedModule <*> getClassEnvironment
 
             -- Check main has the right type
             mainRenamed <- case M.lookup "main" topLevelRenames of
@@ -128,7 +140,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
 
             writeLog $ unlines ["Tagged module:", synPrint taggedModule]
             (deoverloadResult, deoverloadState) <- embedLoggerNGIntoResult $ runDeoverload (deoverloadModule moduleClassInfo taggedModule) types kinds classEnvironment
-            deoverloadedModule <- liftEither $ runExcept deoverloadResult
+            deoverloadedModule <- time flags "Deoverload" $ liftEither $ runExcept deoverloadResult
             let types' = Deoverloader.types deoverloadState
                 kinds' = Deoverloader.kinds deoverloadState
                 dicts  = Deoverloader.dictionaries deoverloadState
@@ -136,7 +148,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             writeLog $ unlines ["Deoverloaded module:", synPrint deoverloadedModule]
             writeLog $ unlines ["Deoverloaded", synPrint deoverloadedModule]
             deoverloadedTypes <- mapM deoverloadQuantType types'
-            (ila, ilaState) <- embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames reverseRenames1 deoverloadedTypes kinds' dicts dictNames
+            (ila, ilaState) <- time flags "ILA" $ embedExceptLoggerNGIntoResult $ ILA.runConverter (ILA.toIla deoverloadedModule) topLevelRenames reverseRenames1 deoverloadedTypes kinds' dicts dictNames
             let reverseRenames2 = ILA.reverseRenamings ilaState
                 reverseRenames = combineReverseRenamings reverseRenames2 reverseRenames1
             when (dumpTypes flags) $ forM_ (M.toList topLevelRenames) $ \(origName, renamed) ->
@@ -147,19 +159,19 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 Nothing -> throwError "No main symbol found."
                 Just n  -> return n
             writeLog $ unlines ["ILA", pretty ila, unlines $ map showt ila, ""]
-            ilaanf <- ILAANF.ilaToAnf ila
+            ilaanf <- time flags "ILAANF" $ ILAANF.ilaToAnf ila
             writeLog $ unlines ["ILAANF", pretty ilaanf, unlines $ map showt ilaanf, ""]
-            ilb <- embedExceptIntoResult $ ILB.anfToIlb ilaanf
+            ilb <- time flags "ILB" $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
             -- Optimisations
             let letLiftOpt = makeOptimisation letLift "Let-lifting" performLetLift flags
                 dedupeOpt = makeOptimisation dedupe "Dedupe" doDedupe flags
                 unreachOpt = makeOptimisation unreachableElim "Unreachable Code" (pure . elimUnreachableCode mainName) flags
             ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
-            compiled <- CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            compiled <- time flags "CodeGen" $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             pure $ rnf compiled -- Fully evaluate the compiled class thunks, as we only don't write jars if 
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
-            unless (noWriteJar flags) $ do
+            unless (noWriteJar flags) $ time flags "WriteJar" $ do
                 let classDir = buildDir flags </> package flags
                 lift $ lift $ lift $ liftIO $ createDirectoryIfMissing True classDir
                 lift $ lift $ lift $ mapM_ (liftIO . CodeGen.writeClass classDir) compiled

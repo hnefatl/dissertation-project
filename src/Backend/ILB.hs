@@ -9,6 +9,7 @@ import           Backend.ILA                 (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILAANF              as ANF
 import           BasicPrelude
 import           Control.Monad.Except        (MonadError, throwError)
+import           Control.DeepSeq             (NFData)
 import           Data.Hashable               (Hashable)
 import qualified Data.Map.Strict             as M
 import qualified Data.Set                    as S
@@ -27,6 +28,7 @@ import           Typechecker.Types           (Type)
 data Arg = ArgLit Literal
          | ArgVar VariableName
     deriving (Eq, Ord, Generic)
+instance NFData Arg
 instance Hashable Arg
 data Exp = ExpLit Literal
          | ExpVar VariableName
@@ -35,9 +37,11 @@ data Exp = ExpLit Literal
          | ExpCase Exp Type [VariableName] [Alt Exp] -- Scrutinee, variables the scrutinee's assigned to, alts
          | ExpLet VariableName Rhs Exp
     deriving (Eq, Ord, Generic)
+instance NFData Exp
 instance Hashable Exp
 data Rhs = RhsClosure [VariableName] Exp -- Thunks: if it has arguments, it's a function; otherwise it's a thunk.
     deriving (Eq, Ord, Generic)
+instance NFData Rhs
 instance Hashable Rhs
 
 instance TextShow Arg where

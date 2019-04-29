@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds        #-}
+{-# LANGUAGE DeriveGeneric    #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase       #-}
 
@@ -8,7 +9,9 @@ import           AlphaEq              (AlphaEq, alphaEq')
 import           Backend.ILA          (Alt(..), Binding(..), Literal(..))
 import qualified Backend.ILA          as ILA
 import           BasicPrelude
+import           GHC.Generics         (Generic)
 import           Control.Monad.Except (MonadError, throwError)
+import           Control.DeepSeq             (NFData)
 import qualified Data.Map.Strict      as M
 import           ExtraDefs            (secondM)
 import           Logger               (MonadLogger, writeLog)
@@ -24,11 +27,13 @@ data AnfTrivial = Var VariableName Type
                 | Con VariableName Type
                 | Lit Literal Type
                 | Type Type
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance NFData AnfTrivial
 -- |Applications of terms: specifically split out to ensure we only ever apply trivial arguments
 data AnfApplication = App AnfApplication AnfTrivial
                     | TrivApp AnfTrivial
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance NFData AnfApplication
 -- |Complex ANF expressions are the bread-and-butter: let expressions, case expressions.
 -- Like GHC's STG, in ILA-ANF Case expressions are the only points of *evaluation*, and Let expressions are points of
 -- *allocation* (but not the only points of allocation).
@@ -36,10 +41,12 @@ data AnfComplex = Let VariableName Type AnfRhs AnfComplex
                 | Case AnfComplex Type [VariableName] [Alt AnfComplex]
                 | CompApp AnfApplication
                 | Trivial AnfTrivial
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance NFData AnfComplex
 data AnfRhs = Lam VariableName Type AnfRhs -- Lambdas are only allowed at top-level RHSs
             | Complex AnfComplex
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Generic)
+instance NFData AnfRhs
 instance TextShow AnfTrivial where
     showb (Var v t) = showb v <> " :: " <> showb t
     showb (Con c t) = showb c <> " ;; " <> showb t

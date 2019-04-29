@@ -11,6 +11,7 @@ module Typechecker.Types where
 import           BasicPrelude               hiding (intercalate)
 import           Control.Monad.Except       (MonadError, throwError)
 import           Control.Monad.State.Strict (MonadState, evalStateT, gets, modify)
+import           Control.DeepSeq            (NFData)
 import           Data.Foldable              (foldlM, foldrM)
 import           Data.Hashable              (Hashable)
 import qualified Data.Map.Strict            as M
@@ -28,10 +29,13 @@ import           Tuples                     (makeTupleName)
 -- |A kind is the "type of a type": either `*` or `Kind -> Kind`
 -- Int has kind *, Maybe has kind * -> *, Either has kind * -> * -> *
 data Kind = KindStar | KindFun !Kind !Kind deriving (Eq, Ord, Show, Generic)
+instance NFData Kind
 instance Hashable Kind
 
 data TypeVariable = TypeVariable !TypeVariableName !Kind deriving (Eq, Ord, Show, Generic)
 data TypeConstant = TypeConstant !TypeVariableName !Kind deriving (Eq, Ord, Show, Generic)
+instance NFData TypeVariable
+instance NFData TypeConstant
 instance Hashable TypeVariable
 instance Hashable TypeConstant
 
@@ -42,6 +46,7 @@ data Type = TypeVar !TypeVariable
           | TypeCon !TypeConstant
           | TypeApp !Type !Type !Kind
     deriving (Eq, Ord, Show, Generic)
+instance NFData Type
 instance Hashable Type
 
 -- |Type-level function application, as in `Maybe` applied to `Int` gives `Maybe Int`.
@@ -71,19 +76,22 @@ unmakeKindFun KindStar = throwError "unmakeKindFun given KindStar"
 -- |A type predicate, eg. `Ord a` becomes `IsInstance "Ord" (TypeDummy "a" KindStar)`
 -- Used in quite a few places: as constraints on types and in class/instance declarations, eg.
 -- `foo :: Ord a => a`, `class Eq a => Ord a`, `instance Eq Int`, `instance Eq a => Eq [a]`, ...
-data TypePredicate = IsInstance !ClassName !Type deriving (Eq, Ord, Show)
+data TypePredicate = IsInstance !ClassName !Type deriving (Eq, Ord, Show, Generic)
+instance NFData TypePredicate
 
 -- |A qualified thing: anywhere we can use `=>` is a qualified type, eg. `Eq a => Eq [a]` is a `Qualified
 -- UninstantiatedType (TypePredicate UninstantiatedType)`, and `Eq a => a -> a -> a` is a `Qualified UninstantiatedType
 -- UninstantiatedType`.
-data Qualified a = Qualified !(S.Set TypePredicate) !a deriving (Eq, Ord, Show)
+data Qualified a = Qualified !(S.Set TypePredicate) !a deriving (Eq, Ord, Show, Generic)
+instance NFData a => NFData (Qualified a)
 -- |Some common applications of Qualified
 type QualifiedType = Qualified Type
 -- |A typeclass instance is eg. `instance Ord a => Ord [a]` or `instance Ord Int`.
 type ClassInstance = Qualified TypePredicate
 
 -- |A forall-quantified type: eg. `forall a. Ord a => a -> a -> Bool`
-data Quantified a = Quantified !(S.Set TypeVariable) !a deriving (Eq, Ord, Show)
+data Quantified a = Quantified !(S.Set TypeVariable) !a deriving (Eq, Ord, Show, Generic)
+instance NFData a => NFData (Quantified a)
 type QuantifiedType = Quantified QualifiedType
 type QuantifiedSimpleType = Quantified Type
 

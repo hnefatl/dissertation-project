@@ -13,6 +13,7 @@ import           BasicPrelude                hiding (exp, head)
 import           Control.Monad.Except        (ExceptT, MonadError, throwError)
 import           Control.Monad.Reader        (MonadReader, ReaderT, asks, local, runReaderT)
 import           Control.Monad.State.Strict  (MonadState, StateT, gets, modify, runStateT)
+import           Control.DeepSeq             (NFData)
 import           Data.Default                (Default)
 import qualified Data.Default                as Default (def)
 import           Data.Foldable               (foldrM)
@@ -48,14 +49,16 @@ import qualified Typechecker.Types           as T
 -- |Datatypes are parameterised by their type name (eg. `Maybe`), a list of parametrised type variables (eg. `a`) and a
 -- list of branches. Each branch is a branch name (eg. `Just` and a list of types). `data Maybe a = Nothing | Just a` is
 -- `Datatype "Maybe" ["a"] [("Nothing", []), ("Just", ["a"])]`
-data Strictness = Strict | NonStrict deriving (Eq, Ord, Show)
+data Strictness = Strict | NonStrict deriving (Eq, Ord, Show, Generic)
+instance NFData Strictness
 instance TextShow Strictness where
     showb = fromString . show
 data Datatype = Datatype
     { typeName   :: TypeVariableName
     , parameters :: [TypeVariableName]
     , branches   :: M.Map VariableName [(Type, Strictness)] }
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance NFData Datatype
 instance TextShow Datatype where
     showb = fromString . show
 
@@ -75,6 +78,7 @@ instance TextShow Typeclass where
 data Literal = LiteralInt Integer
              | LiteralChar Char
     deriving (Eq, Ord, Show, Generic)
+instance NFData Literal
 instance Hashable Literal
 instance TextShow Literal where
     showb (LiteralInt i)  = showb i
@@ -86,6 +90,7 @@ instance TextShow Literal where
 -- and checked subsequently, as the alternatives can only contain variable names.
 data Alt a = Alt AltConstructor a
     deriving (Eq, Ord, Show, Generic)
+instance NFData a => NFData (Alt a)
 instance Hashable a => Hashable (Alt a)
 instance TextShow a => TextShow (Alt a) where
     showb (Alt con e) = showb con <> " -> " <> showb e
@@ -97,6 +102,7 @@ getConstructorVariables _              = []
 -- |A constructor that can be used in an alternative statement
 data AltConstructor = DataCon VariableName [VariableName] | Default
     deriving (Eq, Ord, Show, Generic)
+instance NFData AltConstructor
 instance Hashable AltConstructor
 instance TextShow AltConstructor where
     showb (DataCon n vs) = showb n <> (if null vs then "" else " " <> args)
@@ -112,6 +118,7 @@ isDataAlt _                 = False
 -- |A recursive/nonrecursive binding of a Core expression to a name.
 data Binding a = NonRec VariableName a | Rec (M.Map VariableName a)
     deriving (Eq, Ord, Show, Generic)
+instance NFData a => NFData (Binding a)
 instance Hashable a => Hashable (Binding a) where
     hashWithSalt i (NonRec v x) = hashWithSalt i (v, x)
     hashWithSalt i (Rec m)      = hashWithSalt i (M.toAscList m)
@@ -134,7 +141,8 @@ data Expr = Var VariableName Type -- Variable/function
           | Let VariableName Type Expr Expr
           | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to e.
           | Type Type
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Generic)
+instance NFData Expr
 instance TextShow Expr where
     showb (Var n t) = showb n <> " :: " <> showb t
     showb (Con n t) = showb n <> " ;; " <> showb t
@@ -176,12 +184,13 @@ data ConverterState = ConverterState
     { datatypes        :: M.Map TypeVariableName Datatype
     , kinds            :: M.Map TypeVariableName Kind
     , reverseRenamings :: M.Map VariableName VariableName}
-    deriving (Eq, Show)
+    deriving (Eq, Show, Generic)
 instance Default ConverterState where
     def = ConverterState
         { datatypes = M.empty
         , kinds = M.empty
         , reverseRenamings = M.empty }
+instance NFData ConverterState
 instance TextShow ConverterState where
     showb = fromString . show
 

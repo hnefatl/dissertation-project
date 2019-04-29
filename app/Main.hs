@@ -59,6 +59,10 @@ parseFlags = Flags
        <> help "Display all types after compiling"
        <> showDefault)
     <*> switch
+        ( long "time-stages"
+       <> help "Output the time taken to perform each stage of the compiler"
+       <> showDefault)
+    <*> switch
         ( long "wait-on-start"
        <> help "Wait for enter to be pressed before beginning execution. Useful for profiling"
        <> showDefault)

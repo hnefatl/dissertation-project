@@ -1,12 +1,15 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Preprocessor.Info where
 
 import           BasicPrelude
 import           Control.Monad.Except    (MonadError, throwError)
 import           Data.Foldable           (foldlM)
+import Control.DeepSeq (NFData)
 import qualified Data.Map.Strict         as M
 import qualified Data.Set                as S
+import GHC.Generics (Generic)
 import           Language.Haskell.Syntax
 import           Names                   (TypeVariableName, convertName)
 import           TextShow                (TextShow, showb)
@@ -15,7 +18,8 @@ import           Typechecker.Types       (Kind(..), unmakeSynApp)
 data ClassInfo = ClassInfo
     { methods      :: M.Map HsName HsQualType
     , argVariables :: [(HsName, Kind)] }
-    deriving (Eq, Show)
+    deriving (Eq, Show, Generic)
+instance NFData ClassInfo
 instance TextShow ClassInfo where
     showb = fromString . show
 
