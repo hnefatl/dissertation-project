@@ -10,3 +10,4 @@ hoogle.log
 out/
 **/*.jar
 **/__pycache__
+*.prof
