@@ -73,7 +73,7 @@ anfComplexToIlbExp ::  MonadError Text m => ANF.AnfComplex -> m Exp
 anfComplexToIlbExp (ANF.Let v _ r b)  = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
 anfComplexToIlbExp (ANF.Case s t bs as) = ExpCase <$> anfComplexToIlbExp s <*> pure t <*> pure bs <*> mapM anfAltToIlbAlt as
 anfComplexToIlbExp (ANF.CompApp a)    = anfComplexToIlbApp a
-anfComplexToIlbExp (ANF.Trivial t)    = maybe (throwError "Unexpected type in expression") return (anfTrivialToExp t)
+anfComplexToIlbExp (ANF.Trivial t)    = return $ anfTrivialToExp t
 
 anfComplexToIlbApp :: MonadError Text m => ANF.AnfApplication -> m Exp
 anfComplexToIlbApp (ANF.TrivApp a) = case a of
@@ -90,13 +90,11 @@ anfTrivialToArg :: ANF.AnfTrivial -> Maybe Arg
 anfTrivialToArg (ANF.Var v _) = Just $ ArgVar v
 anfTrivialToArg ANF.Con{}     = Nothing
 anfTrivialToArg (ANF.Lit l _) = Just $ ArgLit l
-anfTrivialToArg ANF.Type{}    = Nothing
 
-anfTrivialToExp :: ANF.AnfTrivial -> Maybe Exp
-anfTrivialToExp (ANF.Var v _) = Just $ ExpVar v
-anfTrivialToExp (ANF.Con n _) = Just $ ExpConApp n []
-anfTrivialToExp (ANF.Lit l _) = Just $ ExpLit l
-anfTrivialToExp ANF.Type{}    = Nothing
+anfTrivialToExp :: ANF.AnfTrivial -> Exp
+anfTrivialToExp (ANF.Var v _) = ExpVar v
+anfTrivialToExp (ANF.Con n _) = ExpConApp n []
+anfTrivialToExp (ANF.Lit l _) = ExpLit l
 
 anfAltToIlbAlt :: MonadError Text m => Alt ANF.AnfComplex -> m (Alt Exp)
 anfAltToIlbAlt (Alt c e) = Alt c <$> anfComplexToIlbExp e

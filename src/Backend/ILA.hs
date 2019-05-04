@@ -140,7 +140,6 @@ data Expr = Var VariableName Type -- Variable/function
           | Lam VariableName Type Expr -- Abstraction of terms or types
           | Let VariableName Type Expr Expr
           | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to e.
-          | Type Type
     deriving (Eq, Ord, Show, Generic)
 instance NFData Expr
 instance TextShow Expr where
@@ -152,7 +151,6 @@ instance TextShow Expr where
     showb (Let v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
     showb (Case s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }"
         where cases = mconcat $ intersperse " ; " $ map showb as
-    showb (Type t) = "Type " <> showb t
 
 getExprType :: MonadError Text m => Expr -> m Type
 getExprType (Var _ t)              = return t
@@ -163,7 +161,6 @@ getExprType (Lam _ t e)            = T.makeFun [t] =<< getExprType e
 getExprType (Let _ _ _ e)          = getExprType e
 getExprType (Case _ _ [])          = throwError "No alts in case"
 getExprType (Case _ _ (Alt _ e:_)) = getExprType e
-getExprType (Type t)               = return t
 
 data ConverterReadableState = ConverterReadableState
     { types           :: M.Map VariableName QuantifiedSimpleType
@@ -744,7 +741,6 @@ instance Substitutable VariableName VariableName Expr where
     applySub sub (Lam v t e)              = Lam v t (applySub sub e)
     applySub sub (Let v t e b)            = Let v t (applySub sub e) (applySub sub b)
     applySub sub (Case e vs as)           = Case (applySub sub e) vs (applySub sub as)
-    applySub _ t@Type{}                   = t
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)
 instance Substitutable VariableName VariableName AltConstructor where
@@ -779,5 +775,4 @@ instance AlphaEq Expr where
         alphaEq' e1a e2a
         alphaEq' e1b e2b
     alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
-    alphaEq' (Type t1) (Type t2) = alphaEq' t1 t2
     alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]

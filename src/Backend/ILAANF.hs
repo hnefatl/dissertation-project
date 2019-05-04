@@ -26,7 +26,6 @@ import qualified Typechecker.Types    as T
 data AnfTrivial = Var VariableName Type
                 | Con VariableName Type
                 | Lit Literal Type
-                | Type Type
     deriving (Eq, Ord, Generic)
 instance NFData AnfTrivial
 -- |Applications of terms: specifically split out to ensure we only ever apply trivial arguments
@@ -51,7 +50,6 @@ instance TextShow AnfTrivial where
     showb (Var v t) = showb v <> " :: " <> showb t
     showb (Con c t) = showb c <> " ;; " <> showb t
     showb (Lit l t) = showb l <> " :: " <> showb t
-    showb (Type t)  = showb t
 instance TextShow AnfApplication where
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (TrivApp e) = showb e
@@ -70,7 +68,6 @@ getAnfTrivialType :: MonadError Text m => AnfTrivial -> m Type
 getAnfTrivialType (Var _ t) = return t
 getAnfTrivialType (Con _ t) = return t
 getAnfTrivialType (Lit _ t) = return t
-getAnfTrivialType (Type t)  = return t
 getAnfAppType :: (MonadError Text m, MonadLogger m) => AnfApplication -> m Type
 getAnfAppType (TrivApp e) = getAnfTrivialType e
 getAnfAppType (App e1 e2) = do
@@ -100,14 +97,12 @@ ilaExpToTrivial :: MonadError Text m => ILA.Expr -> m AnfTrivial
 ilaExpToTrivial (ILA.Var v t) = return $ Var v t
 ilaExpToTrivial (ILA.Con v t) = return $ Con v t
 ilaExpToTrivial (ILA.Lit l t) = return $ Lit l t
-ilaExpToTrivial (ILA.Type t)  = return $ Type t
 ilaExpToTrivial e             = throwError $ "Non-trivial ILA to be converted to an ILA-ANF trivial: " <> showt e
 
 ilaExpIsTrivial :: ILA.Expr -> Bool
 ilaExpIsTrivial ILA.Var{}  = True
 ilaExpIsTrivial ILA.Con{}  = True
 ilaExpIsTrivial ILA.Lit{}  = True
-ilaExpIsTrivial ILA.Type{} = True
 ilaExpIsTrivial _          = False
 
 ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
@@ -131,7 +126,6 @@ ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => I
 ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.Con{}        = ilaExpToApp e
 ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Type{}       = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
 ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
 ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
@@ -161,7 +155,6 @@ instance AlphaEq AnfTrivial where
     alphaEq' (Var n1 t1) (Var n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (Con n1 t1) (Con n2 t2) = alphaEq' n1 n2 >> alphaEq' t1 t2
     alphaEq' (Lit l1 t1) (Lit l2 t2) = alphaEq' l1 l2 >> alphaEq' t1 t2
-    alphaEq' (Type t1) (Type t2)     = alphaEq' t1 t2
     alphaEq' e1 e2                   = throwError $ unlines [ "AnfTrivial mismatch:", showt e1, "vs", showt e2 ]
 instance AlphaEq AnfApplication where
     alphaEq' (App e1a e1b) (App e2a e2b) = alphaEq' e1a e2a >> alphaEq' e1b e2b
