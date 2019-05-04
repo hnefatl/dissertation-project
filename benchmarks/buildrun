@@ -1,0 +1,7 @@
+#!/bin/bash
+
+cd ..
+stack build || exit 1
+stack install || exit 2
+cd benchmarks
+./runbenchmarks.py "$@"

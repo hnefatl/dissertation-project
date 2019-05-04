@@ -312,15 +312,16 @@ def executable_profile(subplot=True):
     for plot_num, (benchmark, result_path) in enumerate(results.items()):
         if subplot:
             ax = axes[plot_num // 3][plot_num % 3]
+            ax.set_title("\\texttt{" + benchmark + "}")
         else:
             fig, ax = plt.subplots(figsize=(9, 4.5))
-            # plt.subplots_adjust(left=0.2)
+            ax.set_title("Inner time of runtime functions during \\texttt{" + benchmark + "}")
 
         tree = ET.parse(result_path)
 
         results = []
         for row in tree.getroot().find("TableData").find("TableBody").findall("TableRow"):
-            label = "\\texttt{" + row[0].text.replace("tmp.", "") + "}\nInvocations: " + row[4].text
+            label = "\\texttt{" + row[0].text.replace("tmp.", "") + "}\nInvocations: " + "{:,}".format(int(row[4].text))
             results.append((label, float(row[1].text.strip("%")) / 100))
 
         results.sort(key=lambda r: r[1], reverse=True)
@@ -333,7 +334,7 @@ def executable_profile(subplot=True):
         labels.append("Other")
         percentages.append(1 - sum(percentages))
 
-        ax.pie(x=percentages, labels=texprep(labels))
+        ax.pie(x=percentages, labels=texprep(labels), autopct='{%.2f}\\%%')
         plt.tight_layout()
         if not subplot:
             render_fig("perf_profile_{}.pdf".format(benchmark).lower())
