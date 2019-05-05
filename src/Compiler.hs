@@ -164,9 +164,9 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
             ilb <- time flags "ILB" $ embedExceptIntoResult $ ILB.anfToIlb ilaanf
             writeLog $ unlines ["ILB", pretty ilb, unlines $ map showt ilb, ""]
             -- Optimisations
-            let letLiftOpt = makeOptimisation letLift "Let-lifting" performLetLift flags
+            let letLiftOpt = makeOptimisation letLift "LetLift" performLetLift flags
                 dedupeOpt = makeOptimisation dedupe "Dedupe" doDedupe flags
-                unreachOpt = makeOptimisation unreachableElim "Unreachable Code" (pure . elimUnreachableCode mainName) flags
+                unreachOpt = makeOptimisation unreachableElim "UnreachableCode" (pure . elimUnreachableCode mainName) flags
             ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
             compiled <- time flags "CodeGen" $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             pure $ rnf compiled -- Fully evaluate the compiled class thunks, as we only don't write jars if
