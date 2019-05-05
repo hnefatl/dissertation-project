@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import re
 import string
 import pathlib
 import timeit
@@ -27,16 +28,22 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         self._run_jhaskell_compiler()
 
     def _post_compile(self):
-        classes = map(
-            lambda s: f"{self._package_name}/{s}.class", ["Output", "Data", "Function", "BoxedData", "HeapObject"]
+        self._results["size"] = jmhbenchmark.get_jar_entry_size(
+            self._output_jar,
+            [
+                f"{self._package_name}/{s}.class"
+                for s in [self._class_name, "Data", "Function", "BoxedData", "HeapObject"]
+            ],
         )
-        self._results["size"] = jmhbenchmark.get_jar_entry_size(self._output_jar, classes)
         return super()._post_compile()
 
     def _get_classpath(self):
         return [f"{self._name}.jar"]
 
-    def _run_jhaskell_compiler(self):
+    def _run_jhaskell_compiler(self, extra_args=None):
+        if extra_args is None:
+            extra_args = []
+
         original_dir = pathlib.Path.cwd()
         # Build the source program
         args = (
@@ -52,24 +59,39 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
                 str(original_dir.parent / "runtime"),
             ]
             + self._compiler_args
+            + extra_args
             + [f"programs/{self._package_name}.hs"]
         )
         try:
-            subprocess.check_output(args)
+            return subprocess.check_output(args)
         except subprocess.CalledProcessError as e:
             print(e.stdout.decode())
             raise
 
-    # For JHaskell, time both writing jar and without
+    # For JHaskell, time for each stage of the compiler
     def _benchmark_compilation(self, iterations=50):
-        # Time with writing the jar
-        original_args = self._compiler_args.copy()
         number = 1
-        times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
-        self._results["times"] = [1000 * t / number for t in times]
-        # Time without writing the jar
-        self._compiler_args.append("-j")
-        times = timeit.repeat(stmt=self._compile, setup=self._pre_compile, number=number, repeat=iterations)
-        self._results["times_no_jar"] = [1000 * t / number for t in times]
-        # Reset args
-        self._compiler_args = original_args
+
+        # Record the output of each invocation
+        outputs = []
+
+        def bench_func():
+            outputs.append(self._run_jhaskell_compiler(["--time-stages"]).decode())
+
+        overall_times = timeit.repeat(stmt=bench_func, setup=self._pre_compile, number=number, repeat=iterations)
+
+        time_data = []
+        data_extractor = re.compile(r"(.+): (.+)ms")
+        for output, overall_time in zip(outputs, overall_times):
+            cumulative_time = 0
+            this_run_data = []
+            for line in output.splitlines():
+                match = data_extractor.fullmatch(line)
+                if match is None:
+                    raise RuntimeError("Invalid line from compiler: " + line)
+                this_time = float(match.group(2))
+                this_run_data.append((match.group(1), this_time))
+                cumulative_time += this_time
+            this_run_data.append(("Other", overall_time * 1000 - cumulative_time))
+            time_data.append(this_run_data)
+        self._results["times"] = time_data

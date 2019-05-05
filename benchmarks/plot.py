@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import re
 import numpy as np
@@ -180,8 +181,31 @@ def executable_size_by_compiler(subplot=True):
 
 
 def compilation_time_by_compiler(subplot=True):
-    benchmarks = sorted(list(benches.keys()))
+    # benchmarks = sorted(list(benches.keys()))
+    benchmarks = ["factorial"]
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+    layer_colours = {}
+    layer_colours[None] = "grey"
+    stages = [
+        "Parser",
+        "Renamer",
+        "ClassInfo",
+        "TypeInference",
+        "Deoverload",
+        "ILA",
+        "ILAANF",
+        "ILB",
+        "Unreachable Code",
+        "Let-lifting",
+        "Dedupe",
+        "CodeGen",
+        "WriteJar",
+        "Other",
+    ]
+    cmap = plt.cm.get_cmap("tab20")
+    for i, stage in enumerate(stages):
+        layer_colours[stage] = cmap(i)
+    used_layers = set()
 
     if subplot:
         fig, axes = plt.subplots(2, 3)
@@ -189,46 +213,51 @@ def compilation_time_by_compiler(subplot=True):
     for plot_num, benchmark in enumerate(benchmarks):
         if subplot:
             ax = axes[plot_num // 3][plot_num % 3]
+            ax.set_title("\\texttt{" + benchmark + "}")
         else:
             fig, ax = plt.subplots()
+            ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
             ax.set_ylabel("Compilation time (ms)")
 
-        times = []
-        bottoms = []
-        top_colours = []
-        bottom_colours = []
+        layers = collections.defaultdict(dict)
         for impl in impls:
             result = results[benchmark][impl]
             if impl in {"Mine", "Mine (opt)"}:
-                # We have timing information for with/without disk writes
-                # Pick the pair of entries with minimum sum time. Don't take min of each list as then we might get times
-                # from different runs
-                time, bottom = min(zip(result["times_no_jar"], result["times"]), key=lambda x: x[0] + x[1])
-                times.append(time)
-                bottoms.append(bottom)
-                top_colours.append(DARKGREY)
-                bottom_colours.append(GREY)
+                # We have timing information for all stages of the compiler
+                # Take the entry with the lowest overall time (lowest time in the final stage)
+                layer_times = min(result["times"], key=lambda run: run[:-1][1])
+                cumulative_time = 0
+                for i, (layer_name, layer_time) in enumerate(layer_times):
+                    cumulative_time += layer_time
+                    layers[i][impl] = (layer_name, cumulative_time)
             else:
-                times.append(min(result["times"]))
-                bottoms.append(0)
-                top_colours.append(GREY)
-                bottom_colours.append(DARKGREY)
+                # Only set the first layer
+                layers[0][impl] = (None, min(result["times"]))
 
-        if subplot:
-            ax.set_title("\\texttt{" + benchmark + "}")
-        else:
-            ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
-        ax.bar(x=impls, height=times, bottom=bottoms, color=top_colours)
-        ax.bar(x=impls, height=bottoms, color=bottom_colours)
+        # Paint the layers of the bars top-to-bottom so we paint over higher bars
+        for layer_num in sorted(layers.keys(), reverse=True):
+            layer = layers[layer_num]
+            times = []
+            colours = []
+            for impl in impls:
+                layer_name, layer_time = layer.get(impl, (None, 0))
+                if layer_name is not None:
+                    used_layers.add(layer_name)
+                colours.append(layer_colours[layer_name])
+                times.append(layer_time)
+            ax.bar(x=impls, height=times, color=colours)
+
         ax.tick_params(axis="x", rotation=40)
         ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
+            plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers])
+            used_layers = set()
             ax.set_ylabel("Compilation time (ms)")
-            render_fig("compiler_perf_{}.pdf".format(benchmark).lower())
+            render_fig("compiler_perf_{}.pdf".format(benchmark).lower(), save=False)
             plt.close(fig)
     if subplot:
-        render_fig("compiler_perf.pdf")
+        render_fig("compiler_perf.pdf", save=False)
         plt.close(fig)
 
 
@@ -334,7 +363,7 @@ def executable_profile(subplot=True):
         labels.append("Other")
         percentages.append(1 - sum(percentages))
 
-        ax.pie(x=percentages, labels=texprep(labels), autopct='{%.2f}\\%%')
+        ax.pie(x=percentages, labels=texprep(labels), autopct="{%.2f}\\%%")
         plt.tight_layout()
         if not subplot:
             render_fig("perf_profile_{}.pdf".format(benchmark).lower())
@@ -345,8 +374,9 @@ def executable_profile(subplot=True):
 
 
 for subplot in [True, False]:
-    perf_by_compiler(subplot)
-    executable_size_by_compiler(subplot)
+    # perf_by_compiler(subplot)
+    # executable_size_by_compiler(subplot)
     compilation_time_by_compiler(subplot)
-    optimisation_impact(subplot)
-    executable_profile(subplot)
+    # optimisation_impact(subplot)
+    # executable_profile(subplot)
+

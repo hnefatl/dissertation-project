@@ -95,7 +95,7 @@ def get_jar_entry_size(jar_path, entry_names):
         original_dir = pathlib.Path.cwd()
         # Extract the java 8 runtime files
         os.chdir(temp_dir)
-        args = ["jar", "xf", jar_path] + entry_names
+        args = ["jar", "xf", str(jar_path)] + entry_names
         try:
             subprocess.check_output(args, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -103,10 +103,9 @@ def get_jar_entry_size(jar_path, entry_names):
             raise
         finally:
             os.chdir(original_dir)
-        
+
         return sum(
             os.path.getsize(pathlib.Path(p) / f)
-            for extracted_entry in entry_names
-            for p, _, fs in os.walk(pathlib.Path(temp_dir) / extracted_entry)
+            for p, _, fs in os.walk(str(pathlib.Path(temp_dir)))
             for f in fs
         )
