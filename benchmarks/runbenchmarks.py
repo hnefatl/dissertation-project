@@ -57,6 +57,9 @@ if args.list_benchmarks:
 to_run = [b for b in benchmarks.keys() if any(re.fullmatch(pat, b) for pat in args.patterns)]
 
 for bench_name in to_run:
-    with benchmarks[bench_name] as benchmark:
-        print(benchmark.description)
-        benchmark.execute()
+    try:
+        with benchmarks[bench_name] as benchmark:
+            print(benchmark.description)
+            benchmark.execute()
+    except Exception as e:
+        print(e)

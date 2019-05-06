@@ -39,6 +39,7 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
         args = (
             [
                 "java",
+                "-Xss1024m",  # 1GB of stack space
                 "-jar",
                 str(self._frege_jar_path),
                 # Build dir
@@ -55,4 +56,4 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
             raise
 
     def _get_frege_runtime_size(self):
-        return jmhbenchmark.get_jar_entry_size(self._frege_jar_path, runtime_path)
+        return jmhbenchmark.get_jar_entry_size(self._frege_jar_path, "frege/run8")

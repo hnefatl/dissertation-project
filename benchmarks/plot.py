@@ -181,8 +181,8 @@ def executable_size_by_compiler(subplot=True):
 
 
 def compilation_time_by_compiler(subplot=True):
-    # benchmarks = sorted(list(benches.keys()))
-    benchmarks = ["factorial"]
+    benchmarks = sorted(list(benches.keys()))
+    # benchmarks = ["factorial"]
     impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
     layer_colours = {}
     layer_colours[None] = "grey"
@@ -195,8 +195,8 @@ def compilation_time_by_compiler(subplot=True):
         "ILA",
         "ILAANF",
         "ILB",
-        "Unreachable Code",
-        "Let-lifting",
+        "UnreachableCode",
+        "LetLift",
         "Dedupe",
         "CodeGen",
         "WriteJar",
@@ -254,10 +254,10 @@ def compilation_time_by_compiler(subplot=True):
             plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers])
             used_layers = set()
             ax.set_ylabel("Compilation time (ms)")
-            render_fig("compiler_perf_{}.pdf".format(benchmark).lower(), save=False)
+            render_fig("compiler_perf_{}.pdf".format(benchmark).lower())
             plt.close(fig)
     if subplot:
-        render_fig("compiler_perf.pdf", save=False)
+        render_fig("compiler_perf.pdf")
         plt.close(fig)
 
 
@@ -374,9 +374,9 @@ def executable_profile(subplot=True):
 
 
 for subplot in [True, False]:
-    # perf_by_compiler(subplot)
-    # executable_size_by_compiler(subplot)
+    perf_by_compiler(subplot)
+    executable_size_by_compiler(subplot)
     compilation_time_by_compiler(subplot)
-    # optimisation_impact(subplot)
-    # executable_profile(subplot)
+    optimisation_impact(subplot)
+    executable_profile(subplot)
 
