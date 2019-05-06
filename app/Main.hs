@@ -66,6 +66,10 @@ parseFlags = Flags
         ( long "wait-on-start"
        <> help "Wait for enter to be pressed before beginning execution. Useful for profiling"
        <> showDefault)
+    <*> switch
+        ( long "no-print"
+       <> help "Don't print the result of running the program after execution"
+       <> showDefault)
     <*> strOption
         ( long "build-dir"
        <> short 'd'

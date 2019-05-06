@@ -55,6 +55,7 @@ data Flags = Flags
     , dumpTypes       :: Bool
     , timeStages      :: Bool
     , waitOnStart     :: Bool
+    , noPrint         :: Bool
     , buildDir        :: FilePath
     , outputJar       :: FilePath
     , outputClassName :: FilePath
@@ -73,6 +74,7 @@ instance Default Flags where
         , dumpTypes = False
         , timeStages = False
         , waitOnStart = False
+        , noPrint = False
         , buildDir = "out"
         , outputJar = "a.jar"
         , outputClassName = "Output"
@@ -168,7 +170,7 @@ compile flags f = evalNameGeneratorT (runLoggerT $ runExceptT x) 0 >>= \case
                 dedupeOpt = makeOptimisation dedupe "Dedupe" doDedupe flags
                 unreachOpt = makeOptimisation unreachableElim "UnreachableCode" (pure . elimUnreachableCode mainName) flags
             ilb' <- letLiftOpt ilb >>= dedupeOpt >>= unreachOpt
-            compiled <- time flags "CodeGen" $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
+            compiled <- time flags "CodeGen" $ CodeGen.convert (pack $ outputClassName flags) (pack $ package flags) "javaexperiment/" (waitOnStart flags) (noPrint flags) ilb' mainName reverseRenames topLevelRenames (ILA.datatypes ilaState)
             pure $ rnf compiled -- Fully evaluate the compiled class thunks, as we only don't write jars if
             -- Write the class files to eg. out/<input file name>/*.class, creating the dir if necessary
             unless (noWriteJar flags) $ time flags "WriteJar" $ do

@@ -56,8 +56,8 @@ freeVariables name args x = do
 
 -- |`convert` takes a class name, a path to the primitive java classes, a list of ILB bindings, and the renames used for
 -- the top-level symbols and produces class files
-convert :: Text -> Text -> FilePath -> Bool -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
-convert cname package primitiveClassDir waitBeforeStart bs main revRenames topRenames ds = do
+convert :: Text -> Text -> FilePath -> Bool -> Bool -> [Binding Rhs] -> VariableName -> M.Map VariableName VariableName -> M.Map VariableName VariableName -> M.Map TypeVariableName Datatype -> ExceptT Text (LoggerT (NameGeneratorT IO)) [NamedClass]
+convert cname package primitiveClassDir waitBeforeStart noPrint bs main revRenames topRenames ds = do
     classpath <- loadPrimitiveClasses primitiveClassDir
     let heapObjectCls = ObjectType $ unpack package <> "/HeapObject"
         cname' = package <> "/" <> cname
@@ -80,7 +80,7 @@ convert cname package primitiveClassDir waitBeforeStart bs main revRenames topRe
         action = do
             compiled <- addBootstrapMethods initialState classpath $ do
                 mapM_ processBinding bindings
-                addMainMethod waitBeforeStart
+                addMainMethod waitBeforeStart noPrint
             return $ NamedClass cname compiled
         processBinding (NonRec v rhs) = void $ compileGlobalClosure v rhs
         processBinding (Rec m)        = mapM_ (\(v,r) -> processBinding $ NonRec v r) (M.toList m)
@@ -97,8 +97,8 @@ loadPrimitiveClasses :: MonadIO m => FilePath -> m [Tree CPEntry]
 loadPrimitiveClasses dirPath = liftIO $ execClassPath (mapM_ (loadClass . (dirPath </>)) classes)
     where classes = ["HeapObject", "Function"]
 
-addMainMethod :: Bool -> Converter ()
-addMainMethod waitBeforeStart = do
+addMainMethod :: Bool -> Bool -> Converter ()
+addMainMethod waitBeforeStart noPrint = do
     let access = [ ACC_PUBLIC, ACC_STATIC ]
     void $ newMethod access "main" [arrayOf Java.Lang.stringClass] ReturnsVoid $ do
         when waitBeforeStart $ do
@@ -112,8 +112,9 @@ addMainMethod waitBeforeStart = do
         pushGlobalSymbol main =<< heapObjectClass
         liftJoin2 invokeVirtual heapObject (pure clone)
         liftJoin2 invokeVirtual heapObject enter
-        makeUnboxedString -- Convert the result haskell string into a java string
-        invokeVirtual Java.IO.printStream Java.IO.println
+        if noPrint then pop else do
+            makeUnboxedString -- Convert the result haskell string into a java string
+            invokeVirtual Java.IO.printStream Java.IO.println
         i0 RETURN
 
 -- |Create a new class for each datatype
