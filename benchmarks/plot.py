@@ -329,11 +329,13 @@ def optimisation_impact(subplot=True):
 
 
 def executable_profile(subplot=True):
+    # Results gathered with jprofiler
     results = {
-        "factorial": "results/factorial.xml",
-        "fibonacci": "results/fibonacci.xml",
-        "mergesort": "results/mergesort.xml",
-        "ackermann": "results/ackermann.xml",
+        # Crashed when profiling, no idea why
+        # "factorial": "results/factorial.xml",
+        "fibonacci": "results/fibonacci30.xml",
+        "mergesort": "results/mergesort1000.xml",
+        "ackermann": "results/ackermann3-4.xml",
     }
 
     if subplot:
@@ -349,9 +351,13 @@ def executable_profile(subplot=True):
         tree = ET.parse(result_path)
 
         results = []
-        for row in tree.getroot().find("TableData").find("TableBody").findall("TableRow"):
-            label = "\\texttt{" + row[0].text.replace("tmp.", "") + "}\nInvocations: " + "{:,}".format(int(row[4].text))
-            results.append((label, float(row[1].text.strip("%")) / 100))
+        for row in tree.getroot().findall("hotspot"):
+            class_name = row.attrib["class"].replace("tmp.", "").replace("java.util.", "").replace("java.math.", "")
+            name = class_name + "." + row.attrib["methodName"]
+            inner_time_percent = float(row.attrib["percent"]) / 100
+            invocations = int(row.attrib["count"])
+            label = "\\texttt{" + name + "}\nInvocations: " + "{:,}".format(invocations)
+            results.append((label, inner_time_percent))
 
         results.sort(key=lambda r: r[1], reverse=True)
         # Trim down to just the functions making up a percentage of total time inside themselves

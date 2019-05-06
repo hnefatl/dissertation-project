@@ -1,5 +1,3 @@
 benchmark/generated/
 *.jar
 META-INF/
-
-results
