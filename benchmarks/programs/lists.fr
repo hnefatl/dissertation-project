@@ -1,0 +1,8 @@
+module Bench.Prog where
+
+upFrom :: Integer -> [Integer]
+upFrom n = n:upFrom (n + 1)
+ints :: [Integer]
+ints = upFrom 0
+
+main = print (sum (map (2*) (take 100000 (filter odd ints))))
