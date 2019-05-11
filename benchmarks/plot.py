@@ -9,6 +9,8 @@ import xml.etree.ElementTree as ET
 
 from results import parse_results
 
+OUTPUT_DIR = "../../dissertation/graphs/"
+
 # Use Latex fonts
 plt.rc("text", usetex=True)
 plt.rc("font", family="serif")
@@ -99,9 +101,13 @@ def texprep(s):
 
 def render_fig(name, save=True):
     if save:
-        plt.savefig(fname="../../dissertation/graphs/" + name, format="pdf")
+        plt.savefig(fname=OUTPUT_DIR + name, format="pdf", bbox_inches="tight")
     else:
         plt.show()
+
+
+def needs_log_scale(xs):
+    return max(xs) / min(xs) > 25
 
 
 # TODO(kc506): Include `min_time` measurement?
@@ -132,7 +138,10 @@ def perf_by_compiler(subplot=True):
             ax.set_title("Performance of \\texttt{" + benchmark + "} by compiler")
         ax.bar(x=impls, height=medians, yerr=errors, color=GREY, capsize=3)
         ax.tick_params(axis="x", rotation=40)
-        ax.set_ylim(bottom=0)
+        if needs_log_scale(medians):
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
             ax.set_ylabel("Runtime (ms)")
@@ -168,7 +177,10 @@ def executable_size_by_compiler(subplot=True):
             ax.set_title("Compiled size of \\texttt{" + benchmark + "} by compiler")
         ax.bar(x=impls, height=sizes, color=GREY)
         ax.tick_params(axis="x", rotation=40)
-        ax.set_ylim(bottom=0)
+        if needs_log_scale(sizes):
+            ax.set_yscale("log")
+        else:
+            ax.set_ylim(bottom=0)
         plt.ylabel("Compiled size (bytes)")
         plt.tight_layout()
         if not subplot:
@@ -180,10 +192,15 @@ def executable_size_by_compiler(subplot=True):
         plt.close(fig)
 
 
-def compilation_time_by_compiler(subplot=True):
+def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
+    if impls is None:
+        subplot = False
+        impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+    if out_name is None:
+        subplot = False
+        out_name = "compiler_perf_{}.pdf"
+
     benchmarks = sorted(list(benches.keys()))
-    # benchmarks = ["factorial"]
-    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
     layer_colours = {}
     layer_colours[None] = "grey"
     stages = [
@@ -251,12 +268,13 @@ def compilation_time_by_compiler(subplot=True):
         ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
-            plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers])
+            plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers], loc="center left", bbox_to_anchor=(1, 0.5))
             used_layers = set()
             ax.set_ylabel("Compilation time (ms)")
-            render_fig("compiler_perf_{}.pdf".format(benchmark).lower())
+            render_fig(out_name.format(benchmark).lower())
             plt.close(fig)
     if subplot:
+        plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers], loc="center left", bbox_to_anchor=(1, 0.5))
         render_fig("compiler_perf.pdf")
         plt.close(fig)
 
@@ -385,4 +403,5 @@ for subplot in [True, False]:
     compilation_time_by_compiler(subplot)
     optimisation_impact(subplot)
     executable_profile(subplot)
-
+# Extra run to get just opt/unopt of my compiler
+compilation_time_by_compiler(subplot=False, impls=["Mine", "Mine (opt)"], out_name="compiler_perf_mine_{}.pdf")

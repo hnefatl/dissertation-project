@@ -33,15 +33,18 @@ for opts in powerset(["l", "t", "u"]):
     add_benchmark(JHaskellBenchmark(f"factorial_mine{name_suffix}", "programs/factorial.hs", compiler_args=args))
     add_benchmark(JHaskellBenchmark(f"mergesort_mine{name_suffix}", "programs/mergesort.hs", compiler_args=args))
     add_benchmark(JHaskellBenchmark(f"ackermann_mine{name_suffix}", "programs/ackermann.hs", compiler_args=args))
+    add_benchmark(JHaskellBenchmark(f"hanoi_mine{name_suffix}", "programs/hanoi.hs", compiler_args=args))
 add_benchmark(FregeBenchmark("fibonacci_frege", "programs/fibonacci.fr"))
 add_benchmark(FregeBenchmark("factorial_frege", "programs/factorial.fr"))
 add_benchmark(FregeBenchmark("mergesort_frege", "programs/mergesort.fr"))
 add_benchmark(FregeBenchmark("ackermann_frege", "programs/ackermann.fr"))
+add_benchmark(FregeBenchmark("hanoi_frege", "programs/hanoi.fr"))
 for suffix, args in [("", []), ("_opt", ["-O3"])]:
     add_benchmark(EtaBenchmark(f"fibonacci_eta{suffix}", "programs/fibonacci.eta", compiler_args=args))
     add_benchmark(EtaBenchmark(f"factorial_eta{suffix}", "programs/factorial.eta", compiler_args=args))
     add_benchmark(EtaBenchmark(f"mergesort_eta{suffix}", "programs/mergesort.eta", compiler_args=args))
     add_benchmark(EtaBenchmark(f"ackermann_eta{suffix}", "programs/ackermann.eta", compiler_args=args))
+    add_benchmark(EtaBenchmark(f"hanoi_eta{suffix}", "programs/hanoi.eta", compiler_args=args))
 add_benchmark(JavaBenchmark("factorial_java", "factorial", "programs/Factorial.java"))
 add_benchmark(JavaBenchmark("fibonacci_java", "fibonacci", "programs/Fibonacci.java"))
 

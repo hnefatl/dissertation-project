@@ -82,17 +82,22 @@ primShowIntShow :: Int -> [Char]
 primShowIntegerShow :: Integer -> [Char]
 
 -- These are hacky ways to work around not having support for instance superclasses (Show a => Show [a])
+showList xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
 instance Show [Int] where
-    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
+    show = showList
 instance Show [Integer] where
-    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
+    show = showList
 instance Show [Char] where
     show = concat . map show
 instance Show [Bool] where
-    show xs = "[" ++ ((intercalate "," (map show xs)) ++ "]")
+    show = showList
 instance Show (Maybe Int) where
     show Nothing = "Nothing"
     show (Just x) = "Just " ++ show x
+instance Show (Int, Int) where
+    show (x, y) = "(" ++ show x ++ "," ++ show y ++ ")"
+instance Show [(Int, Int)] where
+    show = showList
 
 class Integral a where
     div :: a -> a -> a
@@ -184,6 +189,10 @@ take n (x:xs) = x:take (n-1 :: Int) xs
 -- map :: (a -> b) -> [a] -> [b]
 map f [] = []
 map f (x:xs) = (f x):(map f xs)
+
+--filter :: (a -> Bool) -> [a] -> [a]
+filter _ [] = []
+filter f (x:xs) = if f x then x:filter f xs else filter f xs
 
 -- concat :: [a] -> [a] -> [a]
 concat = foldl (++) []

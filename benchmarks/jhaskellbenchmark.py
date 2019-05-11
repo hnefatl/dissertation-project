@@ -92,6 +92,6 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
                 this_time = float(match.group(2))
                 this_run_data.append((match.group(1), this_time))
                 cumulative_time += this_time
-            this_run_data.append(("Other", overall_time * 1000 - cumulative_time))
+            #this_run_data.append(("Other", overall_time * 1000 - cumulative_time))
             time_data.append(this_run_data)
         self._results["times"] = time_data
