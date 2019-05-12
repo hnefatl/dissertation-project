@@ -72,9 +72,33 @@ benches = {
         "Frege": "results/ackermann_frege",
         "Eta": "results/ackermann_eta",
     },
+    "hanoi": {
+        "Mine": "results/hanoi_mine",
+        "Mine_l": "results/hanoi_mine_l",
+        "Mine_t": "results/hanoi_mine_t",
+        "Mine_u": "results/hanoi_mine_u",
+        "Mine_l_t": "results/hanoi_mine_l_t",
+        "Mine_l_u": "results/hanoi_mine_l_u",
+        "Mine_t_u": "results/hanoi_mine_t_u",
+        "Mine_l_t_u": "results/hanoi_mine_l_t_u",
+        "Mine (opt)": "results/hanoi_mine_l_t_u",
+        "Frege": "results/hanoi_frege",
+        "Eta": "results/hanoi_eta",
+    },
+    "lists": {
+        "Mine": "results/lists_mine",
+        "Mine_l": "results/lists_mine_l",
+        "Mine_t": "results/lists_mine_t",
+        "Mine_u": "results/lists_mine_u",
+        "Mine_l_t": "results/lists_mine_l_t",
+        "Mine_l_u": "results/lists_mine_l_u",
+        "Mine_t_u": "results/lists_mine_t_u",
+        "Mine_l_t_u": "results/lists_mine_l_t_u",
+        "Mine (opt)": "results/lists_mine_l_t_u",
+        "Frege": "results/lists_frege",
+        "Eta": "results/lists_eta",
+    },
 }
-
-COLOURS = ["blue", "red", "green", "yellow"]
 
 
 results = collections.defaultdict(dict)
@@ -217,7 +241,6 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
         "Dedupe",
         "CodeGen",
         "WriteJar",
-        "Other",
     ]
     cmap = plt.cm.get_cmap("tab20")
     for i, stage in enumerate(stages):
