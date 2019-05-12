@@ -5,6 +5,7 @@ import shutil
 import pathlib
 import results
 import tempfile
+import time
 
 import benchmark
 
@@ -70,22 +71,32 @@ class JMHBenchmark(benchmark.Benchmark):
     def _execute_bench(self):
         original_dir = pathlib.Path.cwd()
         os.chdir(self._temp_dir)
-        try:
-            args = [
-                "java",
-                "-Xss1024m",  # 1GB of stack space
-                "-noverify",
-                "-cp",
-                ":".join(self._get_classpath() + [".", str(original_dir / "deps/*")]),
-                "benchmark.Main",
-            ]
-            output = subprocess.check_output(args)
-            self._results.update(results.parse_results(output.decode()))
-        except subprocess.CalledProcessError as e:
-            print(e.stdout.decode())
-            raise
-        finally:
-            os.chdir(original_dir)
+        times = []
+        for _ in range(50):
+            try:
+                args = [
+                    "java",
+                    "-Xss1024m",  # 1GB of stack space
+                    "-noverify",
+                    "-cp",
+                    ":".join(self._get_classpath()),
+                    "-jar",
+                    f"{self._name}.jar"
+                ]
+                start_s = time.perf_counter()
+                output = subprocess.check_output(args)
+                times.append(1000 * (time.perf_counter() - start_s))
+            except subprocess.CalledProcessError as e:
+                print(e.stdout.decode())
+                os.chdir(original_dir)
+                raise
+        os.chdir(original_dir)
+        if len(times) > 0:
+            times.sort()
+            self._results["min_time"] = times[0]
+            self._results["lower_quartile"] = times[int(len(times) / 4)]
+            self._results["mid_quartile"] = times[int(len(times) / 2)]
+            self._results["upper_quartile"] = times[int(3 * len(times) / 4)]
 
 def get_jar_entry_size(jar_path, entry_names):
     if not isinstance(entry_names, list):
