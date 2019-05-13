@@ -21,80 +21,80 @@ DARKGREY = "#707070"
 # Bar charts of benchmark performance using different languages, grouped by benchmark
 benches = {
     "factorial": {
-        "Mine": "results/factorial_mine",
-        "Mine_l": "results/factorial_mine_l",
-        "Mine_t": "results/factorial_mine_t",
-        "Mine_u": "results/factorial_mine_u",
-        "Mine_l_t": "results/factorial_mine_l_t",
-        "Mine_l_u": "results/factorial_mine_l_u",
-        "Mine_t_u": "results/factorial_mine_t_u",
-        "Mine_l_t_u": "results/factorial_mine_l_t_u",
-        "Mine (opt)": "results/factorial_mine_l_t_u",
+        "HJC": "results/factorial_mine",
+        "HJC_l": "results/factorial_mine_l",
+        "HJC_t": "results/factorial_mine_t",
+        "HJC_u": "results/factorial_mine_u",
+        "HJC_l_t": "results/factorial_mine_l_t",
+        "HJC_l_u": "results/factorial_mine_l_u",
+        "HJC_t_u": "results/factorial_mine_t_u",
+        "HJC_l_t_u": "results/factorial_mine_l_t_u",
+        "HJC (opt)": "results/factorial_mine_l_t_u",
         "Frege": "results/factorial_frege",
         "Eta": "results/factorial_eta",
     },
     "fibonacci": {
-        "Mine": "results/fibonacci_mine",
-        "Mine_l": "results/fibonacci_mine_l",
-        "Mine_t": "results/fibonacci_mine_t",
-        "Mine_u": "results/fibonacci_mine_u",
-        "Mine_l_t": "results/fibonacci_mine_l_t",
-        "Mine_l_u": "results/fibonacci_mine_l_u",
-        "Mine_t_u": "results/fibonacci_mine_t_u",
-        "Mine_l_t_u": "results/fibonacci_mine_l_t_u",
-        "Mine (opt)": "results/fibonacci_mine_l_t_u",
+        "HJC": "results/fibonacci_mine",
+        "HJC_l": "results/fibonacci_mine_l",
+        "HJC_t": "results/fibonacci_mine_t",
+        "HJC_u": "results/fibonacci_mine_u",
+        "HJC_l_t": "results/fibonacci_mine_l_t",
+        "HJC_l_u": "results/fibonacci_mine_l_u",
+        "HJC_t_u": "results/fibonacci_mine_t_u",
+        "HJC_l_t_u": "results/fibonacci_mine_l_t_u",
+        "HJC (opt)": "results/fibonacci_mine_l_t_u",
         "Frege": "results/fibonacci_frege",
         "Eta": "results/fibonacci_eta",
     },
     "mergesort": {
-        "Mine": "results/mergesort_mine",
-        "Mine_l": "results/mergesort_mine_l",
-        "Mine_t": "results/mergesort_mine_t",
-        "Mine_u": "results/mergesort_mine_u",
-        "Mine_l_t": "results/mergesort_mine_l_t",
-        "Mine_l_u": "results/mergesort_mine_l_u",
-        "Mine_t_u": "results/mergesort_mine_t_u",
-        "Mine_l_t_u": "results/mergesort_mine_l_t_u",
-        "Mine (opt)": "results/mergesort_mine_l_t_u",
+        "HJC": "results/mergesort_mine",
+        "HJC_l": "results/mergesort_mine_l",
+        "HJC_t": "results/mergesort_mine_t",
+        "HJC_u": "results/mergesort_mine_u",
+        "HJC_l_t": "results/mergesort_mine_l_t",
+        "HJC_l_u": "results/mergesort_mine_l_u",
+        "HJC_t_u": "results/mergesort_mine_t_u",
+        "HJC_l_t_u": "results/mergesort_mine_l_t_u",
+        "HJC (opt)": "results/mergesort_mine_l_t_u",
         "Frege": "results/mergesort_frege",
         "Eta": "results/mergesort_eta",
     },
     "ackermann": {
-        "Mine": "results/ackermann_mine",
-        "Mine_l": "results/ackermann_mine_l",
-        "Mine_t": "results/ackermann_mine_t",
-        "Mine_u": "results/ackermann_mine_u",
-        "Mine_l_t": "results/ackermann_mine_l_t",
-        "Mine_l_u": "results/ackermann_mine_l_u",
-        "Mine_t_u": "results/ackermann_mine_t_u",
-        "Mine_l_t_u": "results/ackermann_mine_l_t_u",
-        "Mine (opt)": "results/ackermann_mine_l_t_u",
+        "HJC": "results/ackermann_mine",
+        "HJC_l": "results/ackermann_mine_l",
+        "HJC_t": "results/ackermann_mine_t",
+        "HJC_u": "results/ackermann_mine_u",
+        "HJC_l_t": "results/ackermann_mine_l_t",
+        "HJC_l_u": "results/ackermann_mine_l_u",
+        "HJC_t_u": "results/ackermann_mine_t_u",
+        "HJC_l_t_u": "results/ackermann_mine_l_t_u",
+        "HJC (opt)": "results/ackermann_mine_l_t_u",
         "Frege": "results/ackermann_frege",
         "Eta": "results/ackermann_eta",
     },
     "hanoi": {
-        "Mine": "results/hanoi_mine",
-        "Mine_l": "results/hanoi_mine_l",
-        "Mine_t": "results/hanoi_mine_t",
-        "Mine_u": "results/hanoi_mine_u",
-        "Mine_l_t": "results/hanoi_mine_l_t",
-        "Mine_l_u": "results/hanoi_mine_l_u",
-        "Mine_t_u": "results/hanoi_mine_t_u",
-        "Mine_l_t_u": "results/hanoi_mine_l_t_u",
-        "Mine (opt)": "results/hanoi_mine_l_t_u",
+        "HJC": "results/hanoi_mine",
+        "HJC_l": "results/hanoi_mine_l",
+        "HJC_t": "results/hanoi_mine_t",
+        "HJC_u": "results/hanoi_mine_u",
+        "HJC_l_t": "results/hanoi_mine_l_t",
+        "HJC_l_u": "results/hanoi_mine_l_u",
+        "HJC_t_u": "results/hanoi_mine_t_u",
+        "HJC_l_t_u": "results/hanoi_mine_l_t_u",
+        "HJC (opt)": "results/hanoi_mine_l_t_u",
         "Frege": "results/hanoi_frege",
         "Eta": "results/hanoi_eta",
     },
     "lists": {
-        "Mine": "results/lists_mine",
-        "Mine_l": "results/lists_mine_l",
-        "Mine_t": "results/lists_mine_t",
-        "Mine_u": "results/lists_mine_u",
-        "Mine_l_t": "results/lists_mine_l_t",
-        "Mine_l_u": "results/lists_mine_l_u",
-        "Mine_t_u": "results/lists_mine_t_u",
-        "Mine_l_t_u": "results/lists_mine_l_t_u",
-        "Mine (opt)": "results/lists_mine_l_t_u",
+        "HJC": "results/lists_mine",
+        "HJC_l": "results/lists_mine_l",
+        "HJC_t": "results/lists_mine_t",
+        "HJC_u": "results/lists_mine_u",
+        "HJC_l_t": "results/lists_mine_l_t",
+        "HJC_l_u": "results/lists_mine_l_u",
+        "HJC_t_u": "results/lists_mine_t_u",
+        "HJC_l_t_u": "results/lists_mine_l_t_u",
+        "HJC (opt)": "results/lists_mine_l_t_u",
         "Frege": "results/lists_frege",
         "Eta": "results/lists_eta",
     },
@@ -155,7 +155,7 @@ def needs_log_scale(xs):
 # TODO(kc506): Include `min_time` measurement?
 def perf_by_compiler(subplot=True):
     benchmarks = sorted(list(benches.keys()))
-    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+    impls = sorted(["HJC", "HJC (opt)", "Frege", "Eta"])
 
     if subplot:
         fig, axes = plt.subplots(2, 3)
@@ -196,7 +196,7 @@ def perf_by_compiler(subplot=True):
 
 def executable_size_by_compiler(subplot=True):
     benchmarks = sorted(list(benches.keys()))
-    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+    impls = sorted(["HJC", "HJC (opt)", "Frege", "Eta"])
 
     if subplot:
         fig, axes = plt.subplots(2, 3)
@@ -238,7 +238,7 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
     if impls is not None or out_name is not None:
         subplot = False
     if impls is None:
-        impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+        impls = sorted(["HJC", "HJC (opt)", "Frege", "Eta"])
     if out_name is None:
         out_name = "compiler_perf_{}.pdf"
 
@@ -280,7 +280,7 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
         layers = collections.defaultdict(dict)
         for impl in impls:
             result = results[benchmark][impl]
-            if impl in {"Mine", "Mine (opt)"}:
+            if impl in {"HJC", "HJC (opt)"}:
                 # We have timing information for all stages of the compiler
                 # Take the entry with the lowest overall time (lowest time in the final stage)
                 layer_times = min(result["times"], key=lambda run: run[:-1][1])
@@ -328,17 +328,17 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
         plt.close(fig)
 
 
-def optimisation_impact(subplot=True):
+def optimisation_impact_perf(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     readable_impls = {
-        "Mine": "None",
-        "Mine_l": "L",
-        "Mine_t": "D",
-        "Mine_u": "U",
-        "Mine_l_t": "LD",
-        "Mine_l_u": "LU",
-        "Mine_t_u": "DU",
-        "Mine_l_t_u": "LDU",
+        "HJC": "None",
+        "HJC_l": "L",
+        "HJC_t": "D",
+        "HJC_u": "U",
+        "HJC_l_t": "LD",
+        "HJC_l_u": "LU",
+        "HJC_t_u": "DU",
+        "HJC_l_t_u": "LDU",
     }
 
     if subplot:
@@ -376,11 +376,52 @@ def optimisation_impact(subplot=True):
         plt.close(fig)
 
 
+def optimisation_impact_size(subplot=True):
+    benchmarks = sorted(list(benches.keys()))
+    readable_impls = {
+        "HJC": "None",
+        "HJC_u": "U",
+    }
+
+    if subplot:
+        fig, axes = plt.subplots(2, 3)
+        axes[0][0].set_ylabel("Compiled size (bytes)")
+    for plot_num, benchmark in enumerate(benchmarks):
+        if subplot:
+            ax = axes[plot_num // 3][plot_num % 3]
+        else:
+            fig, ax = plt.subplots()
+            ax.set_ylabel("Compiled size (bytes)")
+
+        bar_data = []
+        for impl, readable in readable_impls.items():
+            result = results[benchmark][impl]
+            bar_data.append((readable, result["size"]))
+
+        sorted_bar_data = sorted(bar_data, key=snd)  # Sort by time
+        labels, heights = zip(*sorted_bar_data)
+
+        if subplot:
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
+        else:
+            ax.set_title("Compiled size of \\texttt{" + to_readable_bench(benchmark) + "} by optimisation")
+        ax.bar(x=texprep(labels), height=heights, color=GREY)
+        ax.tick_params(axis="x", rotation=50)
+        ax.set_ylim(bottom=0.95 * min(heights))
+        plt.tight_layout()
+        if not subplot:
+            render_fig("size_{}_by_opt.pdf".format(benchmark).lower())
+            plt.close(fig)
+    if subplot:
+        render_fig("size_by_opt.pdf")
+        plt.close(fig)
+
+
 # Not implemented yet as this would require being able to specify order of optimisations: currently not allowed.
 # Heatmap of effects of pairwise optimisations
 # def optimisation_pairwise():
 #    benchmarks = sorted(list(benches.keys()))
-#    impls = sorted(["Mine", "Mine (opt)", "Frege", "Eta"])
+#    impls = sorted(["HJC", "HJC (opt)", "Frege", "Eta"])
 #
 #    opts = [None, "l", "t", "u"]
 #
@@ -450,7 +491,8 @@ for subplot in [True, False]:
     perf_by_compiler(subplot)
     executable_size_by_compiler(subplot)
     compilation_time_by_compiler(subplot)
-    optimisation_impact(subplot)
+    optimisation_impact_perf(subplot)
+    optimisation_impact_size(subplot)
     executable_profile(subplot)
 # Extra run to get just opt/unopt of my compiler
-compilation_time_by_compiler(subplot=False, impls=["Mine", "Mine (opt)"], out_name="compiler_perf_mine_{}.pdf")
+compilation_time_by_compiler(subplot=False, impls=["HJC", "HJC (opt)"], out_name="compiler_perf_mine_{}.pdf")
