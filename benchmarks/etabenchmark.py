@@ -23,6 +23,9 @@ class EtaBenchmark(jmhbenchmark.JMHBenchmark):
         self._output_jar = self._temp_dir / f"Run{self._source_path.stem}.jar"
         return ret
 
+    def get_run_args(self):
+        return ["-jar", self._output_jar]
+
     def _compile(self):
         self._run_eta_compiler()
 

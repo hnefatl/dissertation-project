@@ -18,6 +18,9 @@ class FregeBenchmark(jmhbenchmark.JMHBenchmark):
         self._compiler_args = compiler_args.copy()
         self._frege_jar_path = pathlib.Path.cwd() / "fregec.jar"
 
+    def get_run_args(self):
+        return [self._package_name + "." + self._class_name]
+
     def _compile(self):
         self._run_frege_compiler()
 

@@ -30,7 +30,7 @@ class Benchmark:
         return f"{self.name}: ({self._temp_dir})"
 
     def execute(self):
-        #self._benchmark_compilation()
+        self._benchmark_compilation()
         self._pre_compile()
         self._compile()
         self._post_compile()

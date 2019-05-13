@@ -297,7 +297,6 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
             render_fig(out_name.format(benchmark).lower())
             plt.close(fig)
     if subplot:
-        print(used_layers)
         plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers], loc="center left", bbox_to_anchor=(1, 0.5))
         render_fig("compiler_perf.pdf")
         plt.close(fig)

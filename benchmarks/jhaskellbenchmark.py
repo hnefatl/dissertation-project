@@ -24,6 +24,9 @@ class JHaskellBenchmark(jmhbenchmark.JMHBenchmark):
         self._output_jar = (self._temp_dir / self._name).with_suffix(".jar")
         return ret
 
+    def get_run_args(self):
+        return ["-jar", f"{self._name}.jar"]
+
     def _compile(self):
         self._run_jhaskell_compiler()
 
