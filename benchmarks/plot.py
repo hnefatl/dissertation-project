@@ -100,6 +100,24 @@ benches = {
     },
 }
 
+readable_benches = {
+    "factorial": "factorial(20000)",
+    "fibonacci": "fibonacci(30)",
+    "mergesort": "mergesort(1000)",
+    "ackermann": "ackermann(3,8)",
+    "hanoi": "hanoi(16)",
+    "lists": "lists(100000)",
+}
+
+
+def to_readable_bench(bench):
+    if isinstance(bench, str):
+        return readable_benches[bench]
+    elif isinstance(bench, list):
+        return [to_readable_bench(b) for b in bench]
+    else:
+        raise ValueError("Can't convert to readable bench: " + bench)
+
 
 results = collections.defaultdict(dict)
 for bench, impls in benches.items():
@@ -157,9 +175,9 @@ def perf_by_compiler(subplot=True):
         errors = [medians - lows, highs - medians]
 
         if subplot:
-            ax.set_title("\\texttt{" + benchmark + "}")
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
-            ax.set_title("Performance of \\texttt{" + benchmark + "} by compiler")
+            ax.set_title("Performance of \\texttt{" + to_readable_bench(benchmark) + "} by compiler")
         ax.bar(x=impls, height=medians, yerr=errors, color=GREY, capsize=3)
         ax.tick_params(axis="x", rotation=40)
         if needs_log_scale(medians):
@@ -196,9 +214,9 @@ def executable_size_by_compiler(subplot=True):
             sizes.append(result["size"])
 
         if subplot:
-            ax.set_title("\\texttt{" + benchmark + "}")
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
-            ax.set_title("Compiled size of \\texttt{" + benchmark + "} by compiler")
+            ax.set_title("Compiled size of \\texttt{" + to_readable_bench(benchmark) + "} by compiler")
         ax.bar(x=impls, height=sizes, color=GREY)
         ax.tick_params(axis="x", rotation=40)
         if needs_log_scale(sizes):
@@ -253,10 +271,10 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
     for plot_num, benchmark in enumerate(benchmarks):
         if subplot:
             ax = axes[plot_num // 3][plot_num % 3]
-            ax.set_title("\\texttt{" + benchmark + "}")
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
             fig, ax = plt.subplots()
-            ax.set_title("Minimum compilation time of \\texttt{" + benchmark + "} by compiler")
+            ax.set_title("Minimum compilation time of \\texttt{" + to_readable_bench(benchmark) + "} by compiler")
             ax.set_ylabel("Compilation time (ms)")
 
         layers = collections.defaultdict(dict)
@@ -291,13 +309,21 @@ def compilation_time_by_compiler(subplot=True, impls=None, out_name=None):
         ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
-            plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers], loc="center left", bbox_to_anchor=(1, 0.5))
+            plt.legend(
+                handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers],
+                loc="center left",
+                bbox_to_anchor=(1, 0.5),
+            )
             used_layers = set()
             ax.set_ylabel("Compilation time (ms)")
             render_fig(out_name.format(benchmark).lower())
             plt.close(fig)
     if subplot:
-        plt.legend(handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers], loc="center left", bbox_to_anchor=(1, 0.5))
+        plt.legend(
+            handles=[patches.Patch(color=layer_colours[layer], label=layer) for layer in used_layers],
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+        )
         render_fig("compiler_perf.pdf")
         plt.close(fig)
 
@@ -334,9 +360,9 @@ def optimisation_impact(subplot=True):
         labels, heights = zip(*sorted_bar_data)
 
         if subplot:
-            ax.set_title("\\texttt{" + benchmark + "}")
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
-            ax.set_title("Runtime of \\texttt{" + benchmark + "} by optimisation")
+            ax.set_title("Runtime of \\texttt{" + to_readable_bench(benchmark) + "} by optimisation")
         ax.bar(x=texprep(labels), height=heights, color=GREY)
         ax.tick_params(axis="x", rotation=50)
         ax.set_ylim(bottom=0.95 * min(heights))
@@ -384,10 +410,10 @@ def executable_profile(subplot=True):
     for plot_num, (benchmark, result_path) in enumerate(results.items()):
         if subplot:
             ax = axes[plot_num // 3][plot_num % 3]
-            ax.set_title("\\texttt{" + benchmark + "}")
+            ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
             fig, ax = plt.subplots(figsize=(9, 4.5))
-            ax.set_title("Inner time of runtime functions during \\texttt{" + benchmark + "}")
+            ax.set_title("Inner time of runtime functions during \\texttt{" + to_readable_bench(benchmark) + "}")
 
         tree = ET.parse(result_path)
 
