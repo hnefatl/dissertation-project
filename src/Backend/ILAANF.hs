@@ -37,7 +37,7 @@ instance NFData AnfApplication
 -- Like GHC's STG, in ILA-ANF Case expressions are the only points of *evaluation*, and Let expressions are points of
 -- *allocation* (but not the only points of allocation).
 data AnfComplex = Let VariableName Type AnfRhs AnfComplex
-                | Case AnfComplex Type [VariableName] [Alt AnfComplex]
+                | Case AnfComplex Type [Alt AnfComplex]
                 | CompApp AnfApplication
                 | Trivial AnfTrivial
     deriving (Eq, Ord, Generic)
@@ -57,7 +57,7 @@ instance TextShow AnfComplex where
     showb (Trivial e) = showb e
     showb (CompApp e) = showb e
     showb (Let v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
-    showb (Case s t bs as) = "case " <> showb s <> " :: " <> showb t <> " of " <> showb bs <> " { " <> cases <> " }"
+    showb (Case s t as) = "case " <> showb s <> " :: " <> showb t <> " of { " <> cases <> " }"
         where cases = mconcat $ intersperse " ; " $ map showb as
 instance TextShow AnfRhs where
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
@@ -76,11 +76,11 @@ getAnfAppType (App e1 e2) = do
     when (argType /= e2Type) $ throwError $ unlines ["Mismatched arg types:", showt argType, showt e2Type, showt e1, showt e2]
     return retType
 getAnfComplexType :: (MonadError Text m, MonadLogger m) => AnfComplex -> m Type
-getAnfComplexType (Trivial e)              = getAnfTrivialType e
-getAnfComplexType (CompApp e)              = getAnfAppType e
-getAnfComplexType (Let _ _ _ e)            = getAnfComplexType e
-getAnfComplexType (Case _ _ _ [])          = throwError "No alts in case"
-getAnfComplexType (Case _ _ _ (Alt _ e:_)) = getAnfComplexType e
+getAnfComplexType (Trivial e)            = getAnfTrivialType e
+getAnfComplexType (CompApp e)            = getAnfAppType e
+getAnfComplexType (Let _ _ _ e)          = getAnfComplexType e
+getAnfComplexType (Case _ _ [])          = throwError "No alts in case"
+getAnfComplexType (Case _ _ (Alt _ e:_)) = getAnfComplexType e
 getAnfRhsType :: (MonadError Text m, MonadLogger m) => AnfRhs -> m Type
 getAnfRhsType (Lam _ t e) = T.makeFun [t] =<< getAnfRhsType e
 getAnfRhsType (Complex c) = getAnfComplexType c
@@ -129,7 +129,7 @@ ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
 ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
 ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
 ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
-ilaExpToComplex (ILA.Case s vs as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> pure vs <*> mapM ilaAltToAnf as
+ilaExpToComplex (ILA.Case s as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> mapM ilaAltToAnf as
 
 ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfRhs
 ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b
@@ -166,7 +166,7 @@ instance AlphaEq AnfComplex where
         alphaEq' t1 t2
         alphaEq' e1a e2a
         alphaEq' e1b e2b
-    alphaEq' (Case e1 t1 vs1 as1) (Case e2 t2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' t1 t2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (Case e1 t1 as1) (Case e2 t2 as2) = alphaEq' e1 e2 >> alphaEq' t1 t2 >> alphaEq' as1 as2
     alphaEq' (Trivial e1) (Trivial e2) = alphaEq' e1 e2
     alphaEq' (CompApp e1) (CompApp e2) = alphaEq' e1 e2
     alphaEq' e1 e2 = throwError $ unlines [ "AnfComplex mismatch:", showt e1, "vs", showt e2 ]

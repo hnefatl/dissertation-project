@@ -139,7 +139,7 @@ data Expr = Var VariableName Type -- Variable/function
           | App Expr Expr -- Application of terms or types
           | Lam VariableName Type Expr -- Abstraction of terms or types
           | Let VariableName Type Expr Expr
-          | Case Expr [VariableName] [Alt Expr] -- in `case e of [x] { a1 ; a2 ; ... }`, x is bound to e.
+          | Case Expr [Alt Expr] -- in `case e of { a1 ; a2 ; ... }`, x is bound to e.
     deriving (Eq, Ord, Show, Generic)
 instance NFData Expr
 instance TextShow Expr where
@@ -149,7 +149,7 @@ instance TextShow Expr where
     showb (App e1 e2) = "(" <> showb e1 <> ") (" <> showb e2 <> ")"
     showb (Lam v t b) = "λ(" <> showb v <> " :: " <> showb t <> ") -> " <> showb b
     showb (Let v t e1 e2) = "let " <> showb v <> " :: " <> showb t <> " = " <> showb e1 <> " in " <> showb e2
-    showb (Case s bs as) = "case " <> showb s <> " of " <> showb bs <> " { " <> cases <> " }"
+    showb (Case s as) = "case " <> showb s <> " of { " <> cases <> " }"
         where cases = mconcat $ intersperse " ; " $ map showb as
 
 getExprType :: MonadError Text m => Expr -> m Type
@@ -159,8 +159,8 @@ getExprType (Lit _ t)              = return t
 getExprType (App e1 _)             = snd <$> (T.unwrapFun =<< getExprType e1)
 getExprType (Lam _ t e)            = T.makeFun [t] =<< getExprType e
 getExprType (Let _ _ _ e)          = getExprType e
-getExprType (Case _ _ [])          = throwError "No alts in case"
-getExprType (Case _ _ (Alt _ e:_)) = getExprType e
+getExprType (Case _ [])          = throwError "No alts in case"
+getExprType (Case _ (Alt _ e:_)) = getExprType e
 
 data ConverterReadableState = ConverterReadableState
     { types           :: M.Map VariableName QuantifiedSimpleType
@@ -452,7 +452,7 @@ expToIla (HsIf cond e1 e2) = do
         (Nothing, _) -> throwError "True constructor not found in ILA lowering"
         (_, Nothing) -> throwError "False constructor not found in ILA lowering"
         (Just trueName, Just falseName) ->
-            return $ Case condExp [] [ Alt (DataCon trueName []) e1Exp , Alt (DataCon falseName []) e2Exp ]
+            return $ Case condExp [ Alt (DataCon trueName []) e1Exp , Alt (DataCon falseName []) e2Exp ]
 expToIla (HsExpTypeSig _ (HsCase scrut@(HsExpTypeSig _ _ scrutType) alts) caseType) = do
     -- Bind the scrutinee to a fresh variable, and generate an ILA case on it
     scrutBinder <- freshVarName
@@ -641,7 +641,7 @@ patToIla ((v, varType):vs) cs def = do
                             eqDictName = applySub sub eqDictPlainName
                             eqDict = Var eqDictName eqDictType
                         expr <- patToIla vs [(pl', rhs, t, sub, extraTypes)] def
-                        return $ Case cond [] [ Alt trueCon expr, Alt falseCon body ]
+                        return $ Case cond [ Alt trueCon expr, Alt falseCon body ]
                     p -> throwError $ "Expected literal list in patToIla, got: " <> showt p
     else if allCon then do
         conGroups <- groupPatCons getPat pats
@@ -653,7 +653,7 @@ patToIla ((v, varType):vs) cs def = do
                 body <- patToIla (freshArgTypes <> vs) es' def
                 return $ Alt (DataCon con $ map fst freshArgTypes) body
         let defaultAlt = Alt Default def
-        return $ Case (Var v varType) [] (defaultAlt:alts)
+        return $ Case (Var v varType) (defaultAlt:alts)
     else do -- Mixture of variables/literals/constructors
         patGroups <- map snd <$> groupPatsOn getPat pats
         foldrM (patToIla ((v,varType):vs)) def patGroups
@@ -740,7 +740,7 @@ instance Substitutable VariableName VariableName Expr where
     applySub sub (App e1 e2)              = App (applySub sub e1) (applySub sub e2)
     applySub sub (Lam v t e)              = Lam v t (applySub sub e)
     applySub sub (Let v t e b)            = Let v t (applySub sub e) (applySub sub b)
-    applySub sub (Case e vs as)           = Case (applySub sub e) vs (applySub sub as)
+    applySub sub (Case e as)              = Case (applySub sub e) (applySub sub as)
 instance Substitutable a b c => Substitutable a b (Alt c) where
     applySub sub (Alt c x) = Alt c (applySub sub x)
 instance Substitutable VariableName VariableName AltConstructor where
@@ -774,5 +774,5 @@ instance AlphaEq Expr where
         alphaEq' t1 t2
         alphaEq' e1a e2a
         alphaEq' e1b e2b
-    alphaEq' (Case e1 vs1 as1) (Case e2 vs2 as2) = alphaEq' e1 e2 >> alphaEq' vs1 vs2 >> alphaEq' as1 as2
+    alphaEq' (Case e1 as1) (Case e2 as2) = alphaEq' e1 e2 >> alphaEq' as1 as2
     alphaEq' e1 e2 = throwError $ unlines [ "ILA Expression mismatch:", showt e1, "vs", showt e2 ]

@@ -56,10 +56,10 @@ reorderRhsLets (RhsClosure vs e) = do
 -- |Get a list of the let-binding nodes that can be reordered, as well as the base expression at the end of a
 -- let-binding chain.
 getLetNodes :: LetLifter m => Exp -> m ([Node], Exp)
-getLetNodes (ExpCase scrut t vs as) = do
+getLetNodes (ExpCase scrut t as) = do
     (scrutReordered, scrutFreeBindings) <- reorderLets scrut
     (altsReordered, altFreeBindings) <- unzip <$> mapM reorderAltLets as
-    return (scrutFreeBindings <> concat altFreeBindings, ExpCase scrutReordered t vs altsReordered)
+    return (scrutFreeBindings <> concat altFreeBindings, ExpCase scrutReordered t altsReordered)
 getLetNodes (ExpLet v rhs inner) = do
     (ns, base) <- getLetNodes inner
     (rhs', freeNodes) <- reorderRhsLets rhs

@@ -76,7 +76,7 @@ dedupeExp l@ExpLit{}            = return l
 dedupeExp (ExpVar v)          = ExpVar <$> withRenamings dedupeVar v
 dedupeExp (ExpApp f as)       = ExpApp <$> withRenamings dedupeVar f <*> mapM (withRenamings dedupeArg) as
 dedupeExp (ExpConApp c as)    = ExpConApp c <$> mapM (withRenamings dedupeArg) as
-dedupeExp (ExpCase e t vs as) = ExpCase <$> dedupeExp e <*> pure t <*> mapM (withRenamings dedupeVar) vs <*> mapM dedupeAlt as
+dedupeExp (ExpCase e t as) = ExpCase <$> dedupeExp e <*> pure t <*> mapM dedupeAlt as
 dedupeExp (ExpLet v rhs e)      = performDedupe v rhs >>= \case
     Nothing -> dedupeExp e
     Just rhs' -> ExpLet v rhs' <$> dedupeExp e

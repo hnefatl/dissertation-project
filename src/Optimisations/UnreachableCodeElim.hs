@@ -49,7 +49,7 @@ getExpUsedVariables ExpLit{}           = S.empty
 getExpUsedVariables (ExpVar v)         = S.singleton v
 getExpUsedVariables (ExpApp v as)      = S.insert v (S.unions $ map getArgUsedVariables as)
 getExpUsedVariables (ExpConApp _ as)   = S.unions $ map getArgUsedVariables as
-getExpUsedVariables (ExpCase s _ _ as) = S.unions $ getExpUsedVariables s:map getAltUsedVariables as
+getExpUsedVariables (ExpCase s _ as)   = S.unions $ getExpUsedVariables s:map getAltUsedVariables as
 getExpUsedVariables (ExpLet _ rhs e)   = S.union (getRhsUsedVariables rhs) (getExpUsedVariables e)
 
 getAltUsedVariables :: Alt Exp -> S.Set VariableName
@@ -79,7 +79,7 @@ removeExpUnusedVariables l@ExpLit{} = return l
 removeExpUnusedVariables v@ExpVar{} = return v
 removeExpUnusedVariables a@ExpApp{} = return a
 removeExpUnusedVariables a@ExpConApp{} = return a
-removeExpUnusedVariables (ExpCase s t vs as) = ExpCase <$> removeExpUnusedVariables s <*> pure t <*> pure vs <*> mapM removeAltUnusedVariables as
+removeExpUnusedVariables (ExpCase s t as) = ExpCase <$> removeExpUnusedVariables s <*> pure t <*> mapM removeAltUnusedVariables as
 removeExpUnusedVariables (ExpLet v rhs e) = do
     used <- asks (S.member v)
     e' <- removeExpUnusedVariables e

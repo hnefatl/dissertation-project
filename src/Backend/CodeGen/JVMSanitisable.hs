@@ -41,7 +41,7 @@ instance JVMSanitisable Exp where
     jvmSanitise (ExpVar v)          = ExpVar (jvmSanitise v)
     jvmSanitise (ExpApp v as)       = ExpApp (jvmSanitise v) (jvmSanitises as)
     jvmSanitise (ExpConApp c as)    = ExpConApp (jvmSanitise c) (jvmSanitises as)
-    jvmSanitise (ExpCase s t bs as) = ExpCase (jvmSanitise s) t (jvmSanitises bs) (jvmSanitises as)
+    jvmSanitise (ExpCase s t as) = ExpCase (jvmSanitise s) t (jvmSanitises as)
     jvmSanitise (ExpLet v r e)      = ExpLet (jvmSanitise v) (jvmSanitise r) (jvmSanitise e)
 instance JVMSanitisable Rhs where
     jvmSanitise (RhsClosure vs e) = RhsClosure (jvmSanitises vs) (jvmSanitise e)

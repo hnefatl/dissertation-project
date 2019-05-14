@@ -315,7 +315,7 @@ compileExp (ExpConApp con args) = do
     -- Push all the datatype arguments onto the stack then call the datatype constructor
     forM_ args pushArg
     invokeStatic (toLazyByteString cname) $ NameType (toLazyByteString methodname) methodSig
-compileExp (ExpCase head t vs alts) = do
+compileExp (ExpCase head t alts) = do
     package <- getPackageName
     headType <- case fst $ Types.unmakeApp t of
             Types.TypeCon (Types.TypeConstant "->" _) -> boxedData
@@ -326,10 +326,6 @@ compileExp (ExpCase head t vs alts) = do
     compileExp head
     -- Evaluate the expression
     liftJoin2 invokeVirtual heapObject enter
-    -- Bind each extra variable to the head
-    forM_ vs $ \var -> do
-        dup -- Copy the head expression
-        storeLocal var -- Store it locally
     -- Branch: if the head object is a boxed data, we extract its branch value. Otherwise, we pop it and push 0 instead.
     dup
     instanceOf headType
