@@ -45,12 +45,12 @@ getRhsUsedVariables :: Rhs -> S.Set VariableName
 getRhsUsedVariables (RhsClosure _ e) = getExpUsedVariables e
 
 getExpUsedVariables :: Exp -> S.Set VariableName
-getExpUsedVariables ExpLit{}           = S.empty
-getExpUsedVariables (ExpVar v)         = S.singleton v
-getExpUsedVariables (ExpApp v as)      = S.insert v (S.unions $ map getArgUsedVariables as)
-getExpUsedVariables (ExpConApp _ as)   = S.unions $ map getArgUsedVariables as
-getExpUsedVariables (ExpCase s _ as)   = S.unions $ getExpUsedVariables s:map getAltUsedVariables as
-getExpUsedVariables (ExpLet _ rhs e)   = S.union (getRhsUsedVariables rhs) (getExpUsedVariables e)
+getExpUsedVariables ExpLit{}         = S.empty
+getExpUsedVariables (ExpVar v)       = S.singleton v
+getExpUsedVariables (ExpApp v as)    = S.insert v (S.unions $ map getArgUsedVariables as)
+getExpUsedVariables (ExpConApp _ as) = S.unions $ map getArgUsedVariables as
+getExpUsedVariables (ExpCase s _ as) = S.unions $ getExpUsedVariables s:map getAltUsedVariables as
+getExpUsedVariables (ExpLet _ rhs e) = S.union (getRhsUsedVariables rhs) (getExpUsedVariables e)
 
 getAltUsedVariables :: Alt Exp -> S.Set VariableName
 getAltUsedVariables (Alt _ e) = getExpUsedVariables e

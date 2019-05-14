@@ -70,10 +70,10 @@ anfRhsToIlbRhs (ANF.Lam arg _ e) = do -- Aggregate any nested lambdas into one
 anfRhsToIlbRhs (ANF.Complex e) = RhsClosure [] <$> anfComplexToIlbExp e
 
 anfComplexToIlbExp ::  MonadError Text m => ANF.AnfComplex -> m Exp
-anfComplexToIlbExp (ANF.Let v _ r b)  = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
+anfComplexToIlbExp (ANF.Let v _ r b) = ExpLet v <$> anfRhsToIlbRhs r <*> anfComplexToIlbExp b
 anfComplexToIlbExp (ANF.Case s t as) = ExpCase <$> anfComplexToIlbExp s <*> pure t <*> mapM anfAltToIlbAlt as
-anfComplexToIlbExp (ANF.CompApp a)    = anfComplexToIlbApp a
-anfComplexToIlbExp (ANF.Trivial t)    = return $ anfTrivialToExp t
+anfComplexToIlbExp (ANF.CompApp a)   = anfComplexToIlbApp a
+anfComplexToIlbExp (ANF.Trivial t)   = return $ anfTrivialToExp t
 
 anfComplexToIlbApp :: MonadError Text m => ANF.AnfApplication -> m Exp
 anfComplexToIlbApp (ANF.TrivApp a) = case a of
@@ -104,9 +104,9 @@ instance HasFreeVariables Arg where
     getFreeVariables ArgLit{}   = return S.empty
     getFreeVariables (ArgVar v) = return $ S.singleton v
 instance HasFreeVariables Exp where
-    getFreeVariables ExpLit{} = return S.empty
-    getFreeVariables (ExpVar v) = return $ S.singleton v
-    getFreeVariables (ExpApp v as) = S.insert v <$> getFreeVariables as
+    getFreeVariables ExpLit{}         = return S.empty
+    getFreeVariables (ExpVar v)       = return $ S.singleton v
+    getFreeVariables (ExpApp v as)    = S.insert v <$> getFreeVariables as
     getFreeVariables (ExpConApp _ as) = getFreeVariables as
     getFreeVariables (ExpCase s _ cs) = S.union <$> getFreeVariables s <*> getFreeVariables cs
     getFreeVariables (ExpLet v rhs e) = S.delete v <$> (S.union <$> getFreeVariables rhs <*> getFreeVariables e)

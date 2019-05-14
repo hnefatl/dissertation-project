@@ -100,10 +100,10 @@ ilaExpToTrivial (ILA.Lit l t) = return $ Lit l t
 ilaExpToTrivial e             = throwError $ "Non-trivial ILA to be converted to an ILA-ANF trivial: " <> showt e
 
 ilaExpIsTrivial :: ILA.Expr -> Bool
-ilaExpIsTrivial ILA.Var{}  = True
-ilaExpIsTrivial ILA.Con{}  = True
-ilaExpIsTrivial ILA.Lit{}  = True
-ilaExpIsTrivial _          = False
+ilaExpIsTrivial ILA.Var{} = True
+ilaExpIsTrivial ILA.Con{} = True
+ilaExpIsTrivial ILA.Lit{} = True
+ilaExpIsTrivial _         = False
 
 ilaExpToApp  :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
 ilaExpToApp e@ILA.Con{} = CompApp . TrivApp <$> ilaExpToTrivial e
@@ -123,13 +123,13 @@ ilaExpToApp e@ILA.App{} = do
 ilaExpToApp e = throwError $ "Non-application ILA to be converted to an ILA-ANF application: " <> showt e
 
 ilaExpToComplex :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfComplex
-ilaExpToComplex e@ILA.Var{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.Con{}        = ilaExpToApp e
-ilaExpToComplex e@ILA.Lit{}        = Trivial <$> ilaExpToTrivial e
-ilaExpToComplex e@ILA.App{}        = ilaExpToApp e
-ilaExpToComplex e@ILA.Lam{}        = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
-ilaExpToComplex (ILA.Let v t e b)  = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
-ilaExpToComplex (ILA.Case s as) = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> mapM ilaAltToAnf as
+ilaExpToComplex e@ILA.Var{}       = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.Con{}       = ilaExpToApp e
+ilaExpToComplex e@ILA.Lit{}       = Trivial <$> ilaExpToTrivial e
+ilaExpToComplex e@ILA.App{}       = ilaExpToApp e
+ilaExpToComplex e@ILA.Lam{}       = makeBinding e (return . Trivial) -- `\x -> x` into `let v = \x -> x in v`
+ilaExpToComplex (ILA.Let v t e b) = Let v t <$> ilaExpToRhs e <*> ilaExpToComplex b
+ilaExpToComplex (ILA.Case s as)   = Case <$> ilaExpToComplex s <*> ILA.getExprType s <*> mapM ilaAltToAnf as
 
 ilaExpToRhs :: (MonadNameGenerator m, MonadError Text m, MonadLogger m) => ILA.Expr -> m AnfRhs
 ilaExpToRhs (ILA.Lam v t b) = Lam v t <$> ilaExpToRhs b

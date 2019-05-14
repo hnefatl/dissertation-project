@@ -153,12 +153,12 @@ instance TextShow Expr where
         where cases = mconcat $ intersperse " ; " $ map showb as
 
 getExprType :: MonadError Text m => Expr -> m Type
-getExprType (Var _ t)              = return t
-getExprType (Con _ t)              = return t
-getExprType (Lit _ t)              = return t
-getExprType (App e1 _)             = snd <$> (T.unwrapFun =<< getExprType e1)
-getExprType (Lam _ t e)            = T.makeFun [t] =<< getExprType e
-getExprType (Let _ _ _ e)          = getExprType e
+getExprType (Var _ t)            = return t
+getExprType (Con _ t)            = return t
+getExprType (Lit _ t)            = return t
+getExprType (App e1 _)           = snd <$> (T.unwrapFun =<< getExprType e1)
+getExprType (Lam _ t e)          = T.makeFun [t] =<< getExprType e
+getExprType (Let _ _ _ e)        = getExprType e
 getExprType (Case _ [])          = throwError "No alts in case"
 getExprType (Case _ (Alt _ e:_)) = getExprType e
 
