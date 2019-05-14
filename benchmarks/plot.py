@@ -167,29 +167,44 @@ def perf_by_compiler(subplot=True):
             fig, ax = plt.subplots()
             ax.set_ylabel("Runtime (ms)")
 
-        quartiles = []
+        bar_layers = []
         for impl in impls:
             result = results[benchmark][impl]
-            quartiles.append((result["lower_quartile"], result["mid_quartile"], result["upper_quartile"]))
-        lows, medians, highs = map(np.array, zip(*quartiles))
-        errors = [medians - lows, highs - medians]
+            bar_layers.append((result["upper_quartile"], result["lower_quartile"], result["min_time"]))
+        bar_layers_split = list(zip(*bar_layers))
+
+        cmap = plt.cm.get_cmap("tab20")
+        layer_names = ["75th percentile", "25th percentile", "Minimum"]
+        # Reverse colour order because it looks nicer
+        layer_colours = list(reversed([cmap(i) for i in range(len(layer_names))]))
 
         if subplot:
             ax.set_title("\\texttt{" + to_readable_bench(benchmark) + "}")
         else:
             ax.set_title("Performance of \\texttt{" + to_readable_bench(benchmark) + "} by compiler")
-        ax.bar(x=impls, height=medians, yerr=errors, color=GREY, capsize=3)
+        for layer, colour in zip(bar_layers_split, layer_colours):
+            ax.bar(x=impls, height=layer, color=colour, capsize=3)
         ax.tick_params(axis="x", rotation=40)
-        if needs_log_scale(medians):
+        if needs_log_scale([x[0] for x in bar_layers]):
             ax.set_yscale("log")
         else:
             ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
+            plt.legend(
+                handles=[patches.Patch(color=colour, label=layer) for layer, colour in zip(layer_names, layer_colours)],
+                loc="center left",
+                bbox_to_anchor=(1, 0.5),
+            )
             ax.set_ylabel("Runtime (ms)")
             render_fig("perf_{}.pdf".format(benchmark).lower())
             plt.close(fig)
     if subplot:
+        plt.legend(
+            handles=[patches.Patch(color=colour, label=layer) for layer, colour in zip(layer_names, layer_colours)],
+            loc="center left",
+            bbox_to_anchor=(1, 0.5),
+        )
         render_fig("perf.pdf")
         plt.close(fig)
 
@@ -379,8 +394,8 @@ def optimisation_impact_perf(subplot=True):
 def optimisation_impact_size(subplot=True):
     benchmarks = sorted(list(benches.keys()))
     readable_impls = {
-        "HJC": "None",
-        "HJC_u": "U",
+        "HJC": "Without",
+        "HJC_u": "With",
     }
 
     if subplot:
@@ -407,7 +422,7 @@ def optimisation_impact_size(subplot=True):
             ax.set_title("Compiled size of \\texttt{" + to_readable_bench(benchmark) + "} by optimisation")
         ax.bar(x=texprep(labels), height=heights, color=GREY)
         ax.tick_params(axis="x", rotation=50)
-        ax.set_ylim(bottom=0.95 * min(heights))
+        ax.set_ylim(bottom=0)
         plt.tight_layout()
         if not subplot:
             render_fig("size_{}_by_opt.pdf".format(benchmark).lower())
