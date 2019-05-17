@@ -183,9 +183,9 @@ def perf_by_compiler(subplot=True):
         else:
             ax.set_title("Performance of \\texttt{" + to_readable_bench(benchmark) + "} by compiler")
         for layer, colour in zip(bar_layers_split, layer_colours):
-            ax.bar(x=impls, height=layer, color=colour, capsize=3)
+            ax.bar(x=impls, height=layer, color=colour)
         ax.tick_params(axis="x", rotation=40)
-        if needs_log_scale([x[0] for x in bar_layers]):
+        if needs_log_scale([x[2] for x in bar_layers]):
             ax.set_yscale("log")
         else:
             ax.set_ylim(bottom=0)
